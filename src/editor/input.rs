@@ -605,43 +605,60 @@ impl Editor {
             Action::ToggleComposeMode => {
                 let default_wrap = self.config.editor.line_wrap;
                 let default_line_numbers = self.config.editor.line_numbers;
-                let state = self.active_state_mut();
-                state.view_mode = match state.view_mode {
+                let active_split = self.split_manager.active_split();
+                let mut view_mode = {
+                    if let Some(vs) = self.split_view_states.get(&active_split) {
+                        vs.view_mode.clone()
+                    } else {
+                        self.active_state().view_mode.clone()
+                    }
+                };
+
+                view_mode = match view_mode {
                     crate::state::ViewMode::Compose => crate::state::ViewMode::Source,
                     _ => crate::state::ViewMode::Compose,
                 };
 
-                // Compose mode uses soft wrap; Source follows global wrap setting
-                state.viewport.line_wrap_enabled = match state.view_mode {
-                    crate::state::ViewMode::Compose => true,
-                    crate::state::ViewMode::Source => default_wrap,
-                };
-
-                // Toggle line numbers based on mode; restore previous when leaving Compose
-                match state.view_mode {
-                    crate::state::ViewMode::Compose => {
-                        state.compose_prev_line_numbers = Some(state.margins.show_line_numbers);
-                        state.margins.set_line_numbers(false);
-                    }
-                    crate::state::ViewMode::Source => {
-                        let restore = state.compose_prev_line_numbers.take().unwrap_or_else(|| {
-                            default_line_numbers
-                        });
-                        state.margins.set_line_numbers(restore);
+                // Update split view state
+                let current_line_numbers = self.active_state().margins.show_line_numbers;
+                if let Some(vs) = self.split_view_states.get_mut(&active_split) {
+                    vs.view_mode = view_mode.clone();
+                    vs.viewport.line_wrap_enabled = matches!(view_mode, crate::state::ViewMode::Compose) || default_wrap;
+                    match view_mode {
+                        crate::state::ViewMode::Compose => {
+                            vs.compose_prev_line_numbers = Some(current_line_numbers);
+                            self.active_state_mut().margins.set_line_numbers(false);
+                        }
+                        crate::state::ViewMode::Source => {
+                            let restore = vs
+                                .compose_prev_line_numbers
+                                .take()
+                                .unwrap_or(default_line_numbers);
+                            self.active_state_mut().margins.set_line_numbers(restore);
+                        }
                     }
                 }
 
-                let mode_label = match state.view_mode {
+                // Keep buffer-level view mode for status/use
+                {
+                    let state = self.active_state_mut();
+                    state.view_mode = view_mode.clone();
+                    state.viewport.line_wrap_enabled =
+                        matches!(view_mode, crate::state::ViewMode::Compose) || default_wrap;
+                }
+
+                let mode_label = match view_mode {
                     crate::state::ViewMode::Compose => "Compose",
                     crate::state::ViewMode::Source => "Source",
                 };
                 self.set_status_message(format!("Mode: {}", mode_label));
             }
             Action::SetComposeWidth => {
+                let active_split = self.split_manager.active_split();
                 let current = self
-                    .active_state()
-                    .compose_width
-                    .map(|w| w.to_string())
+                    .split_view_states
+                    .get(&active_split)
+                    .and_then(|v| v.compose_width.map(|w| w.to_string()))
                     .unwrap_or_default();
                 self.start_prompt_with_initial_text(
                     "Compose width (empty = viewport): ".to_string(),
@@ -1347,10 +1364,14 @@ impl Editor {
                         }
                         PromptType::SetComposeWidth => {
                             let buffer_id = self.active_buffer;
+                            let active_split = self.split_manager.active_split();
                             let trimmed = input.trim();
                             if trimmed.is_empty() {
                                 if let Some(state) = self.buffers.get_mut(&buffer_id) {
                                     state.compose_width = None;
+                                }
+                                if let Some(vs) = self.split_view_states.get_mut(&active_split) {
+                                    vs.compose_width = None;
                                 }
                                 self.set_status_message("Compose width cleared (viewport)".to_string());
                             } else {
@@ -1358,6 +1379,9 @@ impl Editor {
                                     Ok(val) if val > 0 => {
                                         if let Some(state) = self.buffers.get_mut(&buffer_id) {
                                             state.compose_width = Some(val);
+                                        }
+                                        if let Some(vs) = self.split_view_states.get_mut(&active_split) {
+                                            vs.compose_width = Some(val);
                                         }
                                         self.set_status_message(format!(
                                             "Compose width set to {}",

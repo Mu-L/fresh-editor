@@ -6,8 +6,9 @@ use crate::cursor::SelectionMode;
 use crate::editor::BufferMetadata;
 use crate::event::{BufferId, EventLog, SplitDirection};
 use crate::line_wrapping::{char_position_to_segment, wrap_line, WrapConfig};
+use crate::plugin_api::ViewTransformPayload;
 use crate::split::SplitManager;
-use crate::state::EditorState;
+use crate::state::{EditorState, ViewMode};
 use crate::ui::tabs::TabsRenderer;
 use crate::virtual_text::VirtualTextPosition;
 use ratatui::layout::Rect;
@@ -51,7 +52,7 @@ impl SplitRenderer {
         background_fade: f32,
         lsp_waiting: bool,
         large_file_threshold_bytes: u64,
-        line_wrap: bool,
+        _line_wrap: bool,
         estimated_line_length: usize,
         split_view_states: Option<&HashMap<crate::event::SplitId, crate::split::SplitViewState>>,
         hide_cursor: bool,
@@ -169,6 +170,33 @@ impl SplitRenderer {
                     state.viewport.ensure_visible(&mut state.buffer, &primary);
                 }
 
+                // Split-specific view prefs
+                let (view_mode, compose_width, compose_column_guides, view_transform) =
+                    if let Some(view_states) = split_view_states {
+                        if let Some(view_state) = view_states.get(&split_id) {
+                            (
+                                view_state.view_mode.clone(),
+                                view_state.compose_width,
+                                view_state.compose_column_guides.clone(),
+                                view_state.view_transform.clone(),
+                            )
+                        } else {
+                            (
+                                state.view_mode.clone(),
+                                state.compose_width,
+                                state.compose_column_guides.clone(),
+                                state.view_transform.clone(),
+                            )
+                        }
+                    } else {
+                        (
+                            state.view_mode.clone(),
+                            state.compose_width,
+                            state.compose_column_guides.clone(),
+                            state.view_transform.clone(),
+                        )
+                    };
+
                 Self::render_buffer_in_split(
                     frame,
                     state,
@@ -179,7 +207,10 @@ impl SplitRenderer {
                     ansi_background,
                     background_fade,
                     lsp_waiting,
-                    line_wrap,
+                    view_mode,
+                    compose_width,
+                    compose_column_guides,
+                    view_transform,
                     estimated_line_length,
                     buffer_id,
                     hide_cursor,
@@ -404,7 +435,10 @@ impl SplitRenderer {
         ansi_background: Option<&AnsiBackground>,
         background_fade: f32,
         lsp_waiting: bool,
-        _line_wrap: bool,
+        view_mode: ViewMode,
+        compose_width: Option<u16>,
+        _compose_column_guides: Option<Vec<u16>>,
+        _view_transform: Option<ViewTransformPayload>,
         estimated_line_length: usize,
         _buffer_id: BufferId,
         hide_cursor: bool,
@@ -431,9 +465,8 @@ impl SplitRenderer {
 
         // Centering for compose mode with optional tinted margins
         let mut render_area = area;
-        if state.view_mode == crate::state::ViewMode::Compose {
-            let target_width = state
-                .compose_width
+        if view_mode == ViewMode::Compose {
+            let target_width = compose_width
                 .map(|w| w as u16)
                 .unwrap_or(render_area.width);
             let clamped_width = target_width.min(render_area.width).max(1);

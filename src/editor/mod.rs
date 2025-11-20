@@ -3363,23 +3363,33 @@ impl Editor {
             }
             PluginCommand::SetLayoutHints {
                 buffer_id,
+                split_id,
                 range: _,
                 hints,
             } => {
-                if let Some(state) = self.buffers.get_mut(&buffer_id) {
-                    state.compose_width = hints.compose_width;
-                    state.compose_column_guides = hints.column_guides;
-                }
+                let target_split = split_id.unwrap_or(self.split_manager.active_split());
+                let view_state = self
+                    .split_view_states
+                    .entry(target_split)
+                    .or_insert_with(|| {
+                        SplitViewState::with_buffer(self.terminal_width, self.terminal_height, buffer_id)
+                    });
+                view_state.compose_width = hints.compose_width;
+                view_state.compose_column_guides = hints.column_guides;
             }
             PluginCommand::SubmitViewTransform {
                 buffer_id,
+                split_id,
                 payload,
             } => {
-                if let Some(state) = self.buffers.get_mut(&buffer_id) {
-                    state.view_transform = Some(payload);
-                } else {
-                    tracing::warn!("SubmitViewTransform: buffer_id {} not found", buffer_id.0);
-                }
+                let target_split = split_id.unwrap_or(self.split_manager.active_split());
+                let view_state = self
+                    .split_view_states
+                    .entry(target_split)
+                    .or_insert_with(|| {
+                        SplitViewState::with_buffer(self.terminal_width, self.terminal_height, buffer_id)
+                    });
+                view_state.view_transform = Some(payload);
             }
             PluginCommand::OpenFileAtLocation { path, line, column } => {
                 // Open the file

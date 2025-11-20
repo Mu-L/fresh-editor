@@ -41,6 +41,7 @@
 
 use crate::commands::Suggestion;
 use crate::event::BufferId;
+use crate::event::SplitId;
 use crate::plugin_api::{EditorStateSnapshot, LayoutHints, PluginCommand};
 use anyhow::{anyhow, Result};
 use deno_core::{
@@ -556,6 +557,7 @@ fn op_fresh_refresh_lines(state: &mut OpState, buffer_id: u32) -> bool {
 fn op_fresh_submit_view_transform(
     state: &mut OpState,
     buffer_id: u32,
+    split_id: Option<u32>,
     start: u32,
     end: u32,
     #[serde] tokens: Vec<serde_json::Value>,
@@ -568,16 +570,19 @@ fn op_fresh_submit_view_transform(
             compose_width: None,
             column_guides: None,
         });
+        let split_id = split_id.map(|id| SplitId(id as usize));
         let result = runtime_state
             .command_sender
             .send(PluginCommand::SetLayoutHints {
                 buffer_id: BufferId(buffer_id as usize),
+                split_id,
                 range: start as usize..end as usize,
                 hints: hints.clone(),
             });
         // Also send full view transform payload for renderer consumption
         let _ = runtime_state.command_sender.send(PluginCommand::SubmitViewTransform {
             buffer_id: BufferId(buffer_id as usize),
+            split_id,
             payload: crate::plugin_api::ViewTransformPayload {
                 range: start as usize..end as usize,
                 tokens,

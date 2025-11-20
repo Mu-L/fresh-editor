@@ -26,6 +26,7 @@
 use crate::cursor::Cursors;
 use crate::event::{BufferId, SplitDirection, SplitId};
 use crate::viewport::Viewport;
+use crate::{plugin_api::ViewTransformPayload, state::ViewMode};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +79,21 @@ pub struct SplitViewState {
 
     /// Horizontal scroll offset for the tabs in this split
     pub tab_scroll_offset: usize,
+
+    /// View mode (Source/Compose) per split
+    pub view_mode: ViewMode,
+
+    /// Optional compose width for centering/wrapping in this split
+    pub compose_width: Option<u16>,
+
+    /// Column guides for this split (e.g., tables)
+    pub compose_column_guides: Option<Vec<u16>>,
+
+    /// Previously configured line number visibility (restored when leaving Compose)
+    pub compose_prev_line_numbers: Option<bool>,
+
+    /// Optional view transform payload for this split/viewport
+    pub view_transform: Option<ViewTransformPayload>,
 }
 
 impl SplitViewState {
@@ -88,6 +104,11 @@ impl SplitViewState {
             viewport: Viewport::new(width, height),
             open_buffers: Vec::new(),
             tab_scroll_offset: 0,
+            view_mode: ViewMode::Source,
+            compose_width: None,
+            compose_column_guides: None,
+            compose_prev_line_numbers: None,
+            view_transform: None,
         }
     }
 
@@ -98,6 +119,11 @@ impl SplitViewState {
             viewport: Viewport::new(width, height),
             open_buffers: vec![buffer_id],
             tab_scroll_offset: 0,
+            view_mode: ViewMode::Source,
+            compose_width: None,
+            compose_column_guides: None,
+            compose_prev_line_numbers: None,
+            view_transform: None,
         }
     }
 

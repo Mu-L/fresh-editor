@@ -193,6 +193,7 @@ pub enum PluginCommand {
     /// Set layout hints for a buffer/viewport
     SetLayoutHints {
         buffer_id: BufferId,
+        split_id: Option<SplitId>,
         range: Range<usize>,
         hints: LayoutHints,
     },
@@ -200,6 +201,7 @@ pub enum PluginCommand {
     /// Submit a transformed view stream for a viewport
     SubmitViewTransform {
         buffer_id: BufferId,
+        split_id: Option<SplitId>,
         payload: ViewTransformPayload,
     },
 
