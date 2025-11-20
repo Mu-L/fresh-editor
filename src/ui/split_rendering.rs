@@ -748,6 +748,7 @@ impl SplitRenderer {
         let mut cursor_screen_y = 0u16;
         let mut view_to_screen: HashMap<usize, (u16, u16)> = HashMap::new();
         let mut source_to_screen: HashMap<usize, (u16, u16)> = HashMap::new();
+        let mut have_cursor = false;
 
         loop {
             let (line_view_offset, line_content, line_has_newline) =
@@ -1367,6 +1368,11 @@ impl SplitRenderer {
                                 .or_else(|| view_extra_sources.get(view_idx).copied().flatten());
                             if let Some(src) = src_opt {
                                 source_to_screen.insert(src, (screen_x, current_y));
+                                if src == state.cursors.primary().position {
+                                    cursor_screen_x = screen_x;
+                                    cursor_screen_y = current_y;
+                                    have_cursor = true;
+                                }
                             }
                         }
                     }
@@ -1467,16 +1473,17 @@ impl SplitRenderer {
             };
         }
 
-        let mut have_cursor = false;
-        if let Some(pos) = source_to_screen.get(&state.cursors.primary().position) {
-            cursor_screen_x = pos.0;
-            cursor_screen_y = pos.1;
-            have_cursor = true;
-        } else if let Some(view_idx) = primary_cursor_view_idx {
-            if let Some(pos) = view_to_screen.get(&view_idx) {
+        if !have_cursor {
+            if let Some(pos) = source_to_screen.get(&state.cursors.primary().position) {
                 cursor_screen_x = pos.0;
                 cursor_screen_y = pos.1;
                 have_cursor = true;
+            } else if let Some(view_idx) = primary_cursor_view_idx {
+                if let Some(pos) = view_to_screen.get(&view_idx) {
+                    cursor_screen_x = pos.0;
+                    cursor_screen_y = pos.1;
+                    have_cursor = true;
+                }
             }
         }
 
