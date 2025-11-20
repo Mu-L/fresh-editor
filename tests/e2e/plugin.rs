@@ -1,6 +1,7 @@
 use crate::common::fixtures::TestFixture;
 use crate::common::harness::EditorTestHarness;
 use crate::common::fake_lsp::FakeLspServer;
+use crate::common::tracing::init_tracing_from_env;
 use crossterm::event::{KeyCode, KeyModifiers};
 use fresh::config::Config;
 use fresh::lsp::LspServerConfig;
@@ -1674,6 +1675,7 @@ editor.setStatus("Panel cleanup test plugin loaded");
 /// Ensure the clangd plugin uses editor.sendLspRequest successfully
 #[test]
 fn test_clangd_plugin_switch_source_header() -> std::io::Result<()> {
+    init_tracing_from_env();
     let _fake_server = FakeLspServer::spawn()?;
 
     let temp_dir = tempfile::TempDir::new().unwrap();
