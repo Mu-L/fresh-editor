@@ -1186,7 +1186,7 @@ impl SplitRenderer {
                                 &mut line_view_map,
                                 " ".to_string(),
                                 cursor_style,
-                                None,
+                                Some(view_idx),
                             );
                         }
                         // Primary cursor on newline will be shown by terminal hardware cursor (active split only)
@@ -1250,7 +1250,7 @@ impl SplitRenderer {
                             &mut line_view_map,
                             " ".to_string(),
                             cursor_style,
-                            None,
+                            Some(line_end_pos),
                         );
                     }
                     // Primary cursor at end of line will be shown by terminal hardware cursor (active split only)
