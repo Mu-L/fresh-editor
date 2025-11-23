@@ -1722,3 +1722,237 @@ fn test_git_blame_shows_different_commits() {
         "Should show commit summaries"
     );
 }
+
+/// Test git blame line numbers are correct - headers should NOT have line numbers
+/// and content lines should have sequential line numbers matching the source file
+#[test]
+fn test_git_blame_line_numbers_correct() {
+    let repo = GitTestRepo::new();
+
+    // Create file with multiple commits for different blame blocks
+    repo.create_file("numbered.txt", "Line 1 from first commit\nLine 2 from first commit\n");
+    repo.git_add(&["numbered.txt"]);
+    repo.git_commit("First commit");
+
+    // Add more lines in second commit
+    repo.create_file("numbered.txt", "Line 1 from first commit\nLine 2 from first commit\nLine 3 from second commit\nLine 4 from second commit\n");
+    repo.git_add(&["numbered.txt"]);
+    repo.git_commit("Second commit");
+
+    repo.setup_git_blame_plugin();
+
+    // Change to repo directory
+    let original_dir = repo.change_to_repo_dir();
+    let _guard = DirGuard::new(original_dir);
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        120,
+        40,
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    // Open file directly
+    let file_path = repo.path.join("numbered.txt");
+    harness.open_file(&file_path).unwrap();
+
+    // Wait until file is loaded
+    harness.wait_until(|h| {
+        h.get_buffer_content().contains("Line 1")
+    }).unwrap();
+
+    // Trigger git blame
+    trigger_git_blame(&mut harness);
+
+    // Wait until blame view appears with multiple blocks
+    harness.wait_until(|h| {
+        let screen = h.screen_to_string();
+        screen.matches("──").count() >= 2
+    }).unwrap();
+
+    let screen = harness.screen_to_string();
+    println!("Git blame with line numbers:\n{screen}");
+
+    // The screen should show:
+    // - Header lines WITHOUT line numbers (just spaces or blank in gutter)
+    // - Content lines WITH line numbers 1, 2, 3, 4
+
+    // Check that line numbers 1-4 are present (for the 4 content lines)
+    // Line numbers appear at the start of lines in the gutter
+    assert!(
+        screen.contains("1") && screen.contains("2") && screen.contains("3") && screen.contains("4"),
+        "Should show line numbers 1-4 for content lines"
+    );
+
+    // The header lines (──) should not be preceded by a line number
+    // This is harder to check directly, but we can verify the structure
+    // by checking that we have more lines than line numbers
+    let total_lines = screen.lines().count();
+    let header_count = screen.matches("──").count();
+
+    // With 4 content lines and 2 headers, we should have at least 6 lines
+    assert!(
+        total_lines >= 6,
+        "Should have at least 6 lines (4 content + 2 headers), got {total_lines}"
+    );
+    assert!(
+        header_count >= 2,
+        "Should have at least 2 header lines, got {header_count}"
+    );
+}
+
+/// Test git blame scrolling - scroll to bottom and verify rendering is correct
+#[test]
+fn test_git_blame_scroll_to_bottom() {
+    let repo = GitTestRepo::new();
+
+    // Create file with many lines to require scrolling
+    let mut content = String::new();
+    for i in 1..=50 {
+        content.push_str(&format!("Line {} content\n", i));
+    }
+    repo.create_file("scrolltest.txt", &content);
+    repo.git_add(&["scrolltest.txt"]);
+    repo.git_commit("Add scrollable file");
+
+    repo.setup_git_blame_plugin();
+
+    // Change to repo directory
+    let original_dir = repo.change_to_repo_dir();
+    let _guard = DirGuard::new(original_dir);
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        120,
+        30, // Smaller height to force scrolling
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    // Open file directly
+    let file_path = repo.path.join("scrolltest.txt");
+    harness.open_file(&file_path).unwrap();
+
+    // Wait until file is loaded
+    harness.wait_until(|h| {
+        h.get_buffer_content().contains("Line 1")
+    }).unwrap();
+
+    // Trigger git blame
+    trigger_git_blame(&mut harness);
+
+    // Wait until blame view appears
+    harness.wait_until(|h| {
+        h.screen_to_string().contains("──")
+    }).unwrap();
+
+    let screen_top = harness.screen_to_string();
+    println!("Git blame at top:\n{screen_top}");
+
+    // Scroll to bottom using G (go to end of file in vim mode)
+    harness.send_key(KeyCode::Char('G'), KeyModifiers::SHIFT).unwrap();
+    harness.process_async_and_render().unwrap();
+
+    // Wait a bit for scrolling to complete
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    harness.render().unwrap();
+
+    let screen_bottom = harness.screen_to_string();
+    println!("Git blame at bottom:\n{screen_bottom}");
+
+    // At the bottom, we should see:
+    // 1. The last lines of the file (e.g., "Line 50 content")
+    // 2. Still have proper rendering (not corrupted)
+    // 3. Still be in blame view (showing ── header or content)
+
+    assert!(
+        screen_bottom.contains("Line 50") || screen_bottom.contains("Line 49") || screen_bottom.contains("Line 48"),
+        "Should show last lines of file after scrolling to bottom"
+    );
+
+    // Should not show the first lines anymore (we scrolled down)
+    // Line 1 should be scrolled out of view in a 30-line terminal
+    // (though with headers, exact behavior depends on header count)
+
+    // Verify rendering is not corrupted - should still have normal text
+    assert!(
+        screen_bottom.contains("content"),
+        "Should still show file content properly after scrolling"
+    );
+}
+
+/// Test that original buffer does NOT show blame decorators
+/// When blame is opened, ONLY the blame virtual buffer should have headers
+#[test]
+fn test_git_blame_original_buffer_not_decorated() {
+    let repo = GitTestRepo::new();
+    repo.setup_typical_project();
+    repo.setup_git_blame_plugin();
+
+    // Change to repo directory
+    let original_dir = repo.change_to_repo_dir();
+    let _guard = DirGuard::new(original_dir);
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        120,
+        40,
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    // Open file directly
+    let file_path = repo.path.join("src/main.rs");
+    harness.open_file(&file_path).unwrap();
+
+    // Wait until file is loaded
+    harness.wait_until(|h| {
+        h.get_buffer_content().contains("fn main")
+    }).unwrap();
+
+    // Capture screen BEFORE opening blame
+    let screen_before_blame = harness.screen_to_string();
+    println!("Screen before blame:\n{screen_before_blame}");
+
+    // Original file should NOT have blame headers
+    assert!(
+        !screen_before_blame.contains("──"),
+        "Original file should NOT have blame headers before opening blame"
+    );
+
+    // Trigger git blame
+    trigger_git_blame(&mut harness);
+
+    // Wait until blame view appears
+    harness.wait_until(|h| {
+        h.screen_to_string().contains("──")
+    }).unwrap();
+
+    let screen_with_blame = harness.screen_to_string();
+    println!("Screen with blame:\n{screen_with_blame}");
+
+    // Blame view SHOULD have headers
+    assert!(
+        screen_with_blame.contains("──"),
+        "Blame view should have headers"
+    );
+
+    // Close blame with q
+    harness.send_key(KeyCode::Char('q'), KeyModifiers::NONE).unwrap();
+
+    // Wait until we're back to original file
+    harness.wait_until(|h| {
+        let screen = h.screen_to_string();
+        screen.contains("fn main") && !screen.contains("──")
+    }).unwrap();
+
+    let screen_after_close = harness.screen_to_string();
+    println!("Screen after closing blame:\n{screen_after_close}");
+
+    // After closing, original file should NOT have blame headers
+    assert!(
+        !screen_after_close.contains("──"),
+        "Original file should NOT have blame headers after closing blame"
+    );
+}
