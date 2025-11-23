@@ -8,8 +8,8 @@
     <style>
         /* General Reset and Body Styles */
         body {
-            /* Solid dark background for isolation */
-            background-color: #1A1A1A; 
+            /* Set body to a slightly lighter dark gray to create the margin color */
+            background-color: #212121; 
             display: flex;
             justify-content: center;
             align-items: flex-start;
@@ -24,7 +24,7 @@
 
         /* Color Variables based on the required palette */
         :root {
-            --bg-dark: #1A1A1A;          /* Deep Black/Near Black */
+            --bg-dark: #000000;          /* Pure Black (Terminal Content) */
             --text-light: #F5F5F5;       /* Off-White/Light Gray */
             --accent-yellow: #FFEA00;    /* Primary Accent */
             --accent-blue: #60a5fa;      /* Syntax Blue */
@@ -34,6 +34,7 @@
 
         /* The main content container (Base styles for Mobile First) */
         .terminal-window {
+            /* Uses the pure black terminal color */
             background-color: var(--bg-dark);
             color: var(--text-light);
             /* Base mobile padding */
@@ -237,7 +238,6 @@
             line-height: 300px;
             text-align: center;
             font-size: 1.2em;
-            /* Border removed as requested */
             border: none; 
             border-radius: 5px;
         }
@@ -299,9 +299,9 @@
 
             <!-- SCREENSHOT AREA (Moved to top, simplified, and made clickable) -->
             <div class="screenshot-area">
-                <a href="screenshot3.png" target="_blank" title="View Full Screenshot">
+                <a href="docs/screenshot1.png" target="_blank" title="View Full Screenshot">
                     <!-- Placeholder image path -->
-                    <img src="screenshot3.png" 
+                    <img src="docs/screenshot1.png" 
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" 
                          alt="A screenshot of the Fresh terminal text editor's user interface, showing syntax-highlighted code and a status bar."/>
                     
