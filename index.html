@@ -85,7 +85,7 @@
             position: absolute;
             /* Fixed position relative to the scrollable container's viewport */
             top: 0; 
-            right: 0; /* MOVED TO ABSOLUTE RIGHT EDGE */
+            right: 0; 
             width: 1ch; 
             height: 100vh; 
             z-index: 10;
@@ -158,11 +158,11 @@
             margin: 20px 0;
             padding: 10px 0;
             font-size: 0.9em; 
-            white-space: normal; /* Allows wrapping */
-            overflow-x: visible; /* Prevents horizontal scrolling */
+            white-space: normal; 
+            overflow-x: visible; 
             border: none; 
             text-align: center;
-            line-height: 1.8; /* Added vertical space for wrapped lines */
+            line-height: 1.8; 
         }
 
         .feature-list b {
@@ -199,6 +199,49 @@
             }
         }
 
+        /* --- Screenshot Area (Moved/Simplified) --- */
+        .screenshot-area {
+            text-align: center;
+            margin-top: 30px; /* Space after feature list */
+            margin-bottom: 30px; /* Space before content sections */
+            padding: 0; 
+            border: none; 
+            background-color: transparent;
+            border-radius: 0;
+        }
+
+        .screenshot-area img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10px auto;
+            border: 1px solid var(--text-light); /* Kept a subtle border */
+            box-shadow: 0 0 15px rgba(255, 234, 0, 0.2); 
+            transition: box-shadow 0.2s;
+        }
+        
+        .screenshot-area a:hover img {
+             box-shadow: 0 0 25px var(--accent-yellow); /* Highlight on hover */
+        }
+        
+        /* Style for the image placeholder/fallback (NEW) */
+        .screenshot-area .image-fallback {
+            max-width: 100%; 
+            height: 300px; /* Fixed height for placeholder visual */
+            display: block;
+            margin: 10px auto;
+            
+            /* Placeholder aesthetics */
+            background-color: #252525;
+            color: #ccc;
+            line-height: 300px;
+            text-align: center;
+            font-size: 1.2em;
+            /* Border removed as requested */
+            border: none; 
+            border-radius: 5px;
+        }
+
         /* --- Other non-responsive styles remain the same --- */
         .content-section:not(:first-of-type) {
             border-top: 1px solid rgba(255, 255, 255, 0.1); 
@@ -213,37 +256,7 @@
             margin-bottom: 10px;
             color: var(--accent-blue);
         }
-        
-        .screenshot-area {
-            text-align: center;
-            margin-top: 50px;
-            padding: 20px;
-            border: 1px dashed var(--accent-yellow); 
-            background-color: #252525;
-            border-radius: 5px;
-        }
 
-        .screenshot-area img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-            margin: 10px auto;
-            border: 1px solid var(--text-light);
-            box-shadow: 0 0 15px rgba(255, 234, 0, 0.2); 
-        }
-        
-        /* Fallback for the image using CSS if path fails */
-        .screenshot-area img:not([src]):before {
-            content: "docs/screenshot1.png is missing. Showing text placeholder.";
-            display: block;
-            width: 100%;
-            height: 300px;
-            background-color: #333;
-            color: #ccc;
-            line-height: 300px;
-            text-align: center;
-            font-size: 1.2em;
-        }
     </style>
 </head>
 <body>
@@ -284,6 +297,21 @@
                 <b class="c-green">Easy To Use</b> | <b class="c-purple">TypeScript Extensible</b> | <b class="c-blue">Light And Fast</b> | <b class="c-yellow">Huge File Support</b>
             </div>
 
+            <!-- SCREENSHOT AREA (Moved to top, simplified, and made clickable) -->
+            <div class="screenshot-area">
+                <a href="screenshot3.png" target="_blank" title="View Full Screenshot">
+                    <!-- Placeholder image path -->
+                    <img src="screenshot3.png" 
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" 
+                         alt="A screenshot of the Fresh terminal text editor's user interface, showing syntax-highlighted code and a status bar."/>
+                    
+                    <!-- Text fallback for the image -->
+                    <div class="image-fallback" style="display:none;">
+                        [Image Placeholder: The Fresh TUI Interface] Click to view full size.
+                    </div>
+                </a>
+            </div>
+
             <!-- 1. INTUITIVE EDITING -->
             <div class="content-section">
                 <h2>Discovery & Ease of Use</h2>
@@ -306,20 +334,6 @@
                 <p>
                     Fresh is engineered for speed. It delivers a near zero-latency experience, with text appearing instantly. The editor is designed to be <b class="c-yellow">light and fast</b>, reliably opening and editing <b class="c-yellow">huge files</b> up to multi-gigabyte sizes without slowdown.
                 </p>
-            </div>
-
-            <!-- SCREENSHOT AREA -->
-            <div class="screenshot-area">
-                <p class="c-yellow"><b>The Interface</b></p>
-                <!-- Placeholder image path -->
-                <img src="docs/screenshot1.png" 
-                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" 
-                     alt="A screenshot of the Fresh terminal text editor's user interface, showing syntax-highlighted code and a status bar."/>
-                
-                <!-- Text fallback for the image -->
-                <div style="display:none; color: #ccc; padding: 50px;">
-                    [Image Placeholder: The Fresh TUI Interface]
-                </div>
             </div>
 
         </div>
