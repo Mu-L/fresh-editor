@@ -2,9 +2,9 @@
 
 This document captures the final architecture for rewriting the remaining byte-centric modules into the new view-centric model. All public APIs must use `ViewPosition`/`ViewEventPosition`/`ViewEventRange` and only consult source bytes via `Layout` when needed. No buffer-first fallbacks.
 
-## Progress Summary (Last Updated: 2025-11-24 - Phase 7 Complete)
+## Progress Summary (Last Updated: 2025-11-25 - Phase 11 Complete)
 
-**Migration Status: 235 → 126 errors (109 fixed, 46% reduction)**
+**Migration Status: 235 → 78 errors (157 fixed, 67% reduction)**
 
 ### Completed Phases:
 
@@ -34,20 +34,39 @@ This document captures the final architecture for rewriting the remaining byte-c
 - Viewport: scroll_to()
 - Editor: search highlights, LSP notifications, overlays, tab visibility
 
-### Remaining Work (126 errors):
+**Phase 8-9: Method Signatures and Conversions (18 errors fixed)**
+- Removed duplicate file explorer methods (implementations in file_explorer.rs)
+- Fixed hook_registry → ts_plugin_manager references
+- Added From<ViewPosition> for ViewEventPosition conversion trait
+- Added view_pos_to_event() and collect_lsp_changes() wrapper methods
+- Fixed plugin API conversions (ViewPosition/Selection → usize/Range<usize>)
+- Fixed plugin command conversions (usize/Range → ViewEventPosition/ViewEventRange)
 
-**Priority 1: Fill in method stubs using origin/master as reference**
-- ~40 Editor methods need real implementations
-- Compare with origin/master to port byte-centric logic to view-centric
-- Key methods: undo/redo, search/replace, LSP operations
+**Phase 10: LSP and Goto Definition (12 errors fixed)**
+- Fixed goto definition MoveCursor event type conversions
+- Fixed request_references() to extract source_byte for byte operations
 
-**Priority 2: Fix type mismatches (~74 errors)**
-- ViewPosition vs ViewEventPosition conversions
-- String/buffer indexing with view positions
-- Function signature mismatches
+**Phase 11: Multi-Cursor Support (7 errors fixed)**
+- Fixed add_cursor_at_next_match() to use source bytes and create proper ViewPositions
+- Fixed add_cursor_above() to extract source_byte and convert result positions
+- Fixed add_cursor_below() to extract source_byte and convert result positions
 
-**Priority 3: Misc errors (~20 errors)**
-- Missing fields, trait bounds, pattern matching, closures
+### Remaining Work (78 errors):
+
+**Priority 1: Fix remaining type mismatches (~43 errors)**
+- ViewPosition vs ViewEventPosition conversions in remaining code
+- Source byte extraction for buffer operations
+- Proper ViewPosition construction with view_line/column
+
+**Priority 2: Add missing methods (~9 errors)**
+- handle_mouse() for mouse event processing
+- apply_wrapping_transform() for split rendering
+- Various stub implementations
+
+**Priority 3: Fix other compilation errors (~26 errors)**
+- Trait bounds, closure signatures, pattern matching
+- Field access, borrow checker issues
+- Type inference edge cases
 
 ### Critical Missing Functionality (Currently Stubbed/Removed):
 
@@ -84,6 +103,44 @@ This document captures the final architecture for rewriting the remaining byte-c
    - **Action Required**: Adapt to view-centric cursor positions, map to source ranges via Layout for identifier matching
 
 **IMPORTANT:** Commits 267037b and 8cc3742 accidentally added code for pre-refactored APIs and were reverted to 8cb7782.
+
+### TODOs Added During Migration (Need Proper Implementation)
+
+During the migration to view-centric architecture, several areas were converted using minimal stubs with TODOs marking incomplete functionality:
+
+1. **View Line and Column Calculation (PERVASIVE)**
+   - **Locations**: `multi_cursor.rs`, plugin event handlers, cursor conversion utilities
+   - **Pattern**: `ViewPosition { view_line: 0, column: 0, source_byte: Some(byte) }`
+   - **Issue**: When converting from source bytes (usize) to ViewPosition, view_line and column are set to 0 as placeholders
+   - **Impact**: View coordinates are incorrect, affecting rendering and cursor display
+   - **Action Required**: Implement proper source_byte → view_line/column mapping using Layout
+
+2. **Cursor Adjustment for Edits (CRITICAL)**
+   - **Location**: `src/editor/mod.rs:1768-1775` - `adjust_other_split_cursors_for_event()`
+   - **Pattern**: Extracts source_byte and calls old byte-based adjust_for_edit
+   - **Issue**: Only adjusts if source_byte is available, doesn't handle view-only edits
+   - **Impact**: Cursor positions in split views become desync after edits
+   - **Action Required**: Port adjust_for_edit() to work with ViewEventPosition, update both source and view coordinates
+
+3. **Text Property Access (INCOMPLETE)**
+   - **Location**: `src/editor/mod.rs:1335` - `get_text_properties_at_cursor()`
+   - **Pattern**: Extracts source_byte or returns None
+   - **Issue**: Fails for view-only positions without source mapping
+   - **Impact**: Text properties unavailable for injected content
+   - **Action Required**: Consider view-based property lookup or proper Layout mapping
+
+4. **Scroll Position Stabilization (STUB)**
+   - **Location**: `src/viewport.rs:281` - `scroll_to()`
+   - **Status**: Empty stub with tracing::warn!
+   - **Impact**: Cannot programmatically scroll to specific view lines
+   - **Action Required**: Implement using Layout to map view line to viewport position
+
+5. **LSP Position Conversion Edge Cases**
+   - **Locations**: Various LSP handlers in `src/editor/mod.rs`
+   - **Pattern**: Uses source_byte.unwrap_or(0) for view-only positions
+   - **Issue**: Defaults to byte 0 when source mapping unavailable
+   - **Impact**: LSP features fail for injected lines (git blame, virtual text, etc.)
+   - **Action Required**: Either skip LSP for view-only content or implement proper source range tracking
 
 **Completed Core Modules:**
 - ✅ position_history.rs - Fully view-centric
