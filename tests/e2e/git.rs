@@ -1899,14 +1899,11 @@ fn test_git_blame_scroll_to_bottom() {
     let screen_top = harness.screen_to_string();
     println!("Git blame at top:\n{screen_top}");
 
-    // Scroll to bottom using G (go to end of file in vim mode)
+    // Scroll to bottom using Ctrl+End (go to end in read-only blame view)
     harness
-        .send_key(KeyCode::Char('G'), KeyModifiers::SHIFT)
+        .send_key(KeyCode::End, KeyModifiers::CONTROL)
         .unwrap();
     harness.process_async_and_render().unwrap();
-
-    // Wait a bit for scrolling to complete
-    std::thread::sleep(std::time::Duration::from_millis(100));
     harness.render().unwrap();
 
     let screen_bottom = harness.screen_to_string();
@@ -1932,6 +1929,67 @@ fn test_git_blame_scroll_to_bottom() {
     assert!(
         screen_bottom.contains("content"),
         "Should still show file content properly after scrolling"
+    );
+}
+
+/// Blame view should remain scrollable with many virtual header lines
+#[test]
+fn test_git_blame_scroll_with_many_virtual_lines() {
+    use std::time::Duration;
+
+    let repo = GitTestRepo::new();
+
+    // Small file (few real lines)
+    let content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n";
+    repo.create_file("scroll_many_virtual.txt", content);
+    repo.git_add(&["scroll_many_virtual.txt"]);
+    repo.git_commit("Add file with few lines");
+    repo.setup_git_blame_plugin();
+
+    // Change to repo directory
+    let original_dir = repo.change_to_repo_dir();
+    let _guard = DirGuard::new(original_dir);
+
+    // Small viewport to stress scrolling with virtual lines from blame headers
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        80,
+        20,
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    // Open file
+    let file_path = repo.path.join("scroll_many_virtual.txt");
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // Trigger git blame to insert virtual header lines
+    trigger_git_blame(&mut harness);
+
+    // Wait for blame view
+    let appeared = harness
+        .wait_for_async(|h| h.screen_to_string().contains("──"), 3000)
+        .unwrap();
+    assert!(appeared, "Blame view should appear");
+
+    // Scroll down repeatedly with Down arrow; should make progress even with many virtual lines
+    for _ in 0..40 {
+        harness
+            .send_key(KeyCode::Down, KeyModifiers::NONE)
+            .unwrap();
+        harness.process_async_and_render().unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    harness.render().unwrap();
+
+    let screen = harness.screen_to_string();
+    println!("Blame after scrolling with virtual lines:\n{screen}");
+
+    // Expect bottom lines to be visible despite virtual header lines
+    assert!(
+        screen.contains("Line 5") || screen.contains("Line 4"),
+        "Should see tail lines after scrolling with many virtual lines"
     );
 }
 
