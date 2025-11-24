@@ -296,27 +296,134 @@ impl SplitRenderer {
         (vec![buffer_id], 0)
     }
 
-    /// Stub: Temporarily set split state for rendering
-    /// TODO: Implement proper split state management
+    /// Placeholder for split state setup during rendering.
+    /// Split state is managed via SplitViewState - this is kept for potential
+    /// future extension of per-split rendering configuration.
+    #[allow(dead_code)]
     fn temporary_split_state(
         _state: &mut EditorState,
         _split_view_states: Option<&HashMap<SplitId, crate::split::SplitViewState>>,
         _split_id: SplitId,
         _is_active: bool,
-    ) -> () {
-        // This is a stub - split state is already managed via SplitViewState
+    ) {
+        // No-op: split state is managed via SplitViewState
     }
 
-    /// Stub: Apply wrapping transform to tokens
-    /// TODO: Implement proper line wrapping
+    /// Apply line wrapping transform to tokens
+    ///
+    /// Breaks long lines into multiple visual lines by inserting Break tokens.
+    /// Accounts for gutter width when calculating available space.
     pub fn apply_wrapping_transform(
         tokens: Vec<ViewTokenWire>,
-        _content_width: usize,
-        _gutter_width: usize,
+        content_width: usize,
+        gutter_width: usize,
     ) -> Vec<ViewTokenWire> {
-        // Stub implementation - return tokens unchanged
-        // Real implementation would apply line wrapping
-        tokens
+        use crate::ansi::visible_char_count;
+        use crate::plugin_api::ViewTokenWireKind;
+
+        let mut wrapped = Vec::new();
+        let mut current_line_width = 0;
+
+        // Calculate available width (accounting for gutter on first line only)
+        let available_width = content_width.saturating_sub(gutter_width);
+
+        if available_width == 0 {
+            return tokens;
+        }
+
+        for token in tokens {
+            match &token.kind {
+                ViewTokenWireKind::Newline => {
+                    // Real newlines always break the line
+                    wrapped.push(token);
+                    current_line_width = 0;
+                }
+                ViewTokenWireKind::Break => {
+                    // Preserve existing breaks
+                    wrapped.push(token);
+                    current_line_width = 0;
+                }
+                ViewTokenWireKind::Space => {
+                    // Spaces are treated as single-width characters
+                    if current_line_width >= available_width {
+                        wrapped.push(ViewTokenWire {
+                            source_offset: None,
+                            kind: ViewTokenWireKind::Break,
+                            style: None,
+                        });
+                        current_line_width = 0;
+                    }
+                    wrapped.push(token);
+                    current_line_width += 1;
+                }
+                ViewTokenWireKind::Text(text) => {
+                    // Use visible character count (excludes ANSI escape sequences)
+                    let text_len = visible_char_count(text);
+
+                    // If this token would exceed line width, insert Break before it
+                    if current_line_width > 0 && current_line_width + text_len > available_width {
+                        wrapped.push(ViewTokenWire {
+                            source_offset: None,
+                            kind: ViewTokenWireKind::Break,
+                            style: None,
+                        });
+                        current_line_width = 0;
+                    }
+
+                    // If token is longer than available width and doesn't contain ANSI codes, split it
+                    if text_len > available_width && !crate::ansi::contains_ansi_codes(text) {
+                        let chars: Vec<char> = text.chars().collect();
+                        let mut char_idx = 0;
+                        let source_base = token.source_offset;
+
+                        while char_idx < chars.len() {
+                            let remaining = chars.len() - char_idx;
+                            let chunk_size =
+                                remaining.min(available_width.saturating_sub(current_line_width));
+
+                            if chunk_size == 0 {
+                                // Need to break to next line
+                                wrapped.push(ViewTokenWire {
+                                    source_offset: None,
+                                    kind: ViewTokenWireKind::Break,
+                                    style: None,
+                                });
+                                current_line_width = 0;
+                                continue;
+                            }
+
+                            let chunk: String =
+                                chars[char_idx..char_idx + chunk_size].iter().collect();
+                            let chunk_source = source_base.map(|b| b + char_idx);
+
+                            wrapped.push(ViewTokenWire {
+                                source_offset: chunk_source,
+                                kind: ViewTokenWireKind::Text(chunk),
+                                style: token.style.clone(),
+                            });
+
+                            current_line_width += chunk_size;
+                            char_idx += chunk_size;
+
+                            // If we filled the line, break
+                            if current_line_width >= available_width {
+                                wrapped.push(ViewTokenWire {
+                                    source_offset: None,
+                                    kind: ViewTokenWireKind::Break,
+                                    style: None,
+                                });
+                                current_line_width = 0;
+                            }
+                        }
+                    } else {
+                        wrapped.push(token);
+                        current_line_width += text_len;
+                    }
+                }
+            }
+        }
+
+        wrapped
     }
 
     fn resolve_view_preferences(

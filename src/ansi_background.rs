@@ -84,16 +84,39 @@ impl AnsiBackground {
         ))
     }
 
-    /// Stub: Render background to frame
-    /// TODO: Implement proper ANSI background rendering
+    /// Render the ANSI background to a frame area with the given fade level
+    ///
+    /// This applies blended background colors from the ANSI art to each cell
+    /// in the given area. The base background color (used for blending) is
+    /// Color::Reset which defaults to the terminal's background color.
     pub fn render_background(
         &self,
-        _frame: &mut ratatui::Frame,
-        _area: ratatui::layout::Rect,
-        _fade: f32,
+        frame: &mut ratatui::Frame,
+        area: ratatui::layout::Rect,
+        fade: f32,
     ) {
-        // Stub implementation - background rendering is handled elsewhere
-        // This can be filled in later for proper ANSI background support
+        use ratatui::style::Color;
+
+        if self.width == 0 || self.height == 0 {
+            return;
+        }
+
+        let buffer = frame.buffer_mut();
+        let base_bg = Color::Reset;
+
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                // Calculate position in the ANSI art (offset by area position)
+                let art_x = (x - area.x) as usize;
+                let art_y = (y - area.y) as usize;
+
+                if let Some(color) = self.faded_color(art_x, art_y, base_bg, fade) {
+                    if let Some(cell) = buffer.cell_mut((x, y)) {
+                        cell.set_bg(color);
+                    }
+                }
+            }
+        }
     }
 }
 

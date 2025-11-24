@@ -2701,26 +2701,213 @@ impl Editor {
         self.set_status_message("Redo".to_string());
     }
 
-    // === Search/Replace (stubs) ===
+    // === Search/Replace ===
 
+    /// Open search prompt
     pub fn prompt_search(&mut self) {
-        tracing::warn!("prompt_search() not yet implemented");
+        // Get selected text if any for pre-filling the search
+        let selected_text = {
+            let state = self.active_state();
+            let sel_range = state.cursors.primary().selection_range();
+            if let Some(sel) = sel_range {
+                let start = sel.start.source_byte.unwrap_or(0);
+                let end = sel.end.source_byte.unwrap_or(0);
+                drop(state);
+                let text = self.active_state_mut().get_text_range(start, end);
+                if !text.contains('\n') && !text.is_empty() {
+                    Some(text)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Get last search from history if no selection
+        let initial_text = selected_text
+            .or_else(|| self.search_history.last().map(|s| s.to_string()))
+            .unwrap_or_default();
+
+        let mut prompt = Prompt::new("Search: ".to_string(), PromptType::Search);
+        if !initial_text.is_empty() {
+            prompt.set_input(initial_text.clone());
+            prompt.selection_anchor = Some(0);
+            prompt.cursor_pos = initial_text.len();
+            // Update highlights for initial search
+            self.update_search_highlights(&initial_text);
+        }
+        self.prompt = Some(prompt);
     }
 
+    /// Find next search match
     pub fn find_next(&mut self) {
-        tracing::warn!("find_next() not yet implemented");
+        if let Some(ref search_state) = self.search_state {
+            if search_state.matches.is_empty() {
+                self.set_status_message("No matches found".to_string());
+                return;
+            }
+
+            // Get current cursor position
+            let current_pos = self.active_state().cursors.primary().position;
+
+            // Find next match after cursor
+            let next_index = search_state.matches.iter().position(|m| {
+                m.view_line > current_pos.view_line
+                    || (m.view_line == current_pos.view_line && m.column > current_pos.column)
+            });
+
+            let match_index = next_index.unwrap_or(0); // Wrap to first match
+            let match_count = search_state.matches.len();
+
+            if let Some(match_pos) = search_state.matches.get(match_index).cloned() {
+                // Move cursor to match
+                let new_pos = ViewPosition {
+                    view_line: match_pos.view_line,
+                    column: match_pos.column,
+                    source_byte: match_pos.source_byte,
+                };
+                self.active_state_mut().cursors.primary_mut().position = new_pos;
+                self.set_status_message(format!(
+                    "Match {} of {}",
+                    match_index + 1,
+                    match_count
+                ));
+            }
+        } else {
+            // No active search, open search prompt
+            self.prompt_search();
+        }
     }
 
+    /// Find previous search match
     pub fn find_prev(&mut self) {
-        tracing::warn!("find_prev() not yet implemented");
+        if let Some(ref search_state) = self.search_state {
+            if search_state.matches.is_empty() {
+                self.set_status_message("No matches found".to_string());
+                return;
+            }
+
+            // Get current cursor position
+            let current_pos = self.active_state().cursors.primary().position;
+
+            // Find previous match before cursor
+            let prev_index = search_state.matches.iter().rposition(|m| {
+                m.view_line < current_pos.view_line
+                    || (m.view_line == current_pos.view_line && m.column < current_pos.column)
+            });
+
+            let match_index = prev_index.unwrap_or(search_state.matches.len() - 1); // Wrap to last match
+            let match_count = search_state.matches.len();
+
+            if let Some(match_pos) = search_state.matches.get(match_index).cloned() {
+                // Move cursor to match
+                let new_pos = ViewPosition {
+                    view_line: match_pos.view_line,
+                    column: match_pos.column,
+                    source_byte: match_pos.source_byte,
+                };
+                self.active_state_mut().cursors.primary_mut().position = new_pos;
+                self.set_status_message(format!(
+                    "Match {} of {}",
+                    match_index + 1,
+                    match_count
+                ));
+            }
+        } else {
+            // No active search, open search prompt
+            self.prompt_search();
+        }
     }
 
+    /// Open replace prompt (first prompts for search, then replacement)
     pub fn prompt_replace(&mut self) {
-        tracing::warn!("prompt_replace() not yet implemented");
+        // Get selected text if any for pre-filling the search
+        let selected_text = {
+            let state = self.active_state();
+            let sel_range = state.cursors.primary().selection_range();
+            if let Some(sel) = sel_range {
+                let start = sel.start.source_byte.unwrap_or(0);
+                let end = sel.end.source_byte.unwrap_or(0);
+                drop(state);
+                let text = self.active_state_mut().get_text_range(start, end);
+                if !text.contains('\n') && !text.is_empty() {
+                    Some(text)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let initial_text = selected_text
+            .or_else(|| self.search_history.last().map(|s| s.to_string()))
+            .unwrap_or_default();
+
+        let mut prompt = Prompt::new("Replace: ".to_string(), PromptType::ReplaceSearch);
+        if !initial_text.is_empty() {
+            prompt.set_input(initial_text.clone());
+            prompt.selection_anchor = Some(0);
+            prompt.cursor_pos = initial_text.len();
+        }
+        self.prompt = Some(prompt);
     }
 
+    /// Replace the current/next match and move to next
     pub fn replace_next(&mut self) {
-        tracing::warn!("replace_next() not yet implemented");
+        if let Some(ref mut replace_state) = self.interactive_replace_state.take() {
+            // Get the source byte range from the current match position
+            if let Some(source_byte) = replace_state.current_match_pos.source_byte {
+                let search_len = replace_state.search.len();
+                let end_byte = source_byte + search_len;
+
+                // Get the text being deleted
+                let deleted_text = self.active_state_mut().get_text_range(source_byte, end_byte);
+
+                // Delete the matched text
+                let delete_event = Event::Delete {
+                    range: ViewEventRange {
+                        start: replace_state.current_match_pos.clone(),
+                        end: ViewEventPosition {
+                            view_line: replace_state.current_match_pos.view_line,
+                            column: replace_state.current_match_pos.column + search_len,
+                            source_byte: Some(end_byte),
+                        },
+                    },
+                    source_range: Some(source_byte..end_byte),
+                    deleted_text,
+                    cursor_id: CursorId(0),
+                };
+
+                // Insert the replacement text
+                let insert_event = Event::Insert {
+                    position: replace_state.current_match_pos.clone(),
+                    text: replace_state.replacement.clone(),
+                    cursor_id: CursorId(0),
+                };
+
+                // Apply both events
+                self.active_event_log_mut().append(delete_event.clone());
+                self.apply_event_to_active_buffer(&delete_event);
+                self.active_event_log_mut().append(insert_event.clone());
+                self.apply_event_to_active_buffer(&insert_event);
+
+                replace_state.replacements_made += 1;
+                self.set_status_message(format!(
+                    "Replaced {} occurrence(s)",
+                    replace_state.replacements_made
+                ));
+            }
+
+            // Put the state back
+            self.interactive_replace_state = Some(replace_state.clone());
+
+            // Find next match
+            self.find_next();
+        } else {
+            self.set_status_message("No active replace operation".to_string());
+        }
     }
 
     // === UI/Navigation ===
@@ -2754,8 +2941,10 @@ impl Editor {
     }
 
     /// Handle popup confirmation (select current item)
+    ///
+    /// Note: Completion confirmation is handled by the prompt system in `handle_prompt_event`.
+    /// This method is a no-op placeholder for consistency with the action dispatch API.
     pub fn handle_popup_confirm(&mut self) {
-        // Handled by prompt system - this is a no-op stub
         // Completion confirmation is handled in handle_prompt_event
     }
 
@@ -2906,30 +3095,328 @@ impl Editor {
         Ok(())
     }
 
-    // === More stubs for missing methods ===
+    // === Search Highlights ===
 
+    /// Clear all search highlight overlays and reset search state
     pub fn clear_search_highlights(&mut self) {
-        tracing::warn!("clear_search_highlights() not yet implemented");
+        // Clear search state
+        self.search_state = None;
+
+        // Clear overlays in the search namespace
+        // Clone the namespace to avoid borrow issues
+        let namespace = self.search_namespace.clone();
+        if let Some(state) = self.buffers.get_mut(&self.active_buffer) {
+            state.overlays.clear_namespace(&namespace, &mut state.marker_list);
+        }
     }
 
-    pub fn update_search_highlights(&mut self, _text: &str) {
-        tracing::warn!("update_search_highlights() not yet implemented");
+    /// Update search highlights based on the search text
+    /// Finds all matches in the buffer and creates overlays for them
+    pub fn update_search_highlights(&mut self, text: &str) {
+        // Clear previous highlights
+        let namespace = self.search_namespace.clone();
+        if let Some(state) = self.buffers.get_mut(&self.active_buffer) {
+            state.overlays.clear_namespace(&namespace, &mut state.marker_list);
+        }
+
+        if text.is_empty() {
+            self.search_state = None;
+            return;
+        }
+
+        // Find all matches in the buffer
+        let case_sensitive = self.search_case_sensitive;
+        let whole_word = self.search_whole_word;
+        let text_len = text.len();
+        let matches = {
+            let state = self.active_state();
+            let buffer_content = state.buffer.to_string();
+            let mut found_matches = Vec::new();
+
+            // Prepare search text based on case sensitivity
+            let search_text = if case_sensitive {
+                text.to_string()
+            } else {
+                text.to_lowercase()
+            };
+
+            let search_content = if case_sensitive {
+                buffer_content.clone()
+            } else {
+                buffer_content.to_lowercase()
+            };
+
+            // Find all occurrences
+            let mut start = 0;
+            while let Some(pos) = search_content[start..].find(&search_text) {
+                let byte_offset = start + pos;
+
+                // Check whole word boundary if needed
+                let is_word_match = if whole_word {
+                    let before_ok = byte_offset == 0
+                        || !buffer_content[..byte_offset]
+                            .chars()
+                            .last()
+                            .map(|c| c.is_alphanumeric() || c == '_')
+                            .unwrap_or(false);
+                    let after_byte = byte_offset + text_len;
+                    let after_ok = after_byte >= buffer_content.len()
+                        || !buffer_content[after_byte..]
+                            .chars()
+                            .next()
+                            .map(|c| c.is_alphanumeric() || c == '_')
+                            .unwrap_or(false);
+                    before_ok && after_ok
+                } else {
+                    true
+                };
+
+                if is_word_match {
+                    // Convert byte offset to view position
+                    if let Some(doc_pos) = state.buffer.offset_to_position(byte_offset) {
+                        found_matches.push(ViewEventPosition {
+                            view_line: doc_pos.line,
+                            column: doc_pos.column,
+                            source_byte: Some(byte_offset),
+                        });
+                    }
+                }
+
+                start = byte_offset + 1;
+            }
+
+            found_matches
+        };
+
+        // Create overlays for each match
+        for match_pos in &matches {
+            if let Some(source_byte) = match_pos.source_byte {
+                let end_byte = source_byte + text_len;
+                let event = Event::AddOverlay {
+                    namespace: Some(namespace.clone()),
+                    range: source_byte..end_byte,
+                    face: crate::event::OverlayFace::Background {
+                        color: (100, 100, 50), // Yellow-ish highlight for search matches
+                    },
+                    priority: 50,
+                    message: None,
+                };
+                self.apply_event_to_active_buffer(&event);
+            }
+        }
+
+        // Update search state
+        self.search_state = Some(SearchState {
+            query: text.to_string(),
+            matches,
+            current_match_index: None,
+            wrap_search: true,
+            search_range: None,
+            case_sensitive,
+            whole_word,
+        });
+
+        // Show status message
+        let match_count = self.search_state.as_ref().map(|s| s.matches.len()).unwrap_or(0);
+        if match_count == 0 {
+            self.set_status_message(format!("No matches for '{}'", text));
+        } else {
+            self.set_status_message(format!("{} match(es) for '{}'", match_count, text));
+        }
     }
 
+    /// Notify LSP servers that the active buffer was saved
     pub fn notify_lsp_save(&mut self) {
-        tracing::warn!("notify_lsp_save() not yet implemented");
+        // Check if LSP is enabled for this buffer
+        let metadata = match self.buffer_metadata.get(&self.active_buffer) {
+            Some(m) => m,
+            None => {
+                tracing::debug!("notify_lsp_save: no metadata for buffer {:?}", self.active_buffer);
+                return;
+            }
+        };
+
+        if !metadata.lsp_enabled {
+            tracing::debug!("notify_lsp_save: LSP disabled for this buffer");
+            return;
+        }
+
+        // Get the URI
+        let uri = match metadata.file_uri() {
+            Some(u) => u.clone(),
+            None => {
+                tracing::debug!("notify_lsp_save: no URI for buffer");
+                return;
+            }
+        };
+
+        // Get the file path for language detection
+        let path = match metadata.file_path() {
+            Some(p) => p,
+            None => {
+                tracing::debug!("notify_lsp_save: no file path for buffer");
+                return;
+            }
+        };
+
+        let language = match detect_language(path) {
+            Some(l) => l,
+            None => {
+                tracing::debug!("notify_lsp_save: no language detected for {:?}", path);
+                return;
+            }
+        };
+
+        // Get the full text to send with didSave
+        let full_text = self.active_state().buffer.to_string();
+        tracing::debug!(
+            "notify_lsp_save: sending didSave to {} (text length: {} bytes)",
+            uri.as_str(),
+            full_text.len()
+        );
+
+        if let Some(lsp) = &mut self.lsp {
+            if let Some(client) = lsp.get_or_spawn(&language) {
+                // Send didSave with the full text content
+                if let Err(e) = client.did_save(uri, Some(full_text)) {
+                    tracing::warn!("Failed to send didSave to LSP: {}", e);
+                } else {
+                    tracing::info!("Successfully sent didSave to LSP");
+                }
+            } else {
+                tracing::warn!("notify_lsp_save: failed to get or spawn LSP client for {}", language);
+            }
+        } else {
+            tracing::debug!("notify_lsp_save: no LSP manager available");
+        }
     }
 
-    pub fn ensure_active_tab_visible(&mut self, _split_id: SplitId, _buffer_id: BufferId, _terminal_width: u16) {
-        tracing::warn!("ensure_active_tab_visible() not yet implemented");
+    /// Ensure the active tab in a split is visible by adjusting its scroll offset
+    pub fn ensure_active_tab_visible(
+        &mut self,
+        split_id: SplitId,
+        active_buffer: BufferId,
+        available_width: u16,
+    ) {
+        let Some(view_state) = self.split_view_states.get_mut(&split_id) else {
+            return;
+        };
+
+        let split_buffers = &view_state.open_buffers;
+        let buffers = &self.buffers;
+        let buffer_metadata = &self.buffer_metadata;
+
+        // Calculate widths of tabs (and separators)
+        let mut tab_layout_info: Vec<(usize, bool)> = Vec::new();
+        for (idx, id) in split_buffers.iter().enumerate() {
+            let Some(state) = buffers.get(id) else {
+                continue;
+            };
+
+            let name = if let Some(metadata) = buffer_metadata.get(id) {
+                metadata.display_name.as_str()
+            } else {
+                state
+                    .buffer
+                    .file_path()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("[No Name]")
+            };
+
+            let modified_indicator_width = if state.buffer.is_modified() { 1 } else { 0 };
+            let tab_width = 2 + name.chars().count() + modified_indicator_width;
+            let is_active = *id == active_buffer;
+
+            tab_layout_info.push((tab_width, is_active));
+            if idx < split_buffers.len() - 1 {
+                tab_layout_info.push((1, false)); // separator
+            }
+        }
+
+        let total_tabs_width: usize = tab_layout_info.iter().map(|(w, _)| w).sum();
+        let max_visible_width = available_width as usize;
+
+        let tab_widths: Vec<usize> = tab_layout_info.iter().map(|(w, _)| *w).collect();
+        let active_tab_index = tab_layout_info.iter().position(|(_, is_active)| *is_active);
+
+        let new_scroll_offset = if let Some(idx) = active_tab_index {
+            crate::ui::tabs::compute_tab_scroll_offset(
+                &tab_widths,
+                idx,
+                max_visible_width,
+                view_state.tab_scroll_offset,
+                1, // separator width
+            )
+        } else {
+            view_state
+                .tab_scroll_offset
+                .min(total_tabs_width.saturating_sub(max_visible_width))
+        };
+
+        view_state.tab_scroll_offset = new_scroll_offset;
     }
 
-    pub fn add_overlay(&mut self, _buffer_id: BufferId, _namespace: String, _overlay_data: serde_json::Value) {
-        tracing::warn!("add_overlay() not yet implemented");
+    /// Add an overlay to a buffer (plugin API)
+    pub fn add_overlay(&mut self, buffer_id: BufferId, namespace: String, overlay_data: serde_json::Value) {
+        let ns = crate::overlay::OverlayNamespace::from_string(namespace);
+
+        // Parse overlay data
+        let start = overlay_data.get("start").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let end = overlay_data.get("end").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let priority = overlay_data.get("priority").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let message = overlay_data.get("message").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        // Parse face
+        let face = if let Some(face_data) = overlay_data.get("face") {
+            let face_type = face_data.get("type").and_then(|v| v.as_str()).unwrap_or("background");
+            let color = face_data.get("color").and_then(|v| {
+                if let Some(arr) = v.as_array() {
+                    if arr.len() >= 3 {
+                        Some((
+                            arr[0].as_u64().unwrap_or(0) as u8,
+                            arr[1].as_u64().unwrap_or(0) as u8,
+                            arr[2].as_u64().unwrap_or(0) as u8,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }).unwrap_or((255, 255, 0));
+
+            match face_type {
+                "underline" => crate::event::OverlayFace::Underline { color, style: crate::event::UnderlineStyle::Straight },
+                "foreground" => crate::event::OverlayFace::Foreground { color },
+                _ => crate::event::OverlayFace::Background { color },
+            }
+        } else {
+            crate::event::OverlayFace::Background { color: (255, 255, 0) }
+        };
+
+        // Create the overlay event
+        let event = Event::AddOverlay {
+            namespace: Some(ns),
+            range: start..end,
+            face,
+            priority,
+            message,
+        };
+
+        // Apply to the specified buffer
+        if let Some(state) = self.buffers.get_mut(&buffer_id) {
+            state.apply(&event);
+        }
     }
 
-    pub fn remove_overlay(&mut self, _buffer_id: BufferId, _namespace: String) {
-        tracing::warn!("remove_overlay() not yet implemented");
+    /// Remove all overlays in a namespace from a buffer (plugin API)
+    pub fn remove_overlay(&mut self, buffer_id: BufferId, namespace: String) {
+        let ns = crate::overlay::OverlayNamespace::from_string(namespace);
+
+        if let Some(state) = self.buffers.get_mut(&buffer_id) {
+            state.overlays.clear_namespace(&ns, &mut state.marker_list);
+        }
     }
 
     /// Convert ViewPosition to ViewEventPosition
@@ -7268,10 +7755,15 @@ impl Editor {
         let word_text = self.active_state_mut().get_text_range(word_start, word_end);
 
         // Create an overlay to highlight the symbol being renamed
-        // Note: overlay API is currently stubbed, create a placeholder handle
-        let overlay_handle = crate::overlay::OverlayHandle::new();
-        // TODO: Implement proper overlay when API is ready
-        // self.add_overlay(buffer_id, namespace, overlay_data);
+        let overlay_handle = self.add_overlay_with_handle(
+            None,
+            word_start..word_end,
+            crate::event::OverlayFace::Background {
+                color: (50, 100, 200), // Blue background for rename
+            },
+            100,
+            Some("Renaming".to_string()),
+        );
 
         // Enter rename mode using the Prompt system
         // Store the rename metadata in the PromptType and pre-fill the input with the current name
@@ -7292,9 +7784,8 @@ impl Editor {
     }
 
     /// Cancel rename mode - removes overlay if the prompt was for LSP rename
-    fn cancel_rename_overlay(&mut self, _handle: &crate::overlay::OverlayHandle) {
-        // TODO: Implement when overlay API is ready
-        // self.remove_overlay(buffer_id, namespace);
+    fn cancel_rename_overlay(&mut self, handle: &crate::overlay::OverlayHandle) {
+        self.remove_overlay_by_handle(handle.clone());
     }
 
     /// Perform the actual LSP rename request

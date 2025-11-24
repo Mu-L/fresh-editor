@@ -693,22 +693,34 @@ impl PopupManager {
         &self.popups
     }
 
-    // === Missing navigation methods (stubs) ===
+    // === Navigation methods (delegates to top popup) ===
 
+    /// Move selection to next item in top popup
     pub fn select_next(&mut self) {
-        tracing::warn!("PopupManager::select_next() not yet implemented");
+        if let Some(popup) = self.top_mut() {
+            popup.select_next();
+        }
     }
 
+    /// Move selection to previous item in top popup
     pub fn select_prev(&mut self) {
-        tracing::warn!("PopupManager::select_prev() not yet implemented");
+        if let Some(popup) = self.top_mut() {
+            popup.select_prev();
+        }
     }
 
+    /// Page down in top popup
     pub fn page_down(&mut self) {
-        tracing::warn!("PopupManager::page_down() not yet implemented");
+        if let Some(popup) = self.top_mut() {
+            popup.page_down();
+        }
     }
 
+    /// Page up in top popup
     pub fn page_up(&mut self) {
-        tracing::warn!("PopupManager::page_up() not yet implemented");
+        if let Some(popup) = self.top_mut() {
+            popup.page_up();
+        }
     }
 }
 

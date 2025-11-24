@@ -124,4 +124,37 @@ impl Editor {
             );
         }
     }
+
+    /// Add an overlay to the active buffer and return a handle for later removal.
+    pub fn add_overlay_with_handle(
+        &mut self,
+        namespace: Option<crate::overlay::OverlayNamespace>,
+        range: std::ops::Range<usize>,
+        face: crate::event::OverlayFace,
+        priority: i32,
+        message: Option<String>,
+    ) -> crate::overlay::OverlayHandle {
+        let event = Event::AddOverlay {
+            namespace,
+            range,
+            face,
+            priority,
+            message,
+        };
+        self.apply_event_to_active_buffer(&event);
+        // Return the handle of the last added overlay
+        let state = self.active_state();
+        state
+            .overlays
+            .all()
+            .last()
+            .map(|o| o.handle.clone())
+            .unwrap_or_else(crate::overlay::OverlayHandle::new)
+    }
+
+    /// Remove an overlay by handle.
+    pub fn remove_overlay_by_handle(&mut self, handle: crate::overlay::OverlayHandle) {
+        let event = Event::RemoveOverlay { handle };
+        self.apply_event_to_active_buffer(&event);
+    }
 }

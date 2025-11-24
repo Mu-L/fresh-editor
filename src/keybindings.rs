@@ -1412,7 +1412,7 @@ impl KeybindingResolver {
             Action::ScrollTabsLeft => "Scroll tabs left".to_string(),
             Action::ScrollTabsRight => "Scroll tabs right".to_string(),
             Action::None => "No action".to_string(),
-            // Stub descriptions for new actions added during refactoring
+            // Additional editor actions
             Action::SaveAll => "Save all files".to_string(),
             Action::OpenFile => "Open file".to_string(),
             Action::OpenRecent => "Open recent file".to_string(),

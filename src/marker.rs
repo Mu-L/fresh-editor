@@ -201,7 +201,8 @@ impl MarkerList {
 
     /// Check invariants (for testing)
     ///
-    /// Note: IntervalTree has its own internal invariants. This is a compatibility stub.
+    /// Note: IntervalTree maintains its own internal invariants, so this always succeeds.
+    /// Kept for API compatibility with tests.
     #[cfg(test)]
     pub fn check_invariants(&self) -> Result<(), String> {
         // IntervalTree maintains its own invariants internally
