@@ -3,7 +3,7 @@
 //! This module maps editor Events to Hook invocations automatically.
 //! This ensures hooks are triggered consistently whenever state changes occur.
 
-use crate::event::{BufferId, Event};
+use crate::event::{BufferId, Event, ViewEventRange};
 use crate::hooks::{HookArgs, HookRegistry};
 use std::sync::RwLock;
 
@@ -28,9 +28,14 @@ impl EventHooks for Event {
                 position: *position,
                 text: text.clone(),
             }),
-            Event::Delete { range, .. } => Some(HookArgs::BeforeDelete {
+            Event::Delete {
+                range,
+                source_range,
+                ..
+            } => Some(HookArgs::BeforeDelete {
                 buffer_id,
                 range: range.clone(),
+                source_range: source_range.clone(),
             }),
             _ => None, // Most events don't have "before" hooks
         }
@@ -46,15 +51,21 @@ impl EventHooks for Event {
                 buffer_id,
                 position: *position,
                 text: text.clone(),
+                affected_range: ViewEventRange::new(*position, position.advanced(text)),
+                source_range: position
+                    .source_byte
+                    .map(|start| start..start.saturating_add(text.len())),
             }),
             Event::Delete {
                 range,
                 deleted_text,
+                source_range,
                 ..
             } => Some(HookArgs::AfterDelete {
                 buffer_id,
                 range: range.clone(),
                 deleted_text: deleted_text.clone(),
+                source_range: source_range.clone(),
             }),
             Event::MoveCursor {
                 cursor_id,

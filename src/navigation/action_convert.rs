@@ -1,0 +1,290 @@
+use crate::cursor::{Cursor, ViewPosition};
+use crate::event::{Event, ViewEventPosition, ViewEventRange};
+use crate::keybindings::Action;
+use crate::navigation::edit_map::{view_pos_to_buffer_byte, view_range_to_buffer_range};
+use crate::navigation::layout_nav;
+use crate::ui::view_pipeline::Layout;
+use crate::viewport::Viewport;
+
+/// Convert an Action into Events using view-centric cursors and layout.
+/// Returns None for actions that do nothing in the current state.
+pub fn action_to_events(
+    cursors: &mut crate::cursor::Cursors,
+    layout: &Layout,
+    viewport: &mut Viewport,
+    action: Action,
+) -> Option<Vec<Event>> {
+    let mut events = Vec::new();
+
+    match action {
+        Action::MoveLeft => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_horizontal(layout, &cursor.position, -1);
+                events.push(move_cursor_event(id, cursor, new_pos, None));
+            }
+        }
+        Action::MoveRight => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_horizontal(layout, &cursor.position, 1);
+                events.push(move_cursor_event(id, cursor, new_pos, None));
+            }
+        }
+        Action::MoveUp => {
+            for (id, cursor) in cursors.iter() {
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, -1);
+                events.push(move_cursor_event(id, cursor, new_pos, pref));
+            }
+        }
+        Action::MoveDown => {
+            for (id, cursor) in cursors.iter() {
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, 1);
+                events.push(move_cursor_event(id, cursor, new_pos, pref));
+            }
+        }
+        Action::MoveLineStart => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_line_start(layout, &cursor.position);
+                events.push(move_cursor_event(id, cursor, new_pos, Some(0)));
+            }
+        }
+        Action::MoveLineEnd => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_line_end(layout, &cursor.position);
+                events.push(move_cursor_event(id, cursor, new_pos, Some(new_pos.column)));
+            }
+        }
+        Action::MovePageUp => {
+            for (id, cursor) in cursors.iter() {
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let new_pos = layout_nav::move_page(layout, &cursor.position, viewport, -1);
+                events.push(move_cursor_event(id, cursor, new_pos, pref));
+            }
+        }
+        Action::MovePageDown => {
+            for (id, cursor) in cursors.iter() {
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let new_pos = layout_nav::move_page(layout, &cursor.position, viewport, 1);
+                events.push(move_cursor_event(id, cursor, new_pos, pref));
+            }
+        }
+        Action::MoveDocumentStart => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = ViewPosition {
+                    view_line: 0,
+                    column: 0,
+                    source_byte: layout.get_source_byte_for_line(0),
+                };
+                events.push(move_cursor_event(id, cursor, new_pos, Some(0)));
+            }
+        }
+        Action::MoveDocumentEnd => {
+            let last_line = layout.lines.len().saturating_sub(1);
+            for (id, cursor) in cursors.iter() {
+                let new_pos = ViewPosition {
+                    view_line: last_line,
+                    column: layout.lines.get(last_line).map(|l| l.char_mappings.len()).unwrap_or(0),
+                    source_byte: layout.get_source_byte_for_line(last_line),
+                };
+                events.push(move_cursor_event(id, cursor, new_pos, Some(new_pos.column)));
+            }
+        }
+        Action::SelectLeft => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_horizontal(layout, &cursor.position, -1);
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectRight => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_horizontal(layout, &cursor.position, 1);
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectUp => {
+            for (id, cursor) in cursors.iter() {
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, -1);
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectDown => {
+            for (id, cursor) in cursors.iter() {
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, 1);
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectLineStart => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_line_start(layout, &cursor.position);
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectLineEnd => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = layout_nav::move_line_end(layout, &cursor.position);
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectDocumentStart => {
+            for (id, cursor) in cursors.iter() {
+                let new_pos = ViewPosition {
+                    view_line: 0,
+                    column: 0,
+                    source_byte: layout.get_source_byte_for_line(0),
+                };
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::SelectDocumentEnd => {
+            let last_line = layout.lines.len().saturating_sub(1);
+            for (id, cursor) in cursors.iter() {
+                let new_pos = ViewPosition {
+                    view_line: last_line,
+                    column: layout.lines.get(last_line).map(|l| l.char_mappings.len()).unwrap_or(0),
+                    source_byte: layout.get_source_byte_for_line(last_line),
+                };
+                events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
+            }
+        }
+        Action::ScrollUp => {
+            layout_nav::scroll_view(layout, viewport, -1);
+        }
+        Action::ScrollDown => {
+            layout_nav::scroll_view(layout, viewport, 1);
+        }
+        Action::DeleteBackward => {
+            for (id, cursor) in cursors.iter() {
+                if let Some(anchor) = cursor.anchor {
+                    let view_range = ViewEventRange::normalized(anchor, cursor.position);
+                    let source_range =
+                        view_range_to_buffer_range(layout, &anchor, &cursor.position);
+                    if source_range.is_some() {
+                        events.push(Event::Delete {
+                            range: view_range,
+                            source_range,
+                            deleted_text: String::new(),
+                            cursor_id: id,
+                        });
+                    }
+                } else if let Some(prev_byte) = cursor.source_byte.and_then(|b| b.checked_sub(1)) {
+                    let start = layout_nav::move_horizontal(layout, &cursor.position, -1);
+                    let view_range = ViewEventRange::normalized(start, cursor.position);
+                    events.push(Event::Delete {
+                        range: view_range,
+                        source_range: Some(prev_byte..cursor.source_byte.unwrap()),
+                        deleted_text: String::new(),
+                        cursor_id: id,
+                    });
+                }
+            }
+        }
+        Action::DeleteForward => {
+            for (id, cursor) in cursors.iter() {
+                if let Some(anchor) = cursor.anchor {
+                    let view_range = ViewEventRange::normalized(anchor, cursor.position);
+                    let source_range =
+                        view_range_to_buffer_range(layout, &anchor, &cursor.position);
+                    if source_range.is_some() {
+                        events.push(Event::Delete {
+                            range: view_range,
+                            source_range,
+                            deleted_text: String::new(),
+                            cursor_id: id,
+                        });
+                    }
+                } else if let Some(start) = cursor.source_byte {
+                    let end_view = layout_nav::move_horizontal(layout, &cursor.position, 1);
+                    let end_byte = layout
+                        .view_position_to_source_byte(end_view.view_line, end_view.column)
+                        .or_else(|| cursor.position.source_byte.map(|b| b.saturating_add(1)));
+                    let view_range = ViewEventRange::normalized(cursor.position, end_view);
+                    events.push(Event::Delete {
+                        range: view_range,
+                        source_range: end_byte.map(|end| start..end),
+                        deleted_text: String::new(),
+                        cursor_id: id,
+                    });
+                }
+            }
+        }
+        Action::InsertChar(ch) => {
+            let text = ch.to_string();
+            for (id, cursor) in cursors.iter() {
+                if let Some(pos) = view_pos_to_buffer_byte(layout, &cursor.position) {
+                    let mut event_pos = view_pos_to_event(&cursor.position);
+                    event_pos.source_byte = Some(pos);
+                    events.push(Event::Insert {
+                        position: event_pos,
+                        text: text.clone(),
+                        cursor_id: id,
+                    });
+                }
+            }
+        }
+        Action::InsertNewline => {
+            for (id, cursor) in cursors.iter() {
+                if let Some(pos) = view_pos_to_buffer_byte(layout, &cursor.position) {
+                    let mut event_pos = view_pos_to_event(&cursor.position);
+                    event_pos.source_byte = Some(pos);
+                    events.push(Event::Insert {
+                        position: event_pos,
+                        text: "\n".to_string(),
+                        cursor_id: id,
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if events.is_empty() {
+        None
+    } else {
+        Some(events)
+    }
+}
+
+fn move_cursor_event(
+    cursor_id: crate::event::CursorId,
+    cursor: &Cursor,
+    new_pos: ViewPosition,
+    new_pref_col: Option<usize>,
+) -> Event {
+    Event::MoveCursor {
+        cursor_id,
+        old_position: view_pos_to_event(&cursor.position),
+        new_position: view_pos_to_event(&new_pos),
+        old_anchor: cursor.anchor.map(view_pos_to_event),
+        new_anchor: None,
+        old_sticky_column: cursor.preferred_visual_column,
+        new_sticky_column: new_pref_col,
+    }
+}
+
+fn move_cursor_event_with_anchor(
+    cursor_id: crate::event::CursorId,
+    cursor: &Cursor,
+    new_pos: ViewPosition,
+) -> Event {
+    let anchor = cursor.anchor.unwrap_or(cursor.position);
+    Event::MoveCursor {
+        cursor_id,
+        old_position: view_pos_to_event(&cursor.position),
+        new_position: view_pos_to_event(&new_pos),
+        old_anchor: cursor.anchor.map(view_pos_to_event),
+        new_anchor: Some(view_pos_to_event(&anchor)),
+        old_sticky_column: cursor.preferred_visual_column,
+        new_sticky_column: cursor.preferred_visual_column,
+    }
+}
+
+fn view_pos_to_event(pos: &ViewPosition) -> ViewEventPosition {
+    ViewEventPosition {
+        view_line: pos.view_line,
+        column: pos.column,
+        source_byte: pos.source_byte,
+    }
+}

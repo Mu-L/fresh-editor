@@ -1139,49 +1139,44 @@ impl Editor {
     /// Convert an action into a list of events to apply to the active buffer
     /// Returns None for actions that don't generate events (like Quit)
     pub fn action_to_events(&mut self, action: Action) -> Option<Vec<Event>> {
-        // Sync viewport from SplitViewState to EditorState BEFORE action conversion
-        // This ensures action_to_events sees correct viewport dimensions for PageDown/PageUp
-        // (since scroll events now update SplitViewState's viewport directly)
-        // Note: We only sync viewport, NOT cursors - EditorState has authoritative cursor state
-        self.sync_viewport_from_split_view_state();
-
-        // Layout-aware vertical navigation (always use view-layer movement)
-        if matches!(
-            action,
-            Action::MoveUp | Action::MoveDown | Action::MovePageUp | Action::MovePageDown
+        // View-centric action conversion: require layout + view cursors
+        let split_id = self.split_manager.active_split();
+        if let (Some(view_state), Some(buffer_state)) = (
+            self.split_view_states.get_mut(&split_id),
+            self.buffers.get_mut(&self.active_buffer),
         ) {
-            let split_id = self.split_manager.active_split();
-            if let (Some(view_state), Some(buffer_state)) = (
-                self.split_view_states.get_mut(&split_id),
-                self.buffers.get_mut(&self.active_buffer),
-            ) {
-                // Keep view state in sync with current editor cursors/viewport sizes
-                view_state.cursors = buffer_state.cursors.clone();
-                view_state.viewport.width = buffer_state.viewport.width;
-                view_state.viewport.height = buffer_state.viewport.height;
+            // Sync view state to buffer state for this split
+            view_state.cursors = buffer_state.cursors.clone();
+            view_state.viewport.width = buffer_state.viewport.width;
+            view_state.viewport.height = buffer_state.viewport.height;
 
-                let viewport_height = view_state.viewport.visible_line_count();
-                let delta = match action {
-                    Action::MoveUp => -1,
-                    Action::MoveDown => 1,
-                    Action::MovePageDown => viewport_height.saturating_sub(1) as isize,
-                    Action::MovePageUp => -(viewport_height.saturating_sub(1) as isize),
-                    _ => 0,
-                };
-
-                let estimated_line_length = self.config.editor.estimated_line_length;
-                let events = view_state.move_cursors_by_view_lines(
-                    delta,
+            // Ensure layout exists
+            let gutter_width = view_state.viewport.gutter_width(&buffer_state.buffer);
+            let wrap_params = Some((view_state.viewport.width as usize, gutter_width));
+            let layout = view_state
+                .ensure_layout(
                     &mut buffer_state.buffer,
-                    estimated_line_length,
-                );
+                    self.config.editor.estimated_line_length,
+                    wrap_params,
+                )
+                .clone();
 
-                buffer_state.viewport = view_state.viewport.clone();
-                return Some(events);
-            }
+            // Convert action using view-centric pipeline
+            let events = crate::navigation::action_convert::action_to_events(
+                &mut view_state.cursors,
+                &layout,
+                &mut view_state.viewport,
+                action,
+            );
+
+            // Sync viewport/cursors back
+            buffer_state.viewport = view_state.viewport.clone();
+            buffer_state.cursors = view_state.cursors.clone();
+
+            return events;
         }
 
-        panic!("action_to_events must be rebuilt for view-centric cursor/layout pipeline");
+        None
     }
 
     // === Search and Replace Methods ===

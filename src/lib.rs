@@ -54,4 +54,5 @@ pub mod ui;
 pub mod view;
 pub mod viewport;
 pub mod virtual_text;
+pub mod navigation;
 pub mod word_navigation;

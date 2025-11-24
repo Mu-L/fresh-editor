@@ -37,19 +37,85 @@ pub struct ViewEventPosition {
     pub source_byte: Option<usize>,
 }
 
+impl ViewEventPosition {
+    /// Construct a view position from a source byte (view coordinates unknown during migration)
+    pub fn from_source_byte(byte: usize) -> Self {
+        Self {
+            view_line: 0,
+            column: byte,
+            source_byte: Some(byte),
+        }
+    }
+
+    /// Advance a view position by a chunk of inserted text (best-effort without layout)
+    pub fn advanced(&self, text: &str) -> Self {
+        let mut pos = *self;
+        let mut current_line = pos.view_line;
+        let mut current_col = pos.column;
+
+        for ch in text.chars() {
+            match ch {
+                '\n' => {
+                    current_line += 1;
+                    current_col = 0;
+                }
+                _ => current_col += 1,
+            }
+        }
+
+        Self {
+            view_line: current_line,
+            column: current_col,
+            source_byte: pos.source_byte.map(|b| b.saturating_add(text.len())),
+        }
+    }
+}
+
+/// View-based range used by view-centric delete events
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewEventRange {
+    pub start: ViewEventPosition,
+    pub end: ViewEventPosition,
+}
+
+impl ViewEventRange {
+    pub fn new(start: ViewEventPosition, end: ViewEventPosition) -> Self {
+        Self { start, end }
+    }
+
+    pub fn normalized(a: ViewEventPosition, b: ViewEventPosition) -> Self {
+        if a.view_line < b.view_line
+            || (a.view_line == b.view_line && a.column <= b.column)
+        {
+            Self { start: a, end: b }
+        } else {
+            Self { start: b, end: a }
+        }
+    }
+
+    pub fn from_source_range(range: Range<usize>) -> Self {
+        Self {
+            start: ViewEventPosition::from_source_byte(range.start),
+            end: ViewEventPosition::from_source_byte(range.end),
+        }
+    }
+}
+
 /// Core event types representing all possible state changes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     /// Insert text at a position
     Insert {
-        position: usize,
+        position: ViewEventPosition,
         text: String,
         cursor_id: CursorId,
     },
 
     /// Delete a range of text
     Delete {
-        range: Range<usize>,
+        range: ViewEventRange,
+        /// Optional resolved source range (None for view-only transforms)
+        source_range: Option<Range<usize>>,
         deleted_text: String,
         cursor_id: CursorId,
     },
@@ -318,9 +384,13 @@ impl Event {
     pub fn inverse(&self) -> Option<Event> {
         match self {
             Event::Insert { position, text, .. } => {
-                let range = *position..(position + text.len());
+                let end = position.advanced(text);
+                let range = ViewEventRange::new(*position, end);
                 Some(Event::Delete {
                     range,
+                    source_range: position
+                        .source_byte
+                        .map(|start| start..start.saturating_add(text.len())),
                     deleted_text: text.clone(),
                     cursor_id: CursorId::UNDO_SENTINEL,
                 })
@@ -818,13 +888,14 @@ mod tests {
             prop_oneof![
                 // Insert events
                 (0usize..1000, ".{1,50}").prop_map(|(pos, text)| Event::Insert {
-                    position: pos,
+                    position: ViewEventPosition::from_source_byte(pos),
                     text,
                     cursor_id: CursorId(0),
                 }),
                 // Delete events
                 (0usize..1000, 1usize..50).prop_map(|(pos, len)| Event::Delete {
-                    range: pos..pos + len,
+                    range: ViewEventRange::from_source_range(pos..pos + len),
+                    source_range: Some(pos..pos + len),
                     deleted_text: "x".repeat(len),
                     cursor_id: CursorId(0),
                 }),
@@ -919,7 +990,7 @@ mod tests {
     fn test_event_log_append() {
         let mut log = EventLog::new();
         let event = Event::Insert {
-            position: 0,
+            position: ViewEventPosition::from_source_byte(0),
             text: "hello".to_string(),
             cursor_id: CursorId(0),
         };
@@ -935,13 +1006,13 @@ mod tests {
         let mut log = EventLog::new();
 
         log.append(Event::Insert {
-            position: 0,
+            position: ViewEventPosition::from_source_byte(0),
             text: "a".to_string(),
             cursor_id: CursorId(0),
         });
 
         log.append(Event::Insert {
-            position: 1,
+            position: ViewEventPosition::from_source_byte(1),
             text: "b".to_string(),
             cursor_id: CursorId(0),
         });
@@ -967,7 +1038,7 @@ mod tests {
     #[test]
     fn test_event_inverse() {
         let insert = Event::Insert {
-            position: 5,
+            position: ViewEventPosition::from_source_byte(5),
             text: "hello".to_string(),
             cursor_id: CursorId(0),
         };
@@ -977,9 +1048,11 @@ mod tests {
             Event::Delete {
                 range,
                 deleted_text,
+                source_range,
                 ..
             } => {
-                assert_eq!(range, 5..10);
+                assert_eq!(range.start.source_byte, Some(5));
+                assert_eq!(source_range, Some(5..10));
                 assert_eq!(deleted_text, "hello");
             }
             _ => panic!("Expected Delete event"),
@@ -991,13 +1064,13 @@ mod tests {
         let mut log = EventLog::new();
 
         log.append(Event::Insert {
-            position: 0,
+            position: ViewEventPosition::from_source_byte(0),
             text: "a".to_string(),
             cursor_id: CursorId(0),
         });
 
         log.append(Event::Insert {
-            position: 1,
+            position: ViewEventPosition::from_source_byte(1),
             text: "b".to_string(),
             cursor_id: CursorId(0),
         });
@@ -1007,7 +1080,7 @@ mod tests {
 
         // Adding new event should truncate the future
         log.append(Event::Insert {
-            position: 1,
+            position: ViewEventPosition::from_source_byte(1),
             text: "c".to_string(),
             cursor_id: CursorId(0),
         });

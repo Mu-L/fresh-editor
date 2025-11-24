@@ -6,7 +6,6 @@ pub mod command_palette;
 pub mod document_model;
 pub mod emacs_actions;
 pub mod file_explorer;
-pub mod git;
 pub mod large_file_mode;
 pub mod lifecycle;
 pub mod line_wrapping;

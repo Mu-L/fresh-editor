@@ -3,7 +3,7 @@
 //! Hooks allow plugins to subscribe to editor events and react to them.
 //! This is inspired by Emacs' hook system.
 
-use crate::event::{BufferId, CursorId, SplitId};
+use crate::event::{BufferId, CursorId, SplitId, ViewEventPosition, ViewEventRange};
 use crate::keybindings::Action;
 use crate::plugin_api::ViewTokenWire;
 use std::collections::HashMap;
@@ -31,44 +31,42 @@ pub enum HookArgs {
     /// Before text is inserted
     BeforeInsert {
         buffer_id: BufferId,
-        position: usize,
+        position: ViewEventPosition,
         text: String,
     },
 
     /// After text was inserted
     AfterInsert {
         buffer_id: BufferId,
-        position: usize,
+        position: ViewEventPosition,
         text: String,
-        /// Byte position where the affected range starts
-        affected_start: usize,
-        /// Byte position where the affected range ends (after the inserted text)
-        affected_end: usize,
+        /// View range affected by the insert (start/end after insertion)
+        affected_range: ViewEventRange,
+        /// Optional source byte range affected (if mapping exists)
+        source_range: Option<Range<usize>>,
     },
 
     /// Before text is deleted
     BeforeDelete {
         buffer_id: BufferId,
-        range: Range<usize>,
+        range: ViewEventRange,
+        source_range: Option<Range<usize>>,
     },
 
     /// After text was deleted
     AfterDelete {
         buffer_id: BufferId,
-        range: Range<usize>,
+        range: ViewEventRange,
         deleted_text: String,
-        /// Byte position where the deletion occurred
-        affected_start: usize,
-        /// Length of the deleted content in bytes
-        deleted_len: usize,
+        source_range: Option<Range<usize>>,
     },
 
     /// Cursor moved to a new position
     CursorMoved {
         buffer_id: BufferId,
         cursor_id: CursorId,
-        old_position: usize,
-        new_position: usize,
+        old_position: ViewEventPosition,
+        new_position: ViewEventPosition,
     },
 
     /// Buffer became active
@@ -407,32 +405,32 @@ mod tests {
             },
             HookArgs::BeforeInsert {
                 buffer_id: BufferId(1),
-                position: 0,
+                position: ViewEventPosition::from_source_byte(0),
                 text: "test".to_string(),
             },
             HookArgs::AfterInsert {
                 buffer_id: BufferId(1),
-                position: 0,
+                position: ViewEventPosition::from_source_byte(0),
                 text: "test".to_string(),
-                affected_start: 0,
-                affected_end: 4,
+                affected_range: ViewEventRange::from_source_range(0..4),
+                source_range: Some(0..4),
             },
             HookArgs::BeforeDelete {
                 buffer_id: BufferId(1),
-                range: 0..5,
+                range: ViewEventRange::from_source_range(0..5),
+                source_range: Some(0..5),
             },
             HookArgs::AfterDelete {
                 buffer_id: BufferId(1),
-                range: 0..5,
+                range: ViewEventRange::from_source_range(0..5),
                 deleted_text: "test".to_string(),
-                affected_start: 0,
-                deleted_len: 4,
+                source_range: Some(0..5),
             },
             HookArgs::CursorMoved {
                 buffer_id: BufferId(1),
                 cursor_id: CursorId(0),
-                old_position: 0,
-                new_position: 5,
+                old_position: ViewEventPosition::from_source_byte(0),
+                new_position: ViewEventPosition::from_source_byte(5),
             },
             HookArgs::BufferActivated {
                 buffer_id: BufferId(1),

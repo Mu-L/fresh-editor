@@ -4,7 +4,7 @@ use crate::document_model::{
 };
 use crate::event::{
     Event, MarginContentData, MarginPositionData, OverlayFace as EventOverlayFace, PopupData,
-    PopupPositionData,
+    PopupPositionData, ViewEventPosition, ViewEventRange,
 };
 use crate::highlighter::{Highlighter, Language};
 use crate::indent::IndentCalculator;
@@ -227,24 +227,79 @@ impl EditorState {
                 text,
                 cursor_id,
             } => {
-                // VIEW-CENTRIC TODO: Need mapping from view position to buffer insert location.
-                // Placeholder: no-op until edit pipeline is rewritten.
-                tracing::error!(
-                    "Insert event still expects buffer byte positions; migration incomplete: position={}",
-                    position
-                );
+                if self.editing_disabled {
+                    tracing::warn!("Editing disabled; ignoring insert");
+                    return;
+                }
+
+                if let Some(byte_pos) = position.source_byte {
+                    self.buffer.insert(byte_pos, text);
+                    // Adjust markers and overlays anchored to source bytes
+                    self.marker_list
+                        .adjust_for_insert(byte_pos, text.len());
+                    self.virtual_texts
+                        .adjust_for_insert(byte_pos, text.len());
+
+                    // Adjust source-byte metadata for cursors
+                    self.cursors.adjust_for_edit(byte_pos, 0, text.len());
+                } else {
+                    tracing::error!(
+                        "Insert missing source mapping; view-centric edits not yet routed to buffer: pos={:?}",
+                        position
+                    );
+                }
+
+                // Adjust view positions for all cursors based on the inserted text
+                let start = ViewEventPosition {
+                    view_line: position.view_line,
+                    column: position.column,
+                    source_byte: position.source_byte,
+                };
+
+                adjust_cursors_for_insert(&mut self.cursors, start, text);
+
+                // Defer viewport sync to rendering time for better performance
+                self.viewport.mark_needs_sync();
             }
 
             Event::Delete {
                 range,
                 cursor_id,
                 deleted_text,
+                source_range,
             } => {
-                // VIEW-CENTRIC TODO: Need mapping from view range to buffer delete range.
-                tracing::error!(
-                    "Delete event still expects buffer byte ranges; migration incomplete: range={:?}",
-                    range
-                );
+                if self.editing_disabled {
+                    tracing::warn!("Editing disabled; ignoring delete");
+                    return;
+                }
+
+                let mut resolved_text = deleted_text.clone();
+
+                if resolved_text.is_empty() {
+                    if let Some(src) = source_range.clone() {
+                        resolved_text = self.get_text_range(src.start, src.end);
+                    }
+                }
+
+                if let Some(src) = source_range.clone() {
+                    self.buffer.delete(src.clone());
+                    self.marker_list
+                        .adjust_for_delete(src.start, src.end - src.start);
+                    self.virtual_texts
+                        .adjust_for_delete(src.start, src.end - src.start);
+                    self.cursors
+                        .adjust_for_edit(src.start, src.end - src.start, 0);
+                } else {
+                    tracing::error!(
+                        "Delete missing source mapping; view-centric edits not yet routed to buffer: range={:?}",
+                        range
+                    );
+                }
+
+                adjust_cursors_for_delete(&mut self.cursors, range, &resolved_text);
+
+                // Defer viewport sync to rendering time for better performance
+                self.viewport.mark_needs_sync();
             }
 
             Event::MoveCursor {

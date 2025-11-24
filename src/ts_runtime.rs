@@ -3080,38 +3080,44 @@ impl TypeScriptPluginManager {
                 buffer_id,
                 position,
                 text,
-                affected_start,
-                affected_end,
+                affected_range,
+                source_range,
             } => {
                 serde_json::json!({
                     "buffer_id": buffer_id.0,
                     "position": position,
                     "text": text,
-                    "affected_start": affected_start,
-                    "affected_end": affected_end,
+                    "affected_range": {
+                        "start": affected_range.start,
+                        "end": affected_range.end,
+                    },
+                    "source_range": source_range,
                 })
             }
-            HookArgs::BeforeDelete { buffer_id, range } => {
+            HookArgs::BeforeDelete { buffer_id, range, source_range } => {
                 serde_json::json!({
                     "buffer_id": buffer_id.0,
-                    "start": range.start,
-                    "end": range.end,
+                    "range": {
+                        "start": range.start,
+                        "end": range.end,
+                    },
+                    "source_range": source_range,
                 })
             }
             HookArgs::AfterDelete {
                 buffer_id,
                 range,
                 deleted_text,
-                affected_start,
-                deleted_len,
+                source_range,
             } => {
                 serde_json::json!({
                     "buffer_id": buffer_id.0,
-                    "start": range.start,
-                    "end": range.end,
+                    "range": {
+                        "start": range.start,
+                        "end": range.end,
+                    },
                     "deleted_text": deleted_text,
-                    "affected_start": affected_start,
-                    "deleted_len": deleted_len,
+                    "source_range": source_range,
                 })
             }
             HookArgs::BeforeFileOpen { path } => {
