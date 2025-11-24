@@ -250,6 +250,25 @@
             color: var(--accent-blue);
         }
 
+        /* NEW: Installation Grid for two-column layout */
+        .installation-grid {
+            display: grid;
+            grid-template-columns: 1fr; /* Single column on mobile */
+            gap: 10px 20px; /* Vertical and horizontal gap */
+            margin-bottom: 20px; /* Space before source code link */
+            font-size: 0.9em; /* Slightly reduced font size for installation instructions */
+        }
+        
+        .installation-grid p {
+            margin-bottom: 0; /* Remove default paragraph margin */
+        }
+
+        @media (min-width: 768px) {
+            .installation-grid {
+                grid-template-columns: 1fr 1fr; /* Two columns on desktop */
+            }
+        }
+
         /* --- Footer Styles --- */
         footer {
             background-color: #0d0d0d; /* Slightly darker than main black */
@@ -302,18 +321,23 @@
 
         <!-- INSTALLATION --><div class="content-section">
             <h2>Installation</h2>
-            <p>
-                Install globally via npm:<br>
-                <code class="c-green">npm install -g @fresh-editor/fresh-editor</code>
-            </p>
-            <p>
-                Or run directly with npx:<br>
-                <code class="c-green">npx @fresh-editor/fresh-editor</code>
-            </p>
-            <p>
-                Or install from source with Cargo:<br>
-                <code class="c-green">cargo install fresh-editor</code>
-            </p>
+            <div class="installation-grid">
+                <p>
+                    Install globally via npm:<br>
+                    <code class="c-green">npm install -g @fresh-editor/fresh-editor</code>
+                </p>
+                <p>
+                    Or run directly with npx:<br>
+                    <code class="c-green">npx @fresh-editor/fresh-editor</code>
+                </p>
+                <p>
+                    Or install from source with Cargo:<br>
+                    <code class="c-green">cargo install fresh-editor</code>
+                </p>
+                <p>
+                    Download pre-built binaries from <a href="https://github.com/sinelaw/fresh/releases" target="_blank">GitHub Releases</a>.
+                </p>
+            </div>
             <p>
                 Source code available on <a href="https://github.com/sinelaw/fresh" target="_blank">GitHub</a>.
             </p>
