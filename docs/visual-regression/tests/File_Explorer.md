@@ -12,3 +12,9 @@
 
 *Editor before opening file explorer*
 
+## Step 2: explorer_open
+
+![explorer_open](../screenshots/File_Explorer_02_explorer_open.svg)
+
+*File explorer opened in left pane*
+

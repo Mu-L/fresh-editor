@@ -12,3 +12,9 @@
 
 *Single file open*
 
+## Step 2: horizontal_split
+
+![horizontal_split](../screenshots/Split_View_02_horizontal_split.svg)
+
+*Editor split horizontally*
+

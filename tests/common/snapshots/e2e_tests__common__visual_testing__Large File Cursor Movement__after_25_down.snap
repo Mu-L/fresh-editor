@@ -4,7 +4,9 @@ expression: "&screen_text"
 ---
  File   Edit   View   Selection   Go   Help                                     
  fresh-test-BIG.txt                                                             
-     21 │ @00001600:                                                           █
+     20 │ @00001520:                                                           █
+        │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
+     21 │ @00001600:                                                           │
         │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
      22 │ @00001680:                                                           │
         │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
@@ -21,7 +23,5 @@ expression: "&screen_text"
      28 │ @00002160:                                                           │
         │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
      29 │ @00002240:                                                           │
-        │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
-     30 │ @00002320:                                                           │
         │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 /tmp/fresh-test-BIG.txt | Ln 25, Col 0 | Auto-revert disabl...  Palette: Ctrl+P

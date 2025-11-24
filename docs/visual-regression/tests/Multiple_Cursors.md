@@ -12,3 +12,9 @@
 
 *Three lines with 'hello'*
 
+## Step 2: word_selected
+
+![word_selected](../screenshots/Multiple_Cursors_02_word_selected.svg)
+
+*First word selected*
+
