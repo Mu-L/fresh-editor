@@ -447,6 +447,11 @@ impl MarginManager {
             MarginPosition::Right => self.right_annotations.values().map(|v| v.len()).sum(),
         }
     }
+
+    /// Check if line numbers are enabled
+    pub fn line_numbers_enabled(&self) -> bool {
+        self.show_line_numbers
+    }
 }
 
 impl Default for MarginManager {

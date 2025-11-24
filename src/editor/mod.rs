@@ -2583,6 +2583,32 @@ impl Editor {
         Ok(())
     }
 
+    // === More stubs for missing methods ===
+
+    pub fn clear_search_highlights(&mut self) {
+        tracing::warn!("clear_search_highlights() not yet implemented");
+    }
+
+    pub fn update_search_highlights(&mut self) {
+        tracing::warn!("update_search_highlights() not yet implemented");
+    }
+
+    pub fn notify_lsp_save(&mut self) {
+        tracing::warn!("notify_lsp_save() not yet implemented");
+    }
+
+    pub fn ensure_active_tab_visible(&mut self) {
+        tracing::warn!("ensure_active_tab_visible() not yet implemented");
+    }
+
+    pub fn add_overlay(&mut self, _buffer_id: BufferId, _namespace: String, _overlay_data: serde_json::Value) {
+        tracing::warn!("add_overlay() not yet implemented");
+    }
+
+    pub fn remove_overlay(&mut self, _buffer_id: BufferId, _namespace: String) {
+        tracing::warn!("remove_overlay() not yet implemented");
+    }
+
     /// Add a cursor at the next occurrence of the selected text
     /// If no selection, does nothing
     pub fn add_cursor_at_next_match(&mut self) {

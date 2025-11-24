@@ -692,6 +692,24 @@ impl PopupManager {
     pub fn all(&self) -> &[Popup] {
         &self.popups
     }
+
+    // === Missing navigation methods (stubs) ===
+
+    pub fn select_next(&mut self) {
+        tracing::warn!("PopupManager::select_next() not yet implemented");
+    }
+
+    pub fn select_prev(&mut self) {
+        tracing::warn!("PopupManager::select_prev() not yet implemented");
+    }
+
+    pub fn page_down(&mut self) {
+        tracing::warn!("PopupManager::page_down() not yet implemented");
+    }
+
+    pub fn page_up(&mut self) {
+        tracing::warn!("PopupManager::page_up() not yet implemented");
+    }
 }
 
 impl Default for PopupManager {

@@ -276,6 +276,11 @@ impl Viewport {
         let target = (self.top_view_line as isize + line_offset).max(0) as usize;
         self.top_view_line = target.min(max_top);
     }
+
+    /// Scroll to a specific view line (stub)
+    pub fn scroll_to(&mut self, _layout: &Layout, _view_line: usize) {
+        tracing::warn!("Viewport::scroll_to() not yet implemented");
+    }
 }
 
 #[cfg(test)]
