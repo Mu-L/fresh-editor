@@ -946,10 +946,17 @@ impl EditorTestHarness {
 
         // Get the buffer to read cell content
         let buffer = self.terminal.backend().buffer();
+        let content_start = layout::CONTENT_START_ROW as u16;
+        let content_end = buffer
+            .area
+            .height
+            .saturating_sub(layout::BOTTOM_RESERVED_ROWS as u16);
 
         // Add primary cursor at hardware position
-        if let Some(cell) = buffer.content.get(buffer.index_of(hw_x, hw_y)) {
-            cursors.push((hw_x, hw_y, cell.symbol().to_string(), true));
+        if hw_y >= content_start && hw_y < content_end {
+            if let Some(cell) = buffer.content.get(buffer.index_of(hw_x, hw_y)) {
+                cursors.push((hw_x, hw_y, cell.symbol().to_string(), true));
+            }
         }
 
         // Find secondary cursors (cells with REVERSED modifier or inactive cursor background)
@@ -960,7 +967,7 @@ impl EditorTestHarness {
             Color::DarkGray,
         ];
 
-        for y in 0..buffer.area.height {
+        for y in content_start..content_end {
             for x in 0..buffer.area.width {
                 // Skip if this is the hardware cursor position
                 if x == hw_x && y == hw_y {
