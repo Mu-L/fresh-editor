@@ -46,7 +46,7 @@ use crate::buffer_mode::ModeRegistry;
 use crate::command_registry::CommandRegistry;
 use crate::commands::Suggestion;
 use crate::config::Config;
-use crate::event::{CursorId, Event, EventLog, SplitDirection, SplitId, ViewEventPosition};
+use crate::event::{CursorId, Event, EventLog, SplitDirection, SplitId, ViewEventPosition, ViewEventRange};
 use crate::file_tree::{FileTree, FileTreeView};
 use crate::fs::{FsBackend, FsManager, LocalFsBackend};
 use crate::keybindings::{Action, KeyContext, KeybindingResolver};
@@ -4216,8 +4216,8 @@ impl Editor {
                 };
                 snapshot.buffers.insert(*buffer_id, buffer_info);
 
-                // Store cursor position for this buffer
-                let cursor_pos = view_pos_to_event(state.cursors.primary().position);
+                // Store cursor position for this buffer (extract source byte for plugins)
+                let cursor_pos = state.cursors.primary().position.source_byte.unwrap_or(0);
                 snapshot
                     .buffer_cursor_positions
                     .insert(*buffer_id, cursor_pos);
@@ -4234,8 +4234,10 @@ impl Editor {
             if let Some(active_state) = self.buffers.get_mut(&self.active_buffer) {
                 // Primary cursor
                 let primary = active_state.cursors.primary();
-                let primary_position = primary.position;
-                let primary_selection = primary.selection_range();
+                let primary_position = primary.position.source_byte.unwrap_or(0);
+                let primary_selection = primary.selection_range().and_then(|sel| {
+                    Some(sel.start.source_byte?..sel.end.source_byte?)
+                });
 
                 snapshot.primary_cursor = Some(CursorInfo {
                     position: primary_position,
@@ -4254,8 +4256,10 @@ impl Editor {
                     .cursors
                     .iter()
                     .map(|(_, cursor)| CursorInfo {
-                        position: view_pos_to_event(cursor.position),
-                        selection: cursor.selection_range().map(|sel| (view_pos_to_event(sel.start), view_pos_to_event(sel.end))),
+                        position: cursor.position.source_byte.unwrap_or(0),
+                        selection: cursor.selection_range().and_then(|sel| {
+                            Some(sel.start.source_byte?..sel.end.source_byte?)
+                        }),
                     })
                     .collect();
 
@@ -4290,8 +4294,10 @@ impl Editor {
                 text,
             } => {
                 if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    // Convert usize position to ViewEventPosition
+                    let view_pos = ViewEventPosition::from_source_byte(position);
                     let event = Event::Insert {
-                        position,
+                        position: view_pos,
                         text,
                         cursor_id: CursorId(0),
                     };
@@ -4304,9 +4310,14 @@ impl Editor {
             PluginCommand::DeleteRange { buffer_id, range } => {
                 if let Some(state) = self.buffers.get_mut(&buffer_id) {
                     let deleted_text = state.get_text_range(range.start, range.end);
+                    // Convert Range<usize> to ViewEventRange
+                    let view_range = ViewEventRange::new(
+                        ViewEventPosition::from_source_byte(range.start),
+                        ViewEventPosition::from_source_byte(range.end),
+                    );
                     let event = Event::Delete {
-                        range,
-                        source_range: None, // TODO: plugin ranges need proper source mapping
+                        range: view_range,
+                        source_range: Some(range), // Plugin ranges are source byte ranges
                         deleted_text,
                         cursor_id: CursorId(0),
                     };
