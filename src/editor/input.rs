@@ -256,7 +256,7 @@ impl Editor {
                 self.open_command_palette();
             }
             Action::GotoLine => {
-                self.prompt_goto_line();
+                self.start_prompt("Go to line: ".to_string(), crate::prompt::PromptType::GotoLine);
             }
             Action::PopupConfirm => {
                 self.handle_popup_confirm();
@@ -322,6 +322,12 @@ impl Editor {
             }
             Action::Prompt => {
                 // No-op placeholder for prompt actions handled elsewhere.
+            }
+            Action::PromptConfirm => {
+                // Handle prompt confirmation - process based on prompt type
+                if let Some((input, prompt_type, _selected_index)) = self.confirm_prompt() {
+                    self.handle_prompt_confirm(input, prompt_type)?;
+                }
             }
             Action::PopupShowDocumentation => {
                 // No-op placeholder.
@@ -488,6 +494,141 @@ impl Editor {
         for event in events {
             self.active_event_log_mut().append(event.clone());
             self.apply_event_to_active_buffer(&event);
+        }
+    }
+
+    /// Handle prompt confirmation based on prompt type (view-centric).
+    fn handle_prompt_confirm(
+        &mut self,
+        input: String,
+        prompt_type: crate::prompt::PromptType,
+    ) -> std::io::Result<()> {
+        match prompt_type {
+            crate::prompt::PromptType::GotoLine => {
+                self.handle_goto_line(input)
+            }
+            _ => {
+                // Other prompt types not yet implemented - placeholder
+                self.set_status_message("Prompt type not yet implemented".to_string());
+                Ok(())
+            }
+        }
+    }
+
+    /// Handle goto line prompt (view-centric implementation).
+    fn handle_goto_line(&mut self, input: String) -> std::io::Result<()> {
+        match input.trim().parse::<usize>() {
+            Ok(line_num) if line_num > 0 => {
+                let target_line = line_num.saturating_sub(1); // Convert to 0-based
+                let buffer_id = self.active_buffer;
+                let split_id = self.split_manager.active_split();
+
+                // Get view state and buffer
+                if let (Some(view_state), Some(buffer_state)) = (
+                    self.split_view_states.get_mut(&split_id),
+                    self.buffers.get_mut(&buffer_id),
+                ) {
+                    let cursor_id = buffer_state.cursors.primary_id();
+                    let old_position = buffer_state.cursors.primary().position;
+                    let old_anchor = buffer_state.cursors.primary().anchor;
+                    let old_sticky_column = buffer_state.cursors.primary().sticky_column;
+
+                    // Ensure we have a layout
+                    let gutter_width = view_state.viewport.gutter_width(&buffer_state.buffer);
+                    let wrap_params = Some((view_state.viewport.width as usize, gutter_width));
+                    let layout = view_state.ensure_layout(
+                        &mut buffer_state.buffer,
+                        self.config.editor.estimated_line_length,
+                        wrap_params,
+                    );
+
+                    // Determine if large file mode
+                    let is_large_file = buffer_state.buffer.line_count().is_none();
+                    let buffer_len = buffer_state.buffer.len();
+                    let estimated_line_length = self.config.editor.estimated_line_length;
+
+                    let (new_position, status_message) = if is_large_file {
+                        // Large file: estimate byte offset, find line start via buffer, then map to view
+                        let estimated_offset = target_line * estimated_line_length;
+                        let clamped_offset = estimated_offset.min(buffer_len);
+
+                        // Find actual line start in buffer
+                        let source_byte = {
+                            let iter =
+                                buffer_state
+                                    .buffer
+                                    .line_iterator(clamped_offset, estimated_line_length);
+                            iter.current_position()
+                        };
+
+                        // Map source byte to view position via layout
+                        let view_pos =
+                            crate::navigation::mapping::map_source_to_view(layout, source_byte);
+
+                        let msg = format!(
+                            "Jumped to estimated line {} (large file mode)",
+                            line_num
+                        );
+                        (view_pos, msg)
+                    } else {
+                        // Small file: use exact line position, map buffer line → source byte → view
+                        let max_line = buffer_state
+                            .buffer
+                            .line_count()
+                            .unwrap_or(1)
+                            .saturating_sub(1);
+                        let actual_line = target_line.min(max_line);
+                        let source_byte =
+                            buffer_state.buffer.line_col_to_position(actual_line, 0);
+
+                        // Map source byte to view position
+                        let view_pos =
+                            crate::navigation::mapping::map_source_to_view(layout, source_byte);
+
+                        let msg = if target_line > max_line {
+                            format!(
+                                "Line {} doesn't exist, jumped to line {}",
+                                line_num,
+                                actual_line + 1
+                            )
+                        } else {
+                            format!("Jumped to line {}", line_num)
+                        };
+                        (view_pos, msg)
+                    };
+
+                    // Create MoveCursor event with view position
+                    let event = crate::event::Event::MoveCursor {
+                        cursor_id,
+                        old_position,
+                        new_position,
+                        old_anchor,
+                        new_anchor: None,
+                        old_sticky_column,
+                        new_sticky_column: Some(new_position.column),
+                    };
+
+                    // Apply the event
+                    self.active_event_log_mut().append(event.clone());
+                    self.apply_event_to_active_buffer(&event);
+
+                    // Record position history
+                    let view_event_pos = self.view_pos_to_event(new_position);
+                    self.position_history
+                        .record_movement(buffer_id, view_event_pos, None);
+
+                    self.set_status_message(status_message);
+                }
+                Ok(())
+            }
+            Ok(_) => {
+                self.set_status_message("Line number must be positive".to_string());
+                Ok(())
+            }
+            Err(_) => {
+                self.set_status_message(format!("Invalid line number: {}", input));
+                Ok(())
+            }
         }
     }
 }
