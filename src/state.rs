@@ -15,7 +15,6 @@ use crate::popup::{Popup, PopupContent, PopupListItem, PopupManager, PopupPositi
 use crate::semantic_highlight::SemanticHighlighter;
 use crate::text_buffer::{Buffer, LineNumber};
 use crate::text_property::TextPropertyManager;
-use crate::ui::view_pipeline::{ViewLine, ViewLineIterator};
 use crate::viewport::Viewport;
 use crate::virtual_text::VirtualTextManager;
 use anyhow::Result;
@@ -374,36 +373,12 @@ impl EditorState {
                 self.cursors.remove(*cursor_id);
             }
 
-            Event::Scroll { line_offset } => {
-                // Use view-aware scrolling if we have a view transform
-                // This correctly handles scroll limits when view transforms inject headers
-                if let Some(ref vt) = self.view_transform {
-                    let view_lines: Vec<ViewLine> = ViewLineIterator::new(&vt.tokens).collect();
-                    self.viewport.scroll_view_lines(&view_lines, *line_offset as isize);
-                } else {
-                    // No view transform - use traditional buffer-based scrolling
-                    if *line_offset > 0 {
-                        self.viewport
-                            .scroll_down(&mut self.buffer, *line_offset as usize);
-                    } else {
-                        self.viewport
-                            .scroll_up(&mut self.buffer, line_offset.unsigned_abs());
-                    }
-                }
-            }
-
-            Event::SetViewport { top_line } => {
-                self.viewport.scroll_to(&mut self.buffer, *top_line);
-            }
-
-            Event::Recenter => {
-                // Center the viewport on the primary cursor
-                if let Some((_id, cursor)) = self.cursors.iter().next() {
-                    let cursor_line = self.buffer.position_to_line_col(cursor.position).0;
-                    let half_height = (self.viewport.height / 2) as usize;
-                    let new_top = cursor_line.saturating_sub(half_height);
-                    self.viewport.scroll_to(&mut self.buffer, new_top);
-                }
+            // View events (Scroll, SetViewport, Recenter) are now handled at Editor level
+            // via SplitViewState. They should not reach EditorState.apply().
+            Event::Scroll { .. } | Event::SetViewport { .. } | Event::Recenter => {
+                // These events are intercepted in Editor::apply_event_to_active_buffer
+                // and routed to SplitViewState. If we get here, something is wrong.
+                tracing::warn!("View event {:?} reached EditorState.apply() - should be handled by SplitViewState", event);
             }
 
             Event::SetAnchor {
