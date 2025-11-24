@@ -702,7 +702,7 @@ impl EditorState {
     /// This pre-loads all data that will be needed for rendering the current viewport,
     /// ensuring that subsequent read-only access during rendering will succeed.
     pub fn prepare_for_render(&mut self) -> Result<()> {
-        let start_offset = match self.viewport.top_byte {
+        let start_offset = match self.viewport.anchor_byte {
             offset => offset,
         };
         let line_count = self.viewport.height as usize;

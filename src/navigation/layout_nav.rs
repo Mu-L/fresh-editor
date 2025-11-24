@@ -78,7 +78,6 @@ pub fn scroll_view(layout: &Layout, viewport: &mut Viewport, line_offset: isize)
     let target = (viewport.top_view_line as isize + line_offset).max(0) as usize;
     viewport.top_view_line = target.min(max_top);
     if let Some(byte) = layout.get_source_byte_for_line(viewport.top_view_line) {
-        viewport.top_byte = byte;
         viewport.anchor_byte = byte;
     }
 }

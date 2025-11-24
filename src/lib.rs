@@ -42,6 +42,7 @@ pub mod position_history;
 pub mod process_limits;
 pub mod prompt;
 pub mod script_control;
+pub mod selection;
 pub mod semantic_highlight;
 pub mod signal_handler;
 pub mod split;

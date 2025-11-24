@@ -2200,9 +2200,8 @@ impl Editor {
             {
                 let backtrack_bytes = estimated_line_length
                     .saturating_mul(view_state.viewport.visible_line_count().max(1));
-                view_state.viewport.top_byte =
-                    layout.source_range.start.saturating_sub(backtrack_bytes);
-                view_state.viewport.anchor_byte = view_state.viewport.top_byte;
+                let anchor = layout.source_range.start.saturating_sub(backtrack_bytes);
+                view_state.viewport.anchor_byte = anchor;
                 view_state.layout_dirty = true;
 
                 let layout = view_state
@@ -2217,9 +2216,8 @@ impl Editor {
             if view_state.viewport.top_view_line == max_top
                 && layout.has_content_below(buffer_state.buffer.len())
             {
-                view_state.viewport.top_byte =
-                    layout.source_range.end.min(buffer_state.buffer.len());
-                view_state.viewport.anchor_byte = view_state.viewport.top_byte;
+                let anchor = layout.source_range.end.min(buffer_state.buffer.len());
+                view_state.viewport.anchor_byte = anchor;
                 view_state.layout_dirty = true;
 
                 let layout = view_state
@@ -5125,7 +5123,7 @@ impl Editor {
                                 "SetBufferCursor: updated split {:?} (active={}) viewport top_byte={}",
                                 split_id,
                                 is_active,
-                                view_state.viewport.top_byte
+                                view_state.viewport.anchor_byte
                             );
 
                             // For the active split, also update the buffer state directly

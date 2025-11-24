@@ -33,14 +33,14 @@ pub fn action_to_events(
         }
         Action::MoveUp => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, -1);
                 events.push(move_cursor_event(id, cursor, new_pos, pref));
             }
         }
         Action::MoveDown => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, 1);
                 events.push(move_cursor_event(id, cursor, new_pos, pref));
             }
@@ -59,14 +59,14 @@ pub fn action_to_events(
         }
         Action::MovePageUp => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_page(layout, &cursor.position, viewport, -1);
                 events.push(move_cursor_event(id, cursor, new_pos, pref));
             }
         }
         Action::MovePageDown => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_page(layout, &cursor.position, viewport, 1);
                 events.push(move_cursor_event(id, cursor, new_pos, pref));
             }
@@ -106,14 +106,14 @@ pub fn action_to_events(
         }
         Action::SelectUp => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, -1);
                 events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
             }
         }
         Action::SelectDown => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_vertical(layout, &cursor.position, pref, 1);
                 events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
             }
@@ -153,14 +153,14 @@ pub fn action_to_events(
         }
         Action::SelectPageUp => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_page(layout, &cursor.position, viewport, -1);
                 events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
             }
         }
         Action::SelectPageDown => {
             for (id, cursor) in cursors.iter() {
-                let pref = cursor.preferred_visual_column.or(Some(cursor.column));
+                let pref = cursor.preferred_visual_column.or(Some(cursor.column()));
                 let new_pos = layout_nav::move_page(layout, &cursor.position, viewport, 1);
                 events.push(move_cursor_event_with_anchor(id, cursor, new_pos));
             }
@@ -293,12 +293,12 @@ pub fn action_to_events(
                             cursor_id: id,
                         });
                     }
-                } else if let Some(prev_byte) = cursor.source_byte.and_then(|b| b.checked_sub(1)) {
+                } else if let Some(prev_byte) = cursor.source_byte().and_then(|b| b.checked_sub(1)) {
                     let start = layout_nav::move_horizontal(layout, &cursor.position, -1);
                     let view_range = ViewEventRange::normalized(start, cursor.position);
                     events.push(Event::Delete {
                         range: view_range,
-                        source_range: Some(prev_byte..cursor.source_byte.unwrap()),
+                        source_range: Some(prev_byte..cursor.source_byte().unwrap()),
                         deleted_text: String::new(),
                         cursor_id: id,
                     });
@@ -319,7 +319,7 @@ pub fn action_to_events(
                             cursor_id: id,
                         });
                     }
-                } else if let Some(start) = cursor.source_byte {
+                } else if let Some(start) = cursor.source_byte() {
                     let end_view = layout_nav::move_horizontal(layout, &cursor.position, 1);
                     let end_byte = layout
                         .view_position_to_source_byte(end_view.view_line, end_view.column)

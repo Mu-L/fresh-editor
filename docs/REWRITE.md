@@ -2,18 +2,18 @@
 
 This document captures the final architecture for rewriting the remaining byte-centric modules into the new view-centric model. All public APIs must use `ViewPosition`/`ViewEventPosition`/`ViewEventRange` and only consult source bytes via `Layout` when needed. No buffer-first fallbacks.
 
-## Progress Summary (Last Updated: 2025-11-24 Evening)
+## Progress Summary (Last Updated: 2025-11-24 Late Evening - Comprehensive Analysis)
 
-**IMPORTANT:** Commits 267037b and 8cc3742 accidentally added code for pre-refactored APIs and were reverted.
+**IMPORTANT:** Commits 267037b and 8cc3742 accidentally added code for pre-refactored APIs and were reverted to 8cb7782.
 
 **Completed Core Modules:**
 - ✅ position_history.rs - Fully view-centric
 - ✅ word_navigation.rs - View helpers implemented
-- ✅ viewport.rs - Uses top_view_line (but has top_byte remnants to fix)
+- ✅ viewport.rs - Uses top_view_line (but has 1 top_byte remnant to fix)
 - ✅ status_bar.rs - Displays view positions
-- ✅ split_rendering.rs - Renders from Layout
-- ✅ navigation/action_convert.rs - Core actions + word nav + line ops
-- ✅ navigation/layout_nav.rs - Pure layout navigation (has one top_byte ref to fix)
+- ✅ split_rendering.rs - Renders from Layout (partially - has 5 errors)
+- ✅ navigation/action_convert.rs - Core actions + word nav + line ops (has 23 errors)
+- ✅ navigation/layout_nav.rs - Pure layout navigation (has 1 top_byte ref to fix)
 - ✅ navigation/edit_map.rs - View→source mapping
 - ✅ navigation/mapping.rs - Mapping helpers
 
@@ -21,162 +21,617 @@ This document captures the final architecture for rewriting the remaining byte-c
 - ✅ editor/types.rs - SearchState, Bookmark, InteractiveReplaceState use ViewEventPosition
 - ✅ editor/types.rs - MouseState uses drag_start_top_view_line instead of top_byte
 
-**Remaining Work (235 compilation errors):**
+---
 
-### High Priority - Core Infrastructure
-1. **editor/input.rs** (~60 errors)
-   - Remove references to non-existent Action variants (OpenFile, SaveAll, etc)
-   - Remove calls to removed methods (file_dialog, save_all, hide_popup, etc)
-   - Fix handle_action to only use existing Actions
-   - Many editor methods were removed during refactoring
+## Compilation Errors: Complete Breakdown (235 errors)
 
-2. **editor/mod.rs** (~120 errors)
-   - Missing methods: collect_lsp_changes, clear_search_highlights, update_search_highlights
-   - Missing methods: notify_lsp_save, add_overlay, remove_overlay, ensure_active_tab_visible
-   - Event struct issues: missing source_range field, wrong field names
-   - ViewEventPosition/ViewEventRange need comparison operators and len()
-   - Selection/cursor tuple access (.start, .end) - need proper struct
-   - viewport.top_byte references (should be top_view_line)
+### Category A: Type System Foundations (HIGH PRIORITY - BLOCKS EVERYTHING)
 
-3. **cursor.rs & multi_cursor.rs** (~15 errors)
-   - cursor.column field access (Cursor needs to expose column or use accessors)
-   - ViewPosition arithmetic operations
-   - Selection tuple .start/.end access
+These must be fixed FIRST as they block all other work:
 
-4. **split.rs** (~20 errors)
-   - viewport.top_byte references
-   - SplitRenderer::apply_wrapping_transform removed
-   - Type mismatches with ViewPosition
+#### 1. ViewPosition / ViewEventPosition Missing Trait Implementations
+**Impact:** ~40 errors across all files
 
-5. **state.rs** (~10 errors)
-   - adjust_cursors_for_insert/delete functions missing
-   - VirtualTextManager adjust_for_insert/delete methods missing
-   - viewport.top_byte reference
+**Missing traits:**
+- `PartialOrd`, `Ord` for comparison operators (`<`, `>`, `<=`, `>=`)
+- `Add<usize>` for `pos + offset`
+- `Sub<usize>` for `pos - offset`
+- `AddAssign<usize>` for `pos += offset`
+- `SubAssign<usize>` for `pos -= offset`
+- `Display` for `ViewEventPosition` (2 errors in editor/mod.rs)
 
-6. **script_control.rs** (~6 errors)
-   - handle_mouse method removed from Editor
+**Files affected:**
+- editor/mod.rs: Lines 5787, 5793, 5797, 5813, 5825, 5611, 6103, 6564, 6567, 6578
+- multi_cursor.rs: Lines 61, 65, 134
+- navigation/action_convert.rs: Various comparison operations
 
-7. **ui/split_rendering.rs** (~5 errors)
-   - SplitRenderer::temporary_split_state removed
-   - AnsiBackground::render_background removed
-   - Theme field names changed (gutter_fg, gutter_bg, text_fg)
+**Action:** Add to `src/cursor.rs`:
+```rust
+impl PartialOrd for ViewPosition {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
-8. **viewport.rs** (~1 error)
-   - Anonymous lifetime issue
+impl Ord for ViewPosition {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.view_line.cmp(&other.view_line) {
+            Ordering::Equal => self.column.cmp(&other.column),
+            other => other,
+        }
+    }
+}
 
-### Pattern of Errors
-Most errors fall into these categories:
-1. **Removed methods/fields**: Many Editor methods were removed during refactoring
-2. **top_byte → top_view_line**: Incomplete migration of viewport
-3. **ViewPosition/ViewEventPosition operations**: Need comparison, arithmetic, Display
-4. **Event struct changes**: Missing or renamed fields
-5. **Selection/cursor representation**: Tuples → proper structs needed
+impl Add<usize> for ViewPosition {
+    type Output = ViewPosition;
+    fn add(self, rhs: usize) -> Self::Output {
+        ViewPosition {
+            view_line: self.view_line,
+            column: self.column + rhs,
+            source_byte: self.source_byte,
+        }
+    }
+}
 
-**Key Change:** `navigation::action_convert::action_to_events()` now takes `&Buffer` parameter for word navigation.
+impl Sub<usize> for ViewPosition {
+    type Output = ViewPosition;
+    fn sub(self, rhs: usize) -> Self::Output {
+        ViewPosition {
+            view_line: self.view_line,
+            column: self.column.saturating_sub(rhs),
+            source_byte: self.source_byte,
+        }
+    }
+}
 
-**Next Steps:**
-1. Fix viewport.top_byte → top_view_line everywhere
-2. Implement comparison/arithmetic for ViewPosition types
-3. Add Display impl for ViewEventPosition
-4. Create proper Selection struct instead of tuples
-5. Restore or stub removed Editor methods that are actually needed
-6. Clean up editor/input.rs to remove dead code
+impl AddAssign<usize> for ViewPosition {
+    fn add_assign(&mut self, rhs: usize) {
+        self.column += rhs;
+    }
+}
+
+impl SubAssign<usize> for ViewPosition {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.column = self.column.saturating_sub(rhs);
+    }
+}
+
+impl Display for ViewEventPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.view_line, self.column)
+    }
+}
+```
+
+Similar for `ViewEventPosition` and `ViewEventRange`.
+
+#### 2. ViewEventRange Missing Methods
+**Impact:** 3 errors in editor/mod.rs
+
+**Missing:** `len()` method
+
+**Files affected:**
+- editor/mod.rs: Lines 1729, 1737, 6566
+
+**Action:** Add to `src/event.rs`:
+```rust
+impl ViewEventRange {
+    pub fn len(&self) -> usize {
+        // This is an approximation - view ranges don't have exact byte lengths
+        // Calculate as line difference + column difference for single-line ranges
+        if self.start.view_line == self.end.view_line {
+            self.end.column.saturating_sub(self.start.column)
+        } else {
+            // Multi-line: approximate
+            let line_diff = self.end.view_line.saturating_sub(self.start.view_line);
+            line_diff * 80 + self.end.column
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.start.view_line == self.end.view_line && self.start.column == self.end.column
+    }
+}
+```
+
+#### 3. Selection Struct (Replace Tuples)
+**Impact:** ~15 errors across editor/mod.rs, multi_cursor.rs
+
+**Problem:** Code uses `(ViewPosition, ViewPosition)` tuples and tries to access `.start` and `.end` fields
+
+**Files affected:**
+- editor/mod.rs: Lines 2355, 2356, 2388, 2389, 2392, 2930, 2931, 4048, 5202, 6056, 6058
+- multi_cursor.rs: Lines 32 (twice), 35
+
+**Action:** Create `src/selection.rs`:
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selection {
+    pub start: ViewPosition,
+    pub end: ViewPosition,
+}
+
+impl Selection {
+    pub fn new(start: ViewPosition, end: ViewPosition) -> Self {
+        Self { start, end }
+    }
+
+    pub fn normalized(&self) -> Self {
+        if self.start <= self.end {
+            *self
+        } else {
+            Self { start: self.end, end: self.start }
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+}
+```
+
+Then replace all `(ViewPosition, ViewPosition)` with `Selection`.
+
+#### 4. Cursor Field Access
+**Impact:** 8 errors in navigation/action_convert.rs
+
+**Problem:** Code tries to access `cursor.column` but Cursor doesn't expose this field
+
+**Files affected:**
+- navigation/action_convert.rs: Lines 36, 43, 62, 69, 109, 116, 156, 163
+
+**Action:** Add to `src/cursor.rs`:
+```rust
+impl Cursor {
+    pub fn column(&self) -> usize {
+        self.position.column
+    }
+
+    pub fn view_line(&self) -> usize {
+        self.position.view_line
+    }
+}
+```
+
+Or change uses to `cursor.position.column`.
+
+#### 5. Cursor source_byte Method vs Field
+**Impact:** 3 errors in navigation/action_convert.rs
+
+**Problem:** Code tries to call `cursor.source_byte()` as a method
+
+**Files affected:**
+- navigation/action_convert.rs: Lines 296, 301, 322
+
+**Action:** Change to `cursor.position.source_byte` or add accessor:
+```rust
+impl Cursor {
+    pub fn source_byte(&self) -> Option<usize> {
+        self.position.source_byte
+    }
+}
+```
 
 ---
 
-## position_history.rs
+### Category B: Event Struct Field Mismatches (MEDIUM PRIORITY)
+
+#### 6. Event::Insert and Event::Delete Field Names
+**Impact:** 6 errors
+
+**Problem:** Code uses wrong field names when constructing Event variants
+
+**Files affected:**
+- editor/mod.rs: Lines 105 (Insert missing source_range), 131 (Delete has view_range instead of range), 4108, 5203, 6322, 6464
+
+**Action:** Check `src/event.rs` Event enum definition and ensure all Event construction uses correct field names:
+- `Event::Insert { position: ViewEventPosition, text: String, source_range: Option<...> }`
+- `Event::Delete { range: ViewEventRange, ... }`
+
+---
+
+### Category C: Viewport Migration (top_byte → top_view_line)
+
+#### 7. viewport.top_byte References
+**Impact:** 12 errors
+
+**Files affected:**
+- editor/mod.rs: Lines 2203, 2205, 2220, 2222, 5128
+- split.rs: Lines 218, 222, 249, 250, 332
+- state.rs: Line 705
+- navigation/layout_nav.rs: Line 81
+
+**Action:** Replace all `viewport.top_byte` with `viewport.top_view_line`. The field has been renamed, just update the references.
+
+#### 8. viewport.rs Lifetime Issue
+**Impact:** 1 error
+
+**File:** src/viewport.rs:261
+
+**Problem:** Anonymous lifetime in impl Trait
+```rust
+fn ensure_cursors_visible(
+    &mut self,
+    layout: &Layout,
+    cursors: impl Iterator<Item = &Cursor>,  // ← needs named lifetime
+```
+
+**Action:**
+```rust
+fn ensure_cursors_visible<'a>(
+    &mut self,
+    layout: &Layout,
+    cursors: impl Iterator<Item = &'a Cursor>,
+```
+
+---
+
+### Category D: Missing Editor Methods (Need Restoration or Stubbing)
+
+These methods were removed during refactoring but are still called:
+
+#### 9. Search/Replace Methods
+- `clear_search_highlights()` - 4 calls (editor/mod.rs: 2042, 2050, 2979, 3063)
+- `update_search_highlights()` - 2 calls (editor/mod.rs: 2964, 3238)
+- `prompt_search()` - 2 calls (editor/input.rs: 378, 442)
+- `find_next()` - 1 call (editor/input.rs: 381)
+- `find_prev()` - 1 call (editor/input.rs: 384)
+- `prompt_replace()` - 2 calls (editor/input.rs: 387, 445)
+- `replace_next()` - 1 call (editor/input.rs: 390)
+
+**Action:** These likely need to be reimplemented using view-centric approach. Check if there's search logic elsewhere that can be adapted.
+
+#### 10. LSP Methods
+- `collect_lsp_changes()` - 2 calls (editor/mod.rs: 2017, 6543)
+- `notify_lsp_save()` - 1 call (editor/mod.rs: 2540)
+- `goto_definition()` - 1 call (editor/input.rs: 348)
+- `lsp_hover()` - 1 call (editor/input.rs: 351)
+- `lsp_references()` - 1 call (editor/input.rs: 354)
+- `lsp_rename()` - 1 call (editor/input.rs: 357)
+- `trigger_completion()` - 1 call (editor/input.rs: 345)
+
+**Action:** Check if these were moved to a different module or need view-centric reimplementation.
+
+#### 11. UI/Popup Methods
+- `hide_popup()` - 2 calls (editor/input.rs: 41, 261)
+- `handle_popup_confirm()` - 1 call (editor/input.rs: 258)
+- `open_command_palette()` - 2 calls (editor/input.rs: 252, 448)
+
+**Action:** Check PopupManager for these methods or reimplement.
+
+#### 12. File Operations
+- `file_dialog()` - 1 call (editor/input.rs: 240)
+- `save_all()` - 1 call (editor/input.rs: 249)
+- `prompt_save_as()` - 1 call (editor/input.rs: 436)
+- `prompt_open()` - 1 call (editor/input.rs: 439)
+- `open_recent()` - 1 call (editor/input.rs: 421)
+- `open_config()` - 1 call (editor/input.rs: 424)
+- `open_help()` - 1 call (editor/input.rs: 427)
+- `open_theme_switcher()` - 1 call (editor/input.rs: 430)
+- `open_logs()` - 1 call (editor/input.rs: 454)
+
+**Action:** Either restore these or mark as TODO/unimplemented.
+
+#### 13. Edit Operations
+- `undo()` - 1 call (editor/input.rs: 360)
+- `redo()` - 1 call (editor/input.rs: 363)
+- `paste_clipboard()` - 1 call (editor/input.rs: 372)
+- `select_all()` - 1 call (editor/input.rs: 375)
+
+**Action:** These are core features - must be reimplemented view-centrically.
+
+#### 14. Split Operations
+- `split_horizontal()` - 1 call (editor/input.rs: 400)
+- `split_vertical()` - 1 call (editor/input.rs: 403)
+- `close_split()` - 1 call (editor/input.rs: 406)
+- `toggle_line_wrap()` - 1 call (editor/input.rs: 397)
+- `toggle_compose_mode()` - 1 call (editor/input.rs: 433)
+
+**Action:** Check if these exist elsewhere or need restoration.
+
+#### 15. Other Methods
+- `ensure_active_tab_visible()` - 2 calls (editor/mod.rs: 1694, 1971)
+- `run_plugin_action()` - 1 call (editor/input.rs: 457)
+- `view_pos_to_event()` - 1 call (editor/input.rs: 612)
+- `add_overlay()` - 1 call (editor/mod.rs: 6731)
+- `remove_overlay()` - 1 call (editor/mod.rs: 6761)
+- `handle_mouse()` - 6 calls (script_control.rs: 569, 578, 609, 627, 637, 671)
+
+---
+
+### Category E: Missing Methods on Other Types
+
+#### 16. PopupManager Methods
+- `select_next()` - editor/input.rs:264
+- `select_prev()` - editor/input.rs:267
+- `page_down()` - editor/input.rs:270
+- `page_up()` - editor/input.rs:273
+
+**Action:** Check if PopupManager has these or if they need different names.
+
+#### 17. Viewport Methods
+- `scroll_to()` - editor/mod.rs:2245
+
+**Action:** Implement or use `set_view_top()` instead.
+
+#### 18. MarginManager Methods
+- `line_numbers_enabled()` - editor/input.rs:393
+
+**Action:** Check if this exists or needs implementation.
+
+#### 19. VirtualTextManager Methods
+- `adjust_for_insert()` - state.rs:241
+- `adjust_for_delete()` - state.rs:289
+
+**Action:** Implement view-centric adjustment methods.
+
+#### 20. state.rs Missing Functions
+- `adjust_cursors_for_insert()` - state.rs:259
+- `adjust_cursors_for_delete()` - state.rs:299
+
+**Action:** These were likely free functions - reimplement or move to Cursors type.
+
+#### 21. SplitRenderer Methods
+- `temporary_split_state()` - split.rs:350, ui/split_rendering.rs:140
+- `apply_wrapping_transform()` - split.rs:350
+
+**Action:** Check if these were removed intentionally or need restoration.
+
+#### 22. AnsiBackground Methods
+- `render_background()` - ui/split_rendering.rs:221
+
+**Action:** Check if this was removed or renamed.
+
+#### 23. Theme Field Names
+- `gutter_fg` → ? (ui/split_rendering.rs:395)
+- `gutter_bg` → ? (ui/split_rendering.rs:396)
+- `text_fg` → ? (ui/split_rendering.rs:401)
+
+**Action:** Check Theme struct for current field names.
+
+---
+
+### Category F: Non-Existent Action Variants (DEAD CODE IN input.rs)
+
+These Action variants don't exist in keybindings.rs and should be removed:
+
+#### 24. input.rs Dead Code
+**Lines with non-existent Actions:**
+- 239: `Action::OpenFile` (use `Action::Open`)
+- 248: `Action::SaveAll` (doesn't exist)
+- 319: `Action::Prompt` (doesn't exist)
+- 328: `Action::PopupShowDocumentation` (doesn't exist)
+- 331: `Action::PopupScrollDown` / `PopupScrollUp` (don't exist)
+- 334: `Action::Back` (use `Action::NavigateBack`)
+- 339: `Action::Forward` (use `Action::NavigateForward`)
+- 377: `Action::Find` (doesn't exist)
+- 383: `Action::FindPrev` (doesn't exist)
+- 389: `Action::ReplaceNext` (doesn't exist)
+- 420: `Action::OpenRecent` (doesn't exist)
+- 423: `Action::OpenConfig` (doesn't exist)
+- 426: `Action::OpenHelp` (use `Action::ShowHelp`)
+- 429: `Action::OpenThemeSwitcher` (doesn't exist)
+- 435: `Action::PromptSaveAs` (doesn't exist)
+- 438: `Action::PromptOpen` (doesn't exist)
+- 441: `Action::PromptSearch` (doesn't exist)
+- 444: `Action::PromptReplace` (doesn't exist)
+- 447: `Action::PromptCommand` (doesn't exist)
+- 450: `Action::PromptClose` (doesn't exist)
+- 453: `Action::OpenLogs` (doesn't exist)
+
+**Action:** Remove these match arms entirely or replace with correct Action names if they exist.
+
+#### 25. editor/input.rs hook_registry Access
+**Lines:** 229, 462
+
+**Problem:** `self.hook_registry` doesn't exist on Editor
+
+**Action:** Check what the correct field name is or if this was removed.
+
+---
+
+### Category G: Type Mismatches (Need Case-by-Case Review)
+
+#### 26. Navigation/action_convert.rs Function Signature Mismatches
+**Impact:** 6 errors
+
+**Lines:** 212, 264, 285, 298, 311, 327, 391, 406, 438, 455
+
+**Problem:** Functions in word_navigation.rs likely changed signatures during view-centric refactoring
+
+**Action:** Review word_navigation.rs function signatures and update calls in action_convert.rs to match.
+
+#### 27. editor/mod.rs Type Mismatches
+**Impact:** ~30 errors
+
+**Lines:** Many scattered throughout (1320, 1332, 2943, 4024, 4042, 4043, 4058, 4059, 4095, 4109, 4182, 4398, 4459, 4907, 5118, 5134, 5250, 5253, 5255, 5398, 5399, 5400, 5403, 5836, 6323, 6337, 6465, 6479, 6715, 6716)
+
+**Action:** Review each one - likely ViewPosition vs ViewEventPosition mismatches or byte vs view position confusions.
+
+#### 28. Other Type Mismatches
+- editor/input.rs: 599, 600, 601
+- multi_cursor.rs: 46, 62, 108, 126, 142
+- script_control.rs: 702
+- split.rs: 205, 207, 210, 230, 234, 259, 262, 297-300, 306
+- state.rs: 317
+
+---
+
+### Category H: String Indexing with ViewPosition
+
+#### 29. Buffer/String Indexing Errors
+**Impact:** 4 errors in editor/mod.rs
+
+**Lines:** 5797, 5801, 5814, 5826
+
+**Problem:** Code tries to index strings/buffers with `ViewPosition` instead of `usize`
+
+**Example:**
+```rust
+&text[pos..]  // where pos is ViewPosition
+```
+
+**Action:** Extract byte offset first:
+```rust
+if let Some(byte) = pos.source_byte {
+    &text[byte..]
+} else {
+    // handle view-only position
+}
+```
+
+---
+
+### Category I: Casting ViewPosition to isize
+
+#### 30. Invalid Casts
+**Impact:** 6 errors in editor/mod.rs
+
+**Lines:** 6569 (twice), 6577, 6600, 6609
+
+**Problem:** Code tries `pos as isize` where pos is ViewPosition
+
+**Action:** Use `pos.column as isize` or `pos.view_line as isize` depending on context.
+
+---
+
+## Execution Strategy
+
+### Phase 1: Type System Foundation (CRITICAL - DO THIS FIRST)
+1. **Add trait implementations to ViewPosition/ViewEventPosition** (Category A.1)
+   - File: `src/cursor.rs`
+   - Adds: PartialOrd, Ord, Add, Sub, AddAssign, SubAssign, Display
+
+2. **Add ViewEventRange::len()** (Category A.2)
+   - File: `src/event.rs`
+
+3. **Create Selection struct** (Category A.3)
+   - New file: `src/selection.rs`
+   - Replace all tuple usages
+
+4. **Fix Cursor field access** (Category A.4)
+   - File: `src/cursor.rs`
+   - Add column() and view_line() methods
+
+5. **Fix Cursor source_byte access** (Category A.5)
+   - File: `src/cursor.rs` or fix call sites
+
+### Phase 2: Event and Viewport Fixes
+6. **Fix Event struct field names** (Category B.6)
+   - Files: editor/mod.rs (6 locations)
+
+7. **Fix all top_byte → top_view_line** (Category C.7)
+   - Files: editor/mod.rs, split.rs, state.rs, navigation/layout_nav.rs (12 locations)
+
+8. **Fix viewport.rs lifetime** (Category C.8)
+   - File: src/viewport.rs:261
+
+### Phase 3: Dead Code Cleanup
+9. **Remove non-existent Action variants from input.rs** (Category F.24)
+   - File: editor/input.rs
+   - Remove ~25 match arms with invalid Actions
+
+10. **Fix or remove hook_registry access** (Category F.25)
+    - File: editor/input.rs (2 locations)
+
+### Phase 4: Missing Methods
+11. **Audit and restore Editor methods** (Categories D.9-15)
+    - Decide which to restore vs mark as unimplemented
+    - Focus on: undo/redo, search, LSP, split operations
+
+12. **Fix other type methods** (Categories E.16-23)
+    - PopupManager, Viewport, MarginManager, VirtualTextManager, etc.
+
+### Phase 5: Type Mismatches
+13. **Fix word_navigation function signatures** (Category G.26)
+    - File: navigation/action_convert.rs
+
+14. **Fix buffer/string indexing** (Category H.29)
+    - File: editor/mod.rs (4 locations)
+
+15. **Fix invalid casts** (Category I.30)
+    - File: editor/mod.rs (6 locations)
+
+16. **Fix remaining type mismatches** (Category G.27-28)
+    - Review and fix case-by-case
+
+---
+
+## Module Specifications (Original Planning Docs)
+
+### position_history.rs ✅
 - **Purpose:** VS Code–style back/forward navigation over cursor moves.
-- **Types:**
-  - `PositionEntry { buffer_id: BufferId, position: ViewEventPosition, anchor: Option<ViewEventPosition> }`
-  - `PositionHistory` semantics unchanged (coalesce small moves; commit on buffer switch/large jump/back/forward).
-- **Behavior:**
-  - `record_movement(buffer_id, pos, anchor)`: view positions only; coalesce using view-space distance (line/column deltas or buffer change triggers commit).
-  - `commit_pending_movement`, `push`, `back`, `forward`, `can_go_back/forward`, `current`, `clear`, `len`, `is_empty` stay conceptually identical.
-- **Notes:** No byte math anywhere.
+- **Status:** COMPLETE - fully view-centric
 
-## word_navigation.rs
+### word_navigation.rs ✅
 - **Purpose:** Word boundary helpers.
-- **API split:**
-  - Keep pure byte-level helpers (`is_word_char`, `find_word_start_bytes`, `find_word_end_bytes`).
-  - Buffer-aware byte helpers remain (`find_word_start`, `find_word_end`, `find_word_start_left/right`, `find_completion_word_start`) for source-byte contexts.
-  - Add view helpers: `find_word_start_view`, `find_word_end_view`, `find_word_start_left_view`, `find_word_start_right_view`, `find_completion_word_start_view` that map view → source via layout, scan bytes, then map back; if mapping missing, stay put or operate on visible text window.
-- **Semantics:** Same word rules and completion deletion rules (`.`/`::` stop deletion); entry points in the editor must call view helpers.
+- **Status:** COMPLETE - view helpers implemented
 
-## viewport.rs
+### viewport.rs ⚠️
 - **Purpose:** Scrolling/visible-region tracking.
-- **State:** Replace `top_byte` with `top_view_line` (keep `left_column`, `width/height`, offsets, wrap flag). Optionally cache `top_source_byte` as a hint only.
-- **Behavior:**
-  - `visible_line_count`, `resize`, `set_scroll_offset` unchanged in concept.
-  - `gutter_width` can take optional `Layout` (or total_view_lines) to size digits; buffer-based estimate is a fallback.
-  - `scroll_up/down(lines)` operate on view lines, clamped to `layout.total_view_lines`.
-  - `set_view_top(line)` enforces bounds using `layout.total_view_lines`.
-  - `ensure_visible_in_layout(cursor, layout, gutter_width)`: uses view_line/column + scroll offsets to adjust `top_view_line`; no byte iteration.
-  - Loading/prep: if data needs to be prefetched, use layout.source_range hints; scrolling math stays view-line based.
-- **Notes:** Eliminate `saturating_sub` on positions; columns are separate fields.
+- **Status:** MOSTLY COMPLETE - 1 lifetime error + 1 top_byte reference
 
-## ui/split_rendering.rs
-- **Purpose:** Render splits using `Layout` and view-centric cursors.
-- **Inputs:** `Layout` for the split, `Viewport` (`top_view_line`), cursors (view positions), overlays/margins.
-- **Behavior:**
-  - Slice layout lines for the viewport (`[top_view_line .. top_view_line + height]`).
-  - Gutter numbers: use `line.source_byte` to derive buffer line numbers when available; blank for view-only lines.
-  - Cursor/selection: render directly from view_line/column; multi-cursor via `Cursors::iter()`.
-  - Overlays/virtual text: if source-anchored, map via layout to current view lines before drawing.
-  - Logging: log primary cursor as view position (or `ViewEventPosition`), not bytes.
-- **Notes:** Remove byte math and `Vec<usize>` collectors expecting cursor positions; use view coords or mapped bytes explicitly.
+### ui/split_rendering.rs ⚠️
+- **Purpose:** Render splits using Layout and view-centric cursors.
+- **Status:** MOSTLY COMPLETE - 5 errors (missing methods, theme fields)
 
-## ui/status_bar.rs
+### ui/status_bar.rs ✅
 - **Purpose:** Show cursor position/mode/file info.
-- **Behavior:**
-  - Primary display: view line/column (1-based for UX).
-  - Optional secondary: source line/column if `cursor.source_byte` maps via layout/buffer.
-  - No buffer iterators with view positions; resolve source via layout first.
-  - Multi-cursor count: use `cursors.len()` (add helper on `Cursors` if needed).
+- **Status:** COMPLETE
 
-## editor/render.rs
-- **Purpose:** Main render loop, search, LSP change collection, nav history.
-- **Action conversion:** Already delegated to `navigation::action_convert`.
-- **Rewrites:**
-  - LSP change collection: consume view-centric events; send LSP edits only when `source_range` is present; skip/flag otherwise.
-  - Search find-next/prev: map view cursor → source byte via layout, run buffer search, map hits back to view positions; move cursor with view events.
-  - Position history: record `ViewEventPosition`/anchor, not bytes.
-  - Highlight/selection refresh: accept view ranges; map to source for overlays via layout.
-  - Viewport/cursor sync: entirely view-coordinate + layout-based.
-- **Logging:** Use `{:?}` for view positions or implement Display; no byte formatting.
-
-## editor/input.rs
-- **Purpose:** Input handling, prompts, popups, macro play/record.
-- **Rewrites:**
-  - Goto line/prompt: resolve line → target view_line via layout (or buffer line → source byte → layout); emit `MoveCursor` with `ViewEventPosition`; sync viewport via layout.
-  - Completion confirm: use view word helpers; deletes use `ViewEventRange` + optional `source_range`; inserts carry `ViewEventPosition`.
-  - Position history recording: feed view positions/anchors.
-  - Any viewport comparisons must use view_line vs viewport bounds (no `top_byte`).
-  - Mouse/block selections: view-based; disable or rewrite consistently.
-- **Notes:** No byte-based cursor math remains.
-
-## split.rs (SplitViewState)
-- **Viewport:** store `top_view_line`; rebuild layout accordingly.
-- **Layout metadata:** track `total_view_lines`/`total_injected_lines` to bound scrolling.
-- **Cursor movement helpers:** use `layout_nav` on view positions instead of byte→view mapping.
-
-## navigation/action_convert.rs
+### navigation/action_convert.rs ⚠️
 - **Purpose:** Full action coverage in view space.
-- **Tasks:**
-  - Implement all remaining `Action` variants (word moves/select, block/rect selects, mouse, clipboard, undo/redo glue) in view coordinates.
-  - Edits: always emit view positions/ranges; attach `source_range` only when both endpoints map to real source bytes via layout.
-  - Movements: use `layout_nav` (line/word/page/doc/start/end, block, mouse hit-testing via layout).
-- **Notes:** No byte fallbacks; view-only lines produce view-only events.
+- **Status:** MOSTLY COMPLETE - 23 errors (cursor field access, function signatures)
 
-## actions.rs
-- Remove or re-export the new converter; no byte-based pipeline remains.
+### navigation/layout_nav.rs ⚠️
+- **Purpose:** Pure layout navigation functions.
+- **Status:** MOSTLY COMPLETE - 1 top_byte reference
 
-## state.rs tests/helpers
-- Update tests to construct events with `ViewEventPosition/Range`; expectations in view coords.
-- Rewrite or drop helpers that assume byte positions; source-aware assertions should use layout mappings explicitly.
+### editor/render.rs (part of editor/mod.rs) ⚠️
+- **Purpose:** Main render loop, search, LSP change collection.
+- **Status:** IN PROGRESS - ~120 errors
 
-## Plugins / LSP glue
-- `event_hooks.rs` / `plugin_thread.rs` / `ts_runtime.rs` already view-based; align LSP change path in `render.rs` with view-centric events (only emit LSP edits when `source_range` exists).
+### editor/input.rs ⚠️
+- **Purpose:** Input handling, prompts, popups, macro play/record.
+- **Status:** IN PROGRESS - ~60 errors (mostly dead code + missing methods)
+
+### split.rs ⚠️
+- **Purpose:** Split view state management.
+- **Status:** IN PROGRESS - ~20 errors
+
+### state.rs ⚠️
+- **Purpose:** Editor state and event application.
+- **Status:** IN PROGRESS - ~10 errors
+
+### cursor.rs & multi_cursor.rs ⚠️
+- **Purpose:** Cursor and multi-cursor management.
+- **Status:** IN PROGRESS - ~15 errors
+
+### script_control.rs ⚠️
+- **Purpose:** Plugin script control.
+- **Status:** IN PROGRESS - ~7 errors (missing handle_mouse)
 
 ---
 
-Execution order suggestion: position_history → word_navigation (view helpers) → viewport → split_rendering + status_bar → navigation/action_convert completion → editor/input → editor/render → tests/helpers cleanup.
+## Summary
+
+**Total Errors: 235**
+
+**Breakdown:**
+- Type system (HIGH PRIORITY): ~70 errors
+- Missing methods: ~70 errors
+- top_byte references: 12 errors
+- Dead code (non-existent Actions): ~25 errors
+- Type mismatches: ~40 errors
+- Other: ~18 errors
+
+**Critical Path:**
+1. Fix type system (Phase 1) - unlocks ~70 errors
+2. Fix Event/Viewport (Phase 2) - unlocks ~20 errors
+3. Remove dead code (Phase 3) - removes ~25 errors
+4. The remaining 120 errors require careful case-by-case review
+
+**Estimated complexity:**
+- Phase 1-2: Straightforward, mechanical changes
+- Phase 3: Simple deletion
+- Phase 4-5: Requires understanding original intent and view-centric redesign

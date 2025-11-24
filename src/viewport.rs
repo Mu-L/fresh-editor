@@ -255,10 +255,10 @@ impl Viewport {
     }
 
     /// Ensure all cursors are visible.
-    pub fn ensure_cursors_visible(
+    pub fn ensure_cursors_visible<'a>(
         &mut self,
         layout: &Layout,
-        cursors: impl Iterator<Item = &Cursor>,
+        cursors: impl Iterator<Item = &'a Cursor>,
         gutter_width: usize,
     ) {
         for cursor in cursors {

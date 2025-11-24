@@ -215,11 +215,11 @@ impl SplitViewState {
                 if delta < 0 && view_line == 0 && layout_for_cursor.source_range.start > 0 {
                     let backtrack_bytes = estimated_line_length
                         .saturating_mul(self.viewport.visible_line_count().max(1));
-                    self.viewport.top_byte = layout_for_cursor
+                    let anchor = layout_for_cursor
                         .source_range
                         .start
                         .saturating_sub(backtrack_bytes);
-                    self.viewport.anchor_byte = self.viewport.top_byte;
+                    self.viewport.anchor_byte = anchor;
                     self.layout_dirty = true;
                     layout_for_cursor = self
                         .ensure_layout(buffer, estimated_line_length, wrap_params)
@@ -246,8 +246,8 @@ impl SplitViewState {
                 if (target_view_line >= layout_for_cursor.lines.len())
                     && layout_for_cursor.has_content_below(buffer.len())
                 {
-                    self.viewport.top_byte = layout_for_cursor.source_range.end.min(buffer.len());
-                    self.viewport.anchor_byte = self.viewport.top_byte;
+                    let anchor = layout_for_cursor.source_range.end.min(buffer.len());
+                    self.viewport.anchor_byte = anchor;
                     self.layout_dirty = true;
 
                     layout_for_cursor = self
@@ -329,7 +329,7 @@ impl SplitViewState {
         wrap_params: Option<(usize, usize)>,
     ) {
         let visible_count = self.viewport.visible_line_count().saturating_add(4);
-        let top_byte = self.viewport.top_byte;
+        let top_byte = self.viewport.anchor_byte;
 
         let (mut tokens, source_range) = if let Some(transform) = &self.view_transform {
             (transform.tokens.clone(), transform.range.clone())

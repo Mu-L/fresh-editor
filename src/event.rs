@@ -37,6 +37,27 @@ pub struct ViewEventPosition {
     pub source_byte: Option<usize>,
 }
 
+impl PartialOrd for ViewEventPosition {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ViewEventPosition {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.view_line.cmp(&other.view_line) {
+            std::cmp::Ordering::Equal => self.column.cmp(&other.column),
+            other => other,
+        }
+    }
+}
+
+impl std::fmt::Display for ViewEventPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.view_line, self.column)
+    }
+}
+
 impl ViewEventPosition {
     /// Construct a view position from a source byte (view coordinates unknown during migration)
     pub fn from_source_byte(byte: usize) -> Self {
@@ -98,6 +119,24 @@ impl ViewEventRange {
             start: ViewEventPosition::from_source_byte(range.start),
             end: ViewEventPosition::from_source_byte(range.end),
         }
+    }
+
+    /// Get the approximate length of the range (view-based approximation)
+    pub fn len(&self) -> usize {
+        // This is an approximation - view ranges don't have exact byte lengths
+        // Calculate as line difference + column difference for single-line ranges
+        if self.start.view_line == self.end.view_line {
+            self.end.column.saturating_sub(self.start.column)
+        } else {
+            // Multi-line: approximate using typical line length
+            let line_diff = self.end.view_line.saturating_sub(self.start.view_line);
+            line_diff * 80 + self.end.column
+        }
+    }
+
+    /// Check if the range is empty
+    pub fn is_empty(&self) -> bool {
+        self.start.view_line == self.end.view_line && self.start.column == self.end.column
     }
 }
 

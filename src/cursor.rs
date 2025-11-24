@@ -25,6 +25,55 @@ pub struct ViewPosition {
     pub source_byte: Option<usize>,
 }
 
+impl PartialOrd for ViewPosition {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ViewPosition {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.view_line.cmp(&other.view_line) {
+            std::cmp::Ordering::Equal => self.column.cmp(&other.column),
+            other => other,
+        }
+    }
+}
+
+impl std::ops::Add<usize> for ViewPosition {
+    type Output = ViewPosition;
+    fn add(self, rhs: usize) -> Self::Output {
+        ViewPosition {
+            view_line: self.view_line,
+            column: self.column + rhs,
+            source_byte: self.source_byte,
+        }
+    }
+}
+
+impl std::ops::Sub<usize> for ViewPosition {
+    type Output = ViewPosition;
+    fn sub(self, rhs: usize) -> Self::Output {
+        ViewPosition {
+            view_line: self.view_line,
+            column: self.column.saturating_sub(rhs),
+            source_byte: self.source_byte,
+        }
+    }
+}
+
+impl std::ops::AddAssign<usize> for ViewPosition {
+    fn add_assign(&mut self, rhs: usize) {
+        self.column += rhs;
+    }
+}
+
+impl std::ops::SubAssign<usize> for ViewPosition {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.column = self.column.saturating_sub(rhs);
+    }
+}
+
 /// Position in 2D coordinates (for block selection)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position2D {
@@ -170,6 +219,16 @@ impl Cursor {
 
     pub fn set_source_byte(&mut self, byte: Option<usize>) {
         self.position.source_byte = byte;
+    }
+
+    /// Get the column of the cursor
+    pub fn column(&self) -> usize {
+        self.position.column
+    }
+
+    /// Get the view line of the cursor
+    pub fn view_line(&self) -> usize {
+        self.position.view_line
     }
 }
 
