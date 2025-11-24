@@ -1394,7 +1394,7 @@ impl Editor {
                     old_anchor,
                     new_anchor: target_anchor,
                     old_sticky_column,
-                    new_sticky_column: 0, // Reset sticky column for navigation
+                    new_sticky_column: None, // Reset sticky column for navigation
                 };
                 state.apply(&event);
             }
