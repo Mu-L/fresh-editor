@@ -4690,13 +4690,13 @@ mod tests {
         let args = HookArgs::CursorMoved {
             buffer_id: BufferId(1),
             cursor_id: crate::event::CursorId(0),
-            old_position: 10,
-            new_position: 20,
+            old_position: crate::event::ViewEventPosition::from_source_byte(10),
+            new_position: crate::event::ViewEventPosition::from_source_byte(20),
         };
         let json = manager.hook_args_to_json(&args).unwrap();
         assert!(json.contains("\"buffer_id\":1"));
-        assert!(json.contains("\"old_position\":10"));
-        assert!(json.contains("\"new_position\":20"));
+        assert!(json.contains("\"source_byte\":10"));
+        assert!(json.contains("\"source_byte\":20"));
 
         let args = HookArgs::EditorInitialized;
         let json = manager.hook_args_to_json(&args).unwrap();

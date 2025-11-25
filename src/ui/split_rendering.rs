@@ -582,7 +582,7 @@ fn should_show_line_number(view_line: &ViewLine) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::view_pipeline::{ViewTokenWire, ViewTokenWireKind};
+    use crate::plugin_api::{ViewTokenWire, ViewTokenWireKind};
 
     fn simple_layout(text: &str) -> Layout {
         let token = ViewTokenWire {

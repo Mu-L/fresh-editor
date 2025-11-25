@@ -337,10 +337,11 @@ impl StatusBarRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prompt::PromptType;
 
     #[test]
     fn basic_prompt_cursor_position() {
-        let mut prompt = Prompt::new("Test".to_string());
+        let mut prompt = Prompt::new("Test".to_string(), PromptType::Command);
         prompt.input = "input".to_string();
         prompt.cursor_pos = 2;
         // Rendering can't be unit-tested easily here without a terminal; just ensure accessors work.

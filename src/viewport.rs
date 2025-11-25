@@ -302,7 +302,8 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::view_pipeline::{ViewTokenWire, ViewTokenWireKind};
+    use crate::plugin_api::{ViewTokenWire, ViewTokenWireKind};
+    use crate::text_buffer::Buffer;
 
     fn simple_layout(text: &str) -> Layout {
         let token = ViewTokenWire {
@@ -345,13 +346,14 @@ mod tests {
 
     #[test]
     fn cursor_screen_position_accounts_for_offsets() {
-        let layout = simple_layout("line1\nline2\n");
+        let _layout = simple_layout("line1\nline2\n");
+        let mut buffer = Buffer::from_str_test("line1\nline2\n");
         let mut vp = Viewport::new(10, 2);
         vp.top_view_line = 1;
         vp.left_column = 2;
         let cursor = cursor_at(1, 5, Some(5));
-        let (x, y) = vp.cursor_screen_position(&layout, &cursor, 3);
+        let (x, y) = vp.cursor_screen_position(&mut buffer, &cursor);
         assert_eq!(y, 0); // second line now at top
-        assert_eq!(x, (5usize.saturating_sub(2) + 3) as u16);
+        assert_eq!(x, (5usize.saturating_sub(2)) as u16);
     }
 }

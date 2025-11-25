@@ -3,10 +3,18 @@
 mod common;
 
 use fresh::{
-    event::{CursorId, Event, EventLog},
+    event::{CursorId, Event, EventLog, ViewEventPosition, ViewEventRange},
     overlay::OverlayNamespace,
     state::EditorState,
 };
+
+fn pos(byte: usize) -> ViewEventPosition {
+    ViewEventPosition::from_source_byte(byte)
+}
+
+fn range(start: usize, end: usize) -> ViewEventRange {
+    ViewEventRange::from_source_range(start..end)
+}
 
 /// Test that cursor positions are correctly adjusted after buffer edits
 #[test]
@@ -18,46 +26,62 @@ fn test_buffer_cursor_adjustment_on_insert() {
 
     // Insert some initial text with the original primary cursor
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "hello world".to_string(),
         cursor_id: original_primary,
     });
 
     // Original primary cursor should be at end of inserted text (position 11)
-    assert_eq!(state.cursors.get(original_primary).unwrap().position, 11);
+    assert_eq!(
+        state.cursors.get(original_primary).unwrap().position.source_byte,
+        Some(11)
+    );
 
     // Add a second cursor at position 6 (start of "world")
     // Note: This will make CursorId(1) the new primary
     state.apply(&Event::AddCursor {
         cursor_id: CursorId(1),
-        position: 6,
+        position: pos(6),
         anchor: None,
     });
 
     // Verify CursorId(1) is at position 6 and is now primary
-    assert_eq!(state.cursors.get(CursorId(1)).unwrap().position, 6);
+    assert_eq!(
+        state.cursors.get(CursorId(1)).unwrap().position.source_byte,
+        Some(6)
+    );
     assert_eq!(state.cursors.primary_id(), CursorId(1));
 
     // Insert text at beginning with the ORIGINAL primary cursor (not the new one)
     // This tests that non-editing cursors get adjusted
     let insert_len = "INSERTED ".len();
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "INSERTED ".to_string(),
         cursor_id: original_primary, // Using original cursor, not the new primary
     });
 
     // The cursor that made the edit (original_primary) should be at position 0 + insert_len = 9
     assert_eq!(
-        state.cursors.get(original_primary).unwrap().position,
-        insert_len,
+        state
+            .cursors
+            .get(original_primary)
+            .unwrap()
+            .position
+            .source_byte,
+        Some(insert_len),
         "Cursor that made the edit should be at end of insertion"
     );
 
     // CursorId(1) was at position 6, should have moved forward by insert_len to position 15
     assert_eq!(
-        state.cursors.get(CursorId(1)).unwrap().position,
-        6 + insert_len,
+        state
+            .cursors
+            .get(CursorId(1))
+            .unwrap()
+            .position
+            .source_byte,
+        Some(6 + insert_len),
         "Non-editing cursor should be adjusted by insertion length"
     );
 
@@ -72,7 +96,7 @@ fn test_buffer_cursor_adjustment_on_delete() {
 
     // Insert initial text
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "hello beautiful world".to_string(),
         cursor_id: state.cursors.primary_id(),
     });
@@ -80,20 +104,21 @@ fn test_buffer_cursor_adjustment_on_delete() {
     // Add cursor at position 16 (start of "world")
     state.apply(&Event::AddCursor {
         cursor_id: CursorId(1),
-        position: 16,
+        position: pos(16),
         anchor: None,
     });
 
     // Delete "beautiful " (positions 6-16)
     state.apply(&Event::Delete {
-        range: 6..16,
+        range: range(6, 16),
+        source_range: Some(6..16),
         deleted_text: "beautiful ".to_string(),
         cursor_id: state.cursors.primary_id(),
     });
 
     // Second cursor should have moved back to position 6
     if let Some(cursor) = state.cursors.get(CursorId(1)) {
-        assert_eq!(cursor.position, 6);
+        assert_eq!(cursor.position.source_byte, Some(6));
     }
 
     // Buffer content should be correct
@@ -110,7 +135,7 @@ fn test_state_eventlog_undo_redo() {
 
     // Perform a series of edits - each insert at the END of the buffer
     let event1 = Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "a".to_string(),
         cursor_id,
     };
@@ -118,7 +143,7 @@ fn test_state_eventlog_undo_redo() {
     state.apply(&event1);
 
     let event2 = Event::Insert {
-        position: state.buffer.len(),
+        position: pos(state.buffer.len()),
         text: "b".to_string(),
         cursor_id,
     };
@@ -126,7 +151,7 @@ fn test_state_eventlog_undo_redo() {
     state.apply(&event2);
 
     let event3 = Event::Insert {
-        position: state.buffer.len(),
+        position: pos(state.buffer.len()),
         text: "c".to_string(),
         cursor_id,
     };
@@ -168,7 +193,7 @@ fn test_undo_redo_cursor_positions() {
     for ch in "hello".chars() {
         let pos = state.buffer.len();
         let event = Event::Insert {
-            position: pos,
+            position: pos(pos),
             text: ch.to_string(),
             cursor_id,
         };
@@ -177,8 +202,8 @@ fn test_undo_redo_cursor_positions() {
     }
 
     assert_eq!(state.buffer.to_string(), "hello");
-    let cursor_after_typing = state.cursors.primary().position;
-    assert_eq!(cursor_after_typing, 5);
+    let cursor_after_typing = state.cursors.primary().position.source_byte;
+    assert_eq!(cursor_after_typing, Some(5));
 
     // Undo twice (remove 'o' and 'l')
     for _ in 0..2 {
@@ -189,7 +214,7 @@ fn test_undo_redo_cursor_positions() {
     }
 
     assert_eq!(state.buffer.to_string(), "hel");
-    assert_eq!(state.cursors.primary().position, 3);
+    assert_eq!(state.cursors.primary().position.source_byte, Some(3));
 
     // Redo twice
     for _ in 0..2 {
@@ -200,7 +225,7 @@ fn test_undo_redo_cursor_positions() {
     }
 
     assert_eq!(state.buffer.to_string(), "hello");
-    assert_eq!(state.cursors.primary().position, 5);
+    assert_eq!(state.cursors.primary().position.source_byte, Some(5));
 }
 
 /// Test viewport ensures cursor stays visible after edits
@@ -213,7 +238,7 @@ fn test_viewport_tracks_cursor_through_edits() {
     // Insert many lines to make content scroll
     for i in 0..20 {
         let event = Event::Insert {
-            position: state.buffer.len(),
+            position: pos(state.buffer.len()),
             text: format!("Line {i}\n"),
             cursor_id,
         };
@@ -221,7 +246,7 @@ fn test_viewport_tracks_cursor_through_edits() {
     }
 
     // Cursor should be at the end
-    let cursor_pos = state.cursors.primary().position;
+    let cursor_pos = state.cursors.primary().position.source_byte.unwrap_or(0);
     assert!(cursor_pos > 0);
 
     // Cursor position should be within buffer bounds
@@ -238,7 +263,7 @@ fn test_multi_cursor_normalization() {
 
     // Insert initial text
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "hello world".to_string(),
         cursor_id: state.cursors.primary_id(),
     });
@@ -246,13 +271,13 @@ fn test_multi_cursor_normalization() {
     // Add overlapping cursors
     state.apply(&Event::AddCursor {
         cursor_id: CursorId(1),
-        position: 5,
+        position: pos(5),
         anchor: None,
     });
 
     state.apply(&Event::AddCursor {
         cursor_id: CursorId(2),
-        position: 6,
+        position: pos(6),
         anchor: None,
     });
 
@@ -263,7 +288,10 @@ fn test_multi_cursor_normalization() {
     // This depends on Cursors::normalize() implementation
     // For now, just verify they all exist and are in valid positions
     for (_, cursor) in state.cursors.iter() {
-        assert!(cursor.position <= state.buffer.len());
+        assert!(
+            cursor.position.source_byte.unwrap_or(0) <= state.buffer.len(),
+            "Cursor byte pos should be within buffer"
+        );
     }
 }
 
@@ -274,26 +302,26 @@ fn test_viewport_resize_maintains_cursor() {
 
     // Insert text and move cursor to middle
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "line1\nline2\nline3\nline4\nline5\n".to_string(),
         cursor_id: state.cursors.primary_id(),
     });
 
     state.apply(&Event::MoveCursor {
         cursor_id: state.cursors.primary_id(),
-        old_position: 0,
-        new_position: 12, // Middle of line 2
+        old_position: pos(0),
+        new_position: pos(12), // Middle of line 2
         old_anchor: None,
         new_anchor: None,
-        old_sticky_column: 0,
-        new_sticky_column: 0,
+        old_sticky_column: Some(0),
+        new_sticky_column: Some(0),
     });
 
     // Resize to smaller height
     state.resize(80, 5);
 
     // Cursor should still be within buffer bounds
-    let cursor_pos = state.cursors.primary().position;
+    let cursor_pos = state.cursors.primary().position.source_byte.unwrap_or(0);
     assert!(
         cursor_pos <= state.buffer.len(),
         "After resize, cursor should be within buffer bounds"
@@ -309,7 +337,7 @@ fn test_overlay_events() {
 
     // Insert some text
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "hello world".to_string(),
         cursor_id: CursorId(0),
     });
@@ -453,7 +481,7 @@ fn test_overlay_undo_redo() {
 
     // Insert text and add overlay
     let event1 = Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "hello".to_string(),
         cursor_id: CursorId(0),
     };
@@ -573,7 +601,7 @@ fn test_overlay_priority_layering() {
 
     // Insert text
     state.apply(&Event::Insert {
-        position: 0,
+        position: pos(0),
         text: "hello world".to_string(),
         cursor_id: CursorId(0),
     });
@@ -694,13 +722,14 @@ fn test_diagnostic_overlay_visual_rendering() {
 
 /// Comprehensive tests for Event::inverse()
 mod event_inverse_tests {
+    use super::{pos, range};
     use fresh::event::{CursorId, Event, OverlayFace, UnderlineStyle};
     use fresh::overlay::{OverlayHandle, OverlayNamespace};
 
     #[test]
     fn test_insert_inverse() {
         let event = Event::Insert {
-            position: 10,
+            position: pos(10),
             text: "hello".to_string(),
             cursor_id: CursorId(0),
         };
@@ -712,8 +741,10 @@ mod event_inverse_tests {
                 range,
                 deleted_text,
                 cursor_id,
+                source_range,
             } => {
-                assert_eq!(range, 10..15);
+                assert_eq!(range, range(10, 15));
+                assert_eq!(source_range, Some(10..15));
                 assert_eq!(deleted_text, "hello");
                 assert_eq!(cursor_id, CursorId::UNDO_SENTINEL);
             }
@@ -724,7 +755,8 @@ mod event_inverse_tests {
     #[test]
     fn test_delete_inverse() {
         let event = Event::Delete {
-            range: 5..10,
+            range: range(5, 10),
+            source_range: Some(5..10),
             deleted_text: "world".to_string(),
             cursor_id: CursorId(1),
         };
@@ -737,7 +769,7 @@ mod event_inverse_tests {
                 text,
                 cursor_id,
             } => {
-                assert_eq!(position, 5);
+                assert_eq!(position, pos(5));
                 assert_eq!(text, "world");
                 assert_eq!(cursor_id, CursorId::UNDO_SENTINEL);
             }
@@ -749,8 +781,8 @@ mod event_inverse_tests {
     fn test_add_cursor_inverse() {
         let event = Event::AddCursor {
             cursor_id: CursorId(2),
-            position: 42,
-            anchor: Some(10),
+            position: pos(42),
+            anchor: Some(pos(10)),
         };
 
         let inverse = event.inverse().expect("AddCursor should have inverse");
@@ -762,8 +794,8 @@ mod event_inverse_tests {
                 anchor,
             } => {
                 assert_eq!(cursor_id, CursorId(2));
-                assert_eq!(position, 42);
-                assert_eq!(anchor, Some(10));
+                assert_eq!(position, pos(42));
+                assert_eq!(anchor, Some(pos(10)));
             }
             _ => panic!("AddCursor inverse should be RemoveCursor"),
         }
@@ -773,7 +805,7 @@ mod event_inverse_tests {
     fn test_remove_cursor_inverse() {
         let event = Event::RemoveCursor {
             cursor_id: CursorId(3),
-            position: 100,
+            position: pos(100),
             anchor: None,
         };
 
@@ -786,7 +818,7 @@ mod event_inverse_tests {
                 anchor,
             } => {
                 assert_eq!(cursor_id, CursorId(3));
-                assert_eq!(position, 100);
+                assert_eq!(position, pos(100));
                 assert_eq!(anchor, None);
             }
             _ => panic!("RemoveCursor inverse should be AddCursor"),
@@ -797,12 +829,12 @@ mod event_inverse_tests {
     fn test_move_cursor_inverse() {
         let event = Event::MoveCursor {
             cursor_id: CursorId(0),
-            old_position: 10,
-            new_position: 20,
+            old_position: pos(10),
+            new_position: pos(20),
             old_anchor: None,
-            new_anchor: Some(15),
-            old_sticky_column: 5,
-            new_sticky_column: 10,
+            new_anchor: Some(pos(15)),
+            old_sticky_column: Some(5),
+            new_sticky_column: Some(10),
         };
 
         let inverse = event.inverse().expect("MoveCursor should have inverse");
@@ -818,12 +850,12 @@ mod event_inverse_tests {
                 new_sticky_column,
             } => {
                 assert_eq!(cursor_id, CursorId(0));
-                assert_eq!(old_position, 20); // Swapped
-                assert_eq!(new_position, 10); // Swapped
-                assert_eq!(old_anchor, Some(15)); // Swapped
+                assert_eq!(old_position, pos(20)); // Swapped
+                assert_eq!(new_position, pos(10)); // Swapped
+                assert_eq!(old_anchor, Some(pos(15))); // Swapped
                 assert_eq!(new_anchor, None); // Swapped
-                assert_eq!(old_sticky_column, 10); // Swapped
-                assert_eq!(new_sticky_column, 5); // Swapped
+                assert_eq!(old_sticky_column, Some(10)); // Swapped
+                assert_eq!(new_sticky_column, Some(5)); // Swapped
             }
             _ => panic!("MoveCursor inverse should be MoveCursor"),
         }
@@ -894,17 +926,17 @@ mod event_inverse_tests {
         let batch = Event::Batch {
             events: vec![
                 Event::Insert {
-                    position: 0,
+                    position: pos(0),
                     text: "a".to_string(),
                     cursor_id: CursorId(0),
                 },
                 Event::Insert {
-                    position: 1,
+                    position: pos(1),
                     text: "b".to_string(),
                     cursor_id: CursorId(0),
                 },
                 Event::Insert {
-                    position: 2,
+                    position: pos(2),
                     text: "c".to_string(),
                     cursor_id: CursorId(0),
                 },
@@ -933,7 +965,7 @@ mod event_inverse_tests {
                         deleted_text,
                         ..
                     } => {
-                        assert_eq!(*range, 2..3);
+                        assert_eq!(*range, range(2, 3));
                         assert_eq!(deleted_text, "c");
                     }
                     _ => panic!("Expected Delete"),
@@ -946,7 +978,7 @@ mod event_inverse_tests {
                         deleted_text,
                         ..
                     } => {
-                        assert_eq!(*range, 0..1);
+                        assert_eq!(*range, range(0, 1));
                         assert_eq!(deleted_text, "a");
                     }
                     _ => panic!("Expected Delete"),
@@ -961,7 +993,7 @@ mod event_inverse_tests {
         let batch = Event::Batch {
             events: vec![
                 Event::Insert {
-                    position: 0,
+                    position: pos(0),
                     text: "a".to_string(),
                     cursor_id: CursorId(0),
                 },
@@ -979,12 +1011,12 @@ mod event_inverse_tests {
         let inner_batch = Event::Batch {
             events: vec![
                 Event::Insert {
-                    position: 0,
+                    position: pos(0),
                     text: "x".to_string(),
                     cursor_id: CursorId(0),
                 },
                 Event::Insert {
-                    position: 1,
+                    position: pos(1),
                     text: "y".to_string(),
                     cursor_id: CursorId(0),
                 },
@@ -995,13 +1027,13 @@ mod event_inverse_tests {
         let outer_batch = Event::Batch {
             events: vec![
                 Event::Insert {
-                    position: 0,
+                    position: pos(0),
                     text: "a".to_string(),
                     cursor_id: CursorId(0),
                 },
                 inner_batch,
                 Event::Insert {
-                    position: 3,
+                    position: pos(3),
                     text: "z".to_string(),
                     cursor_id: CursorId(0),
                 },
@@ -1040,7 +1072,7 @@ mod event_inverse_tests {
     #[test]
     fn test_double_inverse_equals_original() {
         let original = Event::Insert {
-            position: 5,
+            position: pos(5),
             text: "test".to_string(),
             cursor_id: CursorId(0),
         };
@@ -1055,7 +1087,7 @@ mod event_inverse_tests {
                 text,
                 cursor_id,
             } => {
-                assert_eq!(position, 5);
+                assert_eq!(position, pos(5));
                 assert_eq!(text, "test");
                 assert_eq!(cursor_id, CursorId::UNDO_SENTINEL);
             }
@@ -1067,12 +1099,12 @@ mod event_inverse_tests {
     fn test_move_cursor_double_inverse() {
         let original = Event::MoveCursor {
             cursor_id: CursorId(0),
-            old_position: 10,
-            new_position: 20,
+            old_position: pos(10),
+            new_position: pos(20),
             old_anchor: None,
-            new_anchor: Some(15),
-            old_sticky_column: 5,
-            new_sticky_column: 10,
+            new_anchor: Some(pos(15)),
+            old_sticky_column: Some(5),
+            new_sticky_column: Some(10),
         };
 
         let inverse = original.inverse().expect("Should have inverse");
@@ -1090,12 +1122,12 @@ mod event_inverse_tests {
                 new_sticky_column,
             } => {
                 assert_eq!(cursor_id, CursorId(0));
-                assert_eq!(old_position, 10);
-                assert_eq!(new_position, 20);
+                assert_eq!(old_position, pos(10));
+                assert_eq!(new_position, pos(20));
                 assert_eq!(old_anchor, None);
-                assert_eq!(new_anchor, Some(15));
-                assert_eq!(old_sticky_column, 5);
-                assert_eq!(new_sticky_column, 10);
+                assert_eq!(new_anchor, Some(pos(15)));
+                assert_eq!(old_sticky_column, Some(5));
+                assert_eq!(new_sticky_column, Some(10));
             }
             _ => panic!("Double inverse should be MoveCursor"),
         }

@@ -1032,14 +1032,22 @@ impl DocumentModel for EditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::CursorId;
+    use crate::event::{CursorId, ViewEventPosition, ViewEventRange};
+
+    fn pos(byte: usize) -> ViewEventPosition {
+        ViewEventPosition::from_source_byte(byte)
+    }
+
+    fn range(start: usize, end: usize) -> ViewEventRange {
+        ViewEventRange::from_source_range(start..end)
+    }
 
     #[test]
     fn test_state_new() {
         let state = EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
         assert!(state.buffer.is_empty());
         assert_eq!(state.cursors.count(), 1);
-        assert_eq!(state.cursors.primary().position, 0);
+        assert_eq!(state.cursors.primary().position.source_byte, Some(0));
     }
 
     #[test]
@@ -1049,13 +1057,13 @@ mod tests {
         let cursor_id = state.cursors.primary_id();
 
         state.apply(&Event::Insert {
-            position: 0,
+            position: pos(0),
             text: "hello".to_string(),
             cursor_id,
         });
 
         assert_eq!(state.buffer.to_string(), "hello");
-        assert_eq!(state.cursors.primary().position, 5);
+        assert_eq!(state.cursors.primary().position.source_byte, Some(5));
         assert!(state.buffer.is_modified());
     }
 
@@ -1067,19 +1075,20 @@ mod tests {
 
         // Insert then delete
         state.apply(&Event::Insert {
-            position: 0,
+            position: pos(0),
             text: "hello world".to_string(),
             cursor_id,
         });
 
         state.apply(&Event::Delete {
-            range: 5..11,
+            range: range(5, 11),
+            source_range: Some(5..11),
             deleted_text: " world".to_string(),
             cursor_id,
         });
 
         assert_eq!(state.buffer.to_string(), "hello");
-        assert_eq!(state.cursors.primary().position, 5);
+        assert_eq!(state.cursors.primary().position.source_byte, Some(5));
     }
 
     #[test]
@@ -1118,12 +1127,12 @@ mod tests {
 
         let events = vec![
             Event::Insert {
-                position: 0,
+                position: pos(0),
                 text: "hello ".to_string(),
                 cursor_id,
             },
             Event::Insert {
-                position: 6,
+                position: pos(6),
                 text: "world".to_string(),
                 cursor_id,
             },
@@ -1143,20 +1152,20 @@ mod tests {
         // Add a second cursor at position 5
         state.apply(&Event::AddCursor {
             cursor_id: CursorId(1),
-            position: 5,
+            position: pos(5),
             anchor: None,
         });
 
         // Insert at position 0 - should push second cursor forward
         state.apply(&Event::Insert {
-            position: 0,
+            position: pos(0),
             text: "abc".to_string(),
             cursor_id,
         });
 
         // Second cursor should be at position 5 + 3 = 8
         if let Some(cursor) = state.cursors.get(CursorId(1)) {
-            assert_eq!(cursor.position, 8);
+            assert_eq!(cursor.position.source_byte, Some(8));
         }
     }
 
@@ -1450,7 +1459,7 @@ mod tests {
             // Insert "beautiful " at position 6 using Event
             let cursor_id = state.cursors.primary_id();
             state.apply(&Event::Insert {
-                position: 6,
+                position: pos(6),
                 text: "beautiful ".to_string(),
                 cursor_id,
             });
@@ -1486,7 +1495,8 @@ mod tests {
             // Delete "beautiful " (positions 6-16) using Event
             let cursor_id = state.cursors.primary_id();
             state.apply(&Event::Delete {
-                range: 6..16,
+                range: range(6, 16),
+                source_range: Some(6..16),
                 deleted_text: "beautiful ".to_string(),
                 cursor_id,
             });

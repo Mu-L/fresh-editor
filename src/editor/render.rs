@@ -114,6 +114,45 @@ impl Editor {
             );
         }
 
+        // Menu bar.
+        let checkbox_states = crate::ui::menu::CheckboxStates {
+            line_numbers: self
+                .buffers
+                .get(&self.active_buffer)
+                .map(|s| s.margins.show_line_numbers)
+                .unwrap_or(true),
+            line_wrap: self
+                .buffers
+                .get(&self.active_buffer)
+                .map(|s| s.viewport.line_wrap_enabled)
+                .unwrap_or(false),
+            compose_mode: self
+                .buffers
+                .get(&self.active_buffer)
+                .map(|s| s.compose_width.is_some())
+                .unwrap_or(false),
+            file_explorer: self.file_explorer_visible,
+            mouse_capture: self.mouse_enabled,
+        };
+
+        let selection_active = self
+            .buffers
+            .get(&self.active_buffer)
+            .map(|s| s.cursors.primary().anchor.is_some())
+            .unwrap_or(false);
+
+        crate::ui::menu::MenuRenderer::render(
+            frame,
+            menu_bar_area,
+            &self.config.menu,
+            &self.menu_state,
+            &self.keybindings,
+            &self.theme,
+            self.mouse_state.hover_target.as_ref(),
+            selection_active,
+            &checkbox_states,
+        );
+
         // Prompt line.
         if let Some(prompt) = &self.prompt {
             crate::ui::status_bar::StatusBarRenderer::render_prompt(
@@ -122,6 +161,32 @@ impl Editor {
                 prompt,
                 &self.theme,
             );
+
+            // Suggestions popup (for command palette, autocomplete, etc.)
+            if !prompt.suggestions.is_empty() {
+                // Position suggestions popup above the prompt line
+                let popup_height = (prompt.suggestions.len() + 2).min(15) as u16;
+                let popup_width = (size.width / 2).max(40).min(size.width - 4);
+                let popup_x = (size.width - popup_width) / 2;
+                let popup_y = main_chunks[prompt_line_idx]
+                    .y
+                    .saturating_sub(popup_height);
+
+                let suggestions_area = ratatui::layout::Rect {
+                    x: popup_x,
+                    y: popup_y,
+                    width: popup_width,
+                    height: popup_height,
+                };
+
+                crate::ui::suggestions::SuggestionsRenderer::render_with_hover(
+                    frame,
+                    suggestions_area,
+                    prompt,
+                    &self.theme,
+                    self.mouse_state.hover_target.as_ref(),
+                );
+            }
         }
     }
 

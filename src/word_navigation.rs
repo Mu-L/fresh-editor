@@ -360,7 +360,8 @@ pub fn find_completion_word_start_view(
 mod tests {
     use super::*;
     use crate::text_buffer::Buffer;
-    use crate::ui::view_pipeline::{Layout, ViewTokenWire, ViewTokenWireKind};
+    use crate::plugin_api::{ViewTokenWire, ViewTokenWireKind};
+    use crate::ui::view_pipeline::Layout;
 
     fn vp(line: usize, col: usize, source: Option<usize>) -> ViewPosition {
         ViewPosition {
