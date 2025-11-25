@@ -24,8 +24,8 @@ fn test_add_cursor_next_match() {
 
     // Verify selection
     let primary = harness.editor().active_state().cursors.primary();
-    assert_eq!(primary.position, 3);
-    assert_eq!(primary.anchor, Some(0));
+    assert_eq!(primary.position.source_byte, Some(3));
+    assert_eq!(primary.anchor.and_then(|a| a.source_byte), Some(0));
 
     // Press Ctrl+D to add cursor at next "foo"
     harness.editor_mut().add_cursor_at_next_match();
@@ -155,12 +155,11 @@ fn test_remove_secondary_cursors() {
     // Should have 3 cursors
     assert_eq!(harness.editor().active_state().cursors.iter().count(), 3);
 
-    // Remove secondary cursors
+    // Remove secondary cursors via action
     harness
         .editor_mut()
-        .active_state_mut()
-        .cursors
-        .remove_secondary();
+        .handle_action(fresh::keybindings::Action::RemoveSecondaryCursors)
+        .unwrap();
     harness.render().unwrap();
 
     // Should have only 1 cursor now

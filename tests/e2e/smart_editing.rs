@@ -39,7 +39,7 @@ fn test_auto_close_parenthesis() {
     // Cursor should be between the parens
     let cursor_pos = harness.editor().active_state().cursors.primary().position;
     assert_eq!(
-        cursor_pos, 8,
+        cursor_pos.source_byte.unwrap(), 8,
         "Cursor should be between parens (at position 8)"
     );
 }
@@ -700,7 +700,7 @@ fn test_jump_to_next_error() {
     let cursor_pos = harness.editor().active_state().cursors.primary().position;
     // Line 0: "line1\n" = 6 bytes, so line 1 starts at byte 6
     assert_eq!(
-        cursor_pos, 6,
+        cursor_pos.source_byte.unwrap(), 6,
         "Cursor should jump to first error (line 2, byte 6)"
     );
 
@@ -749,7 +749,7 @@ fn test_jump_to_previous_error() {
     // Line 0-2: "line1\nline2\nline3\n" = 18 bytes
     let cursor_pos = harness.editor().active_state().cursors.primary().position;
     assert_eq!(
-        cursor_pos, 18,
+        cursor_pos.source_byte.unwrap(), 18,
         "Cursor should jump to last error (line 4, byte 18)"
     );
 
@@ -790,7 +790,7 @@ fn test_jump_to_next_error_wraps() {
 
     let cursor_pos = harness.editor().active_state().cursors.primary().position;
     assert_eq!(
-        cursor_pos, 0,
+        cursor_pos.source_byte.unwrap(), 0,
         "Cursor should wrap to first error (line 1, byte 0)"
     );
 }
@@ -825,7 +825,7 @@ fn test_jump_to_error_no_diagnostics() {
 
     // Cursor should not have moved
     let cursor_pos = harness.editor().active_state().cursors.primary().position;
-    assert_eq!(cursor_pos, 0, "Cursor should not move when no errors");
+    assert_eq!(cursor_pos.source_byte.unwrap(), 0, "Cursor should not move when no errors");
 }
 
 /// Test jumping between multiple errors in sequence
@@ -911,7 +911,7 @@ fn test_block_selection_start() {
 
     // Cursor should have moved right
     assert_eq!(
-        cursor.position, 1,
+        cursor.position.source_byte.unwrap(), 1,
         "Cursor position should be 1 after moving right"
     );
 }
@@ -949,7 +949,7 @@ fn test_block_selection_vertical() {
         .editor()
         .active_state()
         .buffer
-        .get_line_number(cursor.position);
+        .get_line_number(cursor.position.source_byte.unwrap());
     assert_eq!(cur_line, 1, "Cursor should be on line 1 after moving down");
 }
 
@@ -989,19 +989,9 @@ fn test_block_selection_rectangle() {
     assert_eq!(anchor.line, 0);
     assert_eq!(anchor.column, 1);
 
-    // Get cursor's 2D position
-    let cur_line = harness
-        .editor()
-        .active_state()
-        .buffer
-        .get_line_number(cursor.position);
-    let line_start = harness
-        .editor()
-        .active_state()
-        .buffer
-        .line_start_offset(cur_line)
-        .unwrap_or(0);
-    let cur_col = cursor.position - line_start;
+    // Get cursor's 2D position from ViewPosition
+    let cur_line = cursor.position.view_line;
+    let cur_col = cursor.position.column;
 
     // Cursor should be at line 1, column 3 (after moving right twice then down)
     assert_eq!(cur_line, 1, "Cursor should be on line 1");
@@ -1042,7 +1032,7 @@ fn test_block_selection_left() {
     assert_eq!(anchor.column, 3);
 
     // Cursor should now be at column 2 (after moving left)
-    assert_eq!(cursor.position, 2, "Cursor should be at position 2");
+    assert_eq!(cursor.position.source_byte.unwrap(), 2, "Cursor should be at position 2");
 }
 
 /// Test that block selection up works
@@ -1076,6 +1066,6 @@ fn test_block_selection_up() {
         .editor()
         .active_state()
         .buffer
-        .get_line_number(cursor.position);
+        .get_line_number(cursor.position.source_byte.unwrap());
     assert_eq!(cur_line, 1, "Cursor should be on line 1 after moving up");
 }

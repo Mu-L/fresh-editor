@@ -29,8 +29,8 @@ fn test_selection_visual_rendering() {
     assert!(selection.is_some(), "Cursor should have a selection");
 
     let range = selection.unwrap();
-    assert_eq!(range.start, 0, "Selection should start at position 0");
-    assert_eq!(range.end, 5, "Selection should end at position 5");
+    assert_eq!(range.start.source_byte, Some(0), "Selection should start at position 0");
+    assert_eq!(range.end.source_byte, Some(5), "Selection should end at position 5");
 
     println!("Cursor position: {cursor_pos}, Selection: {range:?}");
 
@@ -38,7 +38,7 @@ fn test_selection_visual_rendering() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "Hello", "Selected text should be 'Hello'");
 
     // Get the screen rendering
@@ -132,7 +132,7 @@ fn test_select_word() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "world", "Should select the word 'world'");
 }
 
@@ -162,7 +162,7 @@ fn test_select_word_at_start() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "world", "Should select the word 'world'");
 }
 
@@ -192,7 +192,7 @@ fn test_select_word_at_end() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "hello", "Should select the word 'hello'");
 }
 
@@ -232,7 +232,7 @@ fn test_select_line() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "second line\n",
         "Should select the entire line including newline"
@@ -262,7 +262,7 @@ fn test_select_line_first() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "first line\n",
         "Should select the first line"
@@ -287,7 +287,7 @@ fn test_select_line_last() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "second line",
         "Should select the last line without newline"
@@ -371,7 +371,7 @@ fn test_expand_selection() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "lo",
         "First expand should select from cursor to end of word"
@@ -387,7 +387,7 @@ fn test_expand_selection() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "lo world",
         "Second expand should include next word"
@@ -403,7 +403,7 @@ fn test_expand_selection() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "lo world test",
         "Third expand should include third word"
@@ -436,7 +436,7 @@ fn test_expand_selection_no_initial_selection() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "ar",
         "Should select from cursor to end of word"
@@ -490,7 +490,7 @@ fn test_expand_selection_large_buffer_performance() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert!(!selected_text.is_empty(), "Selection should not be empty");
 }
 
@@ -599,7 +599,7 @@ fn test_select_word_after_scrolling() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
 
     // Should have selected "word50" at line 50
     assert!(
@@ -656,7 +656,7 @@ fn test_expand_selection_after_scrolling() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "ha",
         "First expand should select from cursor to end of word"
@@ -671,7 +671,7 @@ fn test_expand_selection_after_scrolling() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "ha beta",
         "Second expand should include next word"
@@ -709,7 +709,7 @@ fn test_expand_selection_across_lines() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "ending",
         "Should select 'ending' on first line"
@@ -724,7 +724,7 @@ fn test_expand_selection_across_lines() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "ending\nsecond",
         "Should cross line boundary and select 'second'"
@@ -739,7 +739,7 @@ fn test_expand_selection_across_lines() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "ending\nsecond line",
         "Should include 'line' from second line"
@@ -769,7 +769,7 @@ fn test_expand_selection_from_line_end() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
 
     // The selection should include the newline and "second"
     assert!(!selected_text.is_empty(), "Should select something");
@@ -787,7 +787,7 @@ fn test_expand_selection_from_line_end() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
 
     // After multiple expands, we should definitely reach "second" on the next line
     assert!(
@@ -812,7 +812,7 @@ fn test_select_word_with_hyphen() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "foo",
         "Hyphen should be a word separator, selecting 'foo'"
@@ -835,7 +835,7 @@ fn test_select_word_with_underscore() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "baz_qux",
         "Underscore should be a word char, selecting 'baz_qux'"
@@ -858,7 +858,7 @@ fn test_select_word_with_numbers() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "test123",
         "Alphanumeric should be a single word"
@@ -881,7 +881,7 @@ fn test_select_word_with_at_symbol() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "user",
         "@ should be a word separator, selecting 'user'"
@@ -904,7 +904,7 @@ fn test_select_word_with_dot() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "domain",
         ". should be a word separator, selecting 'domain'"
@@ -940,7 +940,7 @@ fn test_expand_selection_on_non_word_char() {
         let selected_text = harness
             .editor_mut()
             .active_state_mut()
-            .get_text_range(range.start, range.end);
+            .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
         assert_eq!(
             selected_text, "**-word",
             "Should select from cursor through end of next word"
@@ -967,7 +967,7 @@ fn test_expand_selection_on_word_char() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "hello", "Should select the current word");
 }
 
@@ -995,7 +995,7 @@ fn test_expand_selection_from_middle_of_word() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     // Should select from 'v' to end: "vent", not the whole word "Event"
     assert_eq!(
         selected_text, "vent",
@@ -1031,7 +1031,7 @@ fn test_select_word_left_on_non_word_char() {
         let selected_text = harness
             .editor_mut()
             .active_state_mut()
-            .get_text_range(range.start, range.end);
+            .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
         // Should select backward from cursor through non-word chars to start of previous word
         assert_eq!(
             selected_text, "word**-",
@@ -1065,7 +1065,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "com", "Should select 'com' backwards");
 
     // Move back and select "domain"
@@ -1083,7 +1083,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "domain", "Should select 'domain' backwards");
 
     // Move back and select "user"
@@ -1101,7 +1101,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "user",
         "Should select 'user' backwards (@ is a separator)"
@@ -1122,7 +1122,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "test123",
         "Should select 'test123' backwards"
@@ -1143,7 +1143,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "baz_qux",
         "Should select 'baz_qux' backwards (underscore is a word char)"
@@ -1164,7 +1164,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(selected_text, "bar", "Should select 'bar' backwards");
 
     // Move back and select "foo"
@@ -1182,7 +1182,7 @@ fn test_select_prev_word_with_special_chars() {
     let selected_text = harness
         .editor_mut()
         .active_state_mut()
-        .get_text_range(range.start, range.end);
+        .get_text_range(range.start.source_byte.unwrap(), range.end.source_byte.unwrap());
     assert_eq!(
         selected_text, "foo",
         "Should select 'foo' backwards (hyphen is a separator)"

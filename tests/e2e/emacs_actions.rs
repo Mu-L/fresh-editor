@@ -234,7 +234,7 @@ fn test_set_mark_basic() {
         "Should have selection anchor after set_mark"
     );
     assert_eq!(
-        anchor_after,
+        anchor_after.and_then(|a| a.source_byte),
         Some(0),
         "Anchor should be at cursor position (0)"
     );
@@ -266,8 +266,8 @@ fn test_set_mark_then_regular_move_creates_selection() {
 
     // Check selection state - anchor should still be at 0 (mark mode)
     let cursor = harness.editor().active_state().cursors.primary();
-    assert_eq!(cursor.anchor, Some(0), "Anchor should still be at 0");
-    assert_eq!(cursor.position, 5, "Cursor should be at position 5");
+    assert_eq!(cursor.anchor.and_then(|a| a.source_byte), Some(0), "Anchor should still be at 0");
+    assert_eq!(cursor.position.source_byte, Some(5), "Cursor should be at position 5");
 }
 
 /// Test set_mark followed by shift+movement extends selection
@@ -295,8 +295,8 @@ fn test_set_mark_then_shift_move_creates_selection() {
 
     // Check selection state - anchor should still be at 0
     let cursor = harness.editor().active_state().cursors.primary();
-    assert_eq!(cursor.anchor, Some(0), "Anchor should still be at 0");
-    assert_eq!(cursor.position, 5, "Cursor should be at position 5");
+    assert_eq!(cursor.anchor.and_then(|a| a.source_byte), Some(0), "Anchor should still be at 0");
+    assert_eq!(cursor.position.source_byte, Some(5), "Cursor should be at position 5");
 
     // The selection should span from 0 to 5 (selecting "hello")
 }
@@ -327,7 +327,7 @@ fn test_escape_cancels_mark_mode() {
     // Verify mark mode is active
     let cursor = harness.editor().active_state().cursors.primary();
     assert_eq!(
-        cursor.anchor,
+        cursor.anchor.and_then(|a| a.source_byte),
         Some(0),
         "Anchor should be at 0 before escape"
     );
@@ -374,7 +374,7 @@ fn test_ctrl_g_cancels_mark_mode() {
 
     // Verify mark mode is active
     let cursor = harness.editor().active_state().cursors.primary();
-    assert_eq!(cursor.anchor, Some(0), "Anchor should be at 0 before C-g");
+    assert_eq!(cursor.anchor.and_then(|a| a.source_byte), Some(0), "Anchor should be at 0 before C-g");
 
     // Press Ctrl+G to cancel mark mode
     harness

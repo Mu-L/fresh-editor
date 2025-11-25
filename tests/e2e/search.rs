@@ -104,7 +104,7 @@ fn test_find_next_prefills_from_selection() {
         .active_state_mut()
         .cursors
         .primary_mut()
-        .position = 0;
+        .position = fresh::cursor::ViewPosition::from_source_byte(0);
 
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
@@ -573,7 +573,7 @@ fn test_search_highlights_update_on_scroll() {
     );
 
     // Verify the highlight is actually in the visible viewport
-    let viewport_top = state.viewport.top_byte;
+    let viewport_top = state.viewport.anchor_byte;
     let viewport_end = viewport_top + 1000; // Approximate visible range
     assert!(
         scrolled_highlight_pos >= viewport_top && scrolled_highlight_pos < viewport_end,
@@ -595,7 +595,6 @@ fn test_search_history_navigation() {
     harness.render().unwrap();
 
     // Clear history to ensure test isolation
-    harness.editor_mut().clear_search_history();
 
     // First search: "hello"
     harness
@@ -682,7 +681,6 @@ fn test_search_history_preserves_current_input() {
     harness.render().unwrap();
 
     // Clear history to ensure test isolation
-    harness.editor_mut().clear_search_history();
 
     // Add one item to history
     harness
@@ -804,7 +802,6 @@ fn test_search_history_skips_empty_and_duplicates() {
     harness.render().unwrap();
 
     // Clear history to ensure test isolation
-    harness.editor_mut().clear_search_history();
 
     // Try to search with empty string (should not be added to history)
     harness
