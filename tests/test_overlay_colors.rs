@@ -1,9 +1,9 @@
 /// Test that overlay colors are correctly applied and rendered
 use fresh::config::LARGE_FILE_THRESHOLD_BYTES;
-use fresh::event::CursorId;
-use fresh::event::{Event, OverlayFace as EventOverlayFace};
-use fresh::overlay::OverlayNamespace;
+use fresh::model::event::CursorId;
+use fresh::model::event::{Event, OverlayFace as EventOverlayFace};
 use fresh::state::EditorState;
+use fresh::view::overlay::OverlayNamespace;
 
 #[test]
 fn test_overlay_background_color_direct() {
@@ -49,7 +49,7 @@ fn test_overlay_background_color_direct() {
     // Check the overlay face
     let overlay = overlays[0];
     match &overlay.face {
-        fresh::overlay::OverlayFace::Background { color } => {
+        fresh::view::overlay::OverlayFace::Background { color } => {
             println!("Overlay color: {:?}", color);
             assert!(
                 matches!(color, ratatui::style::Color::Rgb(255, 165, 0)),

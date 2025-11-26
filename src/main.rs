@@ -9,7 +9,9 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use fresh::{config, editor::Editor, script_control::ScriptControlMode, signal_handler};
+use fresh::{
+    app::script_control::ScriptControlMode, app::Editor, config, services::signal_handler,
+};
 use ratatui::Terminal;
 use std::{
     io::{self, stdout},
@@ -54,7 +56,7 @@ fn main() -> io::Result<()> {
 
     // Handle --script-schema flag
     if args.script_schema {
-        println!("{}", fresh::script_control::get_command_schema());
+        println!("{}", fresh::app::script_control::get_command_schema());
         return Ok(());
     }
 

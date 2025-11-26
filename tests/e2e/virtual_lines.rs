@@ -4,7 +4,7 @@
 //! that appear in the render output without affecting the source buffer.
 
 use crate::common::harness::EditorTestHarness;
-use fresh::virtual_text::{VirtualTextNamespace, VirtualTextPosition};
+use fresh::view::virtual_text::{VirtualTextNamespace, VirtualTextPosition};
 use ratatui::style::{Color, Style};
 use tempfile::TempDir;
 

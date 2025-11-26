@@ -6,7 +6,9 @@ use crossterm::event::{KeyCode, KeyModifiers};
 /// Test that completion popup text is not mangled
 #[test]
 fn test_lsp_completion_popup_text_not_mangled() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -79,7 +81,9 @@ fn test_lsp_completion_popup_text_not_mangled() -> std::io::Result<()> {
 /// Test that completion replaces current word, not appends
 #[test]
 fn test_lsp_completion_replaces_word() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -131,8 +135,8 @@ fn test_lsp_completion_replaces_word() -> std::io::Result<()> {
 /// Test LSP diagnostics display in the editor
 #[test]
 fn test_lsp_diagnostics_display() -> std::io::Result<()> {
-    use fresh::event::{Event, OverlayFace};
-    use fresh::overlay::OverlayNamespace;
+    use fresh::model::event::{Event, OverlayFace};
+    use fresh::view::overlay::OverlayNamespace;
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -168,7 +172,9 @@ fn test_lsp_diagnostics_display() -> std::io::Result<()> {
 /// Test LSP completion popup display
 #[test]
 fn test_lsp_completion_popup() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -239,8 +245,8 @@ fn test_lsp_completion_popup() -> std::io::Result<()> {
 /// Test LSP diagnostics summary in status bar
 #[test]
 fn test_lsp_diagnostics_status_bar() -> std::io::Result<()> {
-    use fresh::event::{Event, OverlayFace};
-    use fresh::overlay::OverlayNamespace;
+    use fresh::model::event::{Event, OverlayFace};
+    use fresh::view::overlay::OverlayNamespace;
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -286,8 +292,8 @@ fn test_lsp_diagnostics_status_bar() -> std::io::Result<()> {
 /// Test that diagnostics are removed when cleared
 #[test]
 fn test_lsp_clear_diagnostics() -> std::io::Result<()> {
-    use fresh::event::{Event, OverlayFace};
-    use fresh::overlay::OverlayNamespace;
+    use fresh::model::event::{Event, OverlayFace};
+    use fresh::view::overlay::OverlayNamespace;
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -332,7 +338,9 @@ fn test_lsp_clear_diagnostics() -> std::io::Result<()> {
 /// Test multiple completion items navigation
 #[test]
 fn test_lsp_completion_navigation() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -395,7 +403,9 @@ fn test_lsp_completion_navigation() -> std::io::Result<()> {
 /// Test popup cancel (Escape) doesn't insert anything
 #[test]
 fn test_lsp_completion_cancel() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -447,7 +457,9 @@ fn test_lsp_completion_cancel() -> std::io::Result<()> {
 /// Test completion after a dot preserves the prefix
 #[test]
 fn test_lsp_completion_after_dot() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -507,7 +519,9 @@ fn test_lsp_completion_after_dot() -> std::io::Result<()> {
 /// Test completion after typing a partial identifier after dot
 #[test]
 fn test_lsp_completion_after_dot_with_partial() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -555,7 +569,9 @@ fn test_lsp_completion_after_dot_with_partial() -> std::io::Result<()> {
 /// Test that completion filtering only shows matching items by prefix
 #[test]
 fn test_lsp_completion_filtering() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -608,7 +624,7 @@ fn test_lsp_completion_filtering() -> std::io::Result<()> {
     );
 
     if let Some(popup) = state.popups.top() {
-        if let fresh::popup::PopupContent::List { items, .. } = &popup.content {
+        if let fresh::view::popup::PopupContent::List { items, .. } = &popup.content {
             // Should only have test_function and test_variable
             assert_eq!(
                 items.len(),
@@ -646,7 +662,9 @@ fn test_lsp_completion_filtering() -> std::io::Result<()> {
 /// Test that popup size is appropriate for the number of filtered items
 #[test]
 fn test_lsp_completion_popup_size() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -751,12 +769,12 @@ fn test_lsp_waiting_indicator() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::script_path().to_string_lossy().to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -799,7 +817,9 @@ fn test_lsp_waiting_indicator() -> std::io::Result<()> {
 /// Test that popup properly hides buffer text behind it
 #[test]
 fn test_lsp_completion_popup_hides_background() -> std::io::Result<()> {
-    use fresh::event::{Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{
+        Event, PopupContentData, PopupData, PopupListItemData, PopupPositionData,
+    };
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -921,12 +941,12 @@ fn test_lsp_completion_canceled_on_cursor_move() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::script_path().to_string_lossy().to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -985,12 +1005,12 @@ fn test_lsp_cursor_animation() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::script_path().to_string_lossy().to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -1050,12 +1070,12 @@ fn test_lsp_completion_canceled_on_text_edit() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::script_path().to_string_lossy().to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -1359,7 +1379,7 @@ edition = "2021"
 #[test]
 #[ignore] // Run with: cargo test test_lsp_typing_performance_with_many_diagnostics -- --ignored --nocapture
 fn test_lsp_typing_performance_with_many_diagnostics() -> std::io::Result<()> {
-    use fresh::event::{Event, OverlayFace};
+    use fresh::model::event::{Event, OverlayFace};
     use std::time::Instant;
 
     const DIAGNOSTIC_COUNT: usize = 200; // Simulate 200 diagnostics (100 lines)
@@ -1425,10 +1445,10 @@ fn test_lsp_typing_performance_with_many_diagnostics() -> std::io::Result<()> {
     let start = Instant::now();
 
     // This is the slow function - apply_diagnostics_to_state
-    fresh::lsp_diagnostics::apply_diagnostics_to_state(
+    fresh::services::lsp::diagnostics::apply_diagnostics_to_state(
         state,
         &diag_params.diagnostics,
-        &fresh::theme::Theme::dark(),
+        &fresh::view::theme::Theme::dark(),
     );
 
     let apply_duration = start.elapsed();
@@ -1461,10 +1481,10 @@ fn test_lsp_typing_performance_with_many_diagnostics() -> std::io::Result<()> {
 
     for i in 0..REAPPLY_COUNT {
         let start = Instant::now();
-        fresh::lsp_diagnostics::apply_diagnostics_to_state_cached(
+        fresh::services::lsp::diagnostics::apply_diagnostics_to_state_cached(
             state,
             &diag_params.diagnostics,
-            &fresh::theme::Theme::dark(),
+            &fresh::view::theme::Theme::dark(),
         );
         let reapply_duration = start.elapsed();
         total_reapply_time += reapply_duration;
@@ -1631,14 +1651,14 @@ fn test_lsp_diagnostics_non_blocking() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::blocking_script_path()
                 .to_string_lossy()
                 .to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -1786,7 +1806,7 @@ fn test_rust_analyzer_rename_real_scenario() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: "rust-analyzer".to_string(),
             args: vec![
                 "--log-file".to_string(),
@@ -1794,7 +1814,7 @@ fn test_rust_analyzer_rename_real_scenario() -> std::io::Result<()> {
             ],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -2394,14 +2414,14 @@ fn test_lsp_progress_status_display() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::progress_script_path()
                 .to_string_lossy()
                 .to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -2553,14 +2573,14 @@ fn test_lsp_crash_detection_and_restart() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::crashing_script_path()
                 .to_string_lossy()
                 .to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -2725,7 +2745,7 @@ fn test_lsp_restart_command_exists() -> std::io::Result<()> {
 /// This test verifies that the LspPulledDiagnostics message can be processed
 #[test]
 fn test_pull_diagnostics_message_handling() -> std::io::Result<()> {
-    use fresh::async_bridge::AsyncMessage;
+    use fresh::services::async_bridge::AsyncMessage;
     use lsp_types::Diagnostic;
 
     let mut harness = EditorTestHarness::new(80, 24)?;
@@ -2797,7 +2817,7 @@ fn test_pull_diagnostics_message_handling() -> std::io::Result<()> {
 /// Test that pull diagnostics handles unchanged responses correctly
 #[test]
 fn test_pull_diagnostics_unchanged_response() -> std::io::Result<()> {
-    use fresh::async_bridge::AsyncMessage;
+    use fresh::services::async_bridge::AsyncMessage;
 
     let mut harness = EditorTestHarness::new(80, 24)?;
 
@@ -2847,14 +2867,14 @@ fn test_pull_diagnostics_auto_trigger_after_open() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::pull_diagnostics_script_path()
                 .to_string_lossy()
                 .to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -2923,14 +2943,14 @@ fn test_pull_diagnostics_result_id_tracking() -> std::io::Result<()> {
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: FakeLspServer::pull_diagnostics_script_path()
                 .to_string_lossy()
                 .to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -3135,12 +3155,12 @@ done
     let mut config = fresh::config::Config::default();
     config.lsp.insert(
         "rust".to_string(),
-        fresh::lsp::LspServerConfig {
+        fresh::services::lsp::client::LspServerConfig {
             command: script_path.to_string_lossy().to_string(),
             args: vec![],
             enabled: true,
             auto_start: false,
-            process_limits: fresh::process_limits::ProcessLimits::default(),
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
         },
     );
 
@@ -3413,7 +3433,7 @@ fn main() {
 /// Test that inlay hints (virtual text) render correctly on screen
 #[test]
 fn test_inlay_hints_render_on_screen() -> std::io::Result<()> {
-    use fresh::virtual_text::VirtualTextPosition;
+    use fresh::view::virtual_text::VirtualTextPosition;
     use ratatui::style::{Color, Style};
 
     let mut harness = EditorTestHarness::new(80, 24)?;
@@ -3497,7 +3517,7 @@ fn test_inlay_hints_render_on_screen() -> std::io::Result<()> {
 /// Test that virtual text positions update when buffer is edited
 #[test]
 fn test_inlay_hints_position_tracking() -> std::io::Result<()> {
-    use fresh::virtual_text::VirtualTextPosition;
+    use fresh::view::virtual_text::VirtualTextPosition;
     use ratatui::style::{Color, Style};
 
     let mut harness = EditorTestHarness::new(80, 24)?;

@@ -1,6 +1,6 @@
 use crate::common::fixtures::TestFixture;
 use crate::common::harness::EditorTestHarness;
-use fresh::document_model::{DocumentModel, DocumentPosition};
+use fresh::model::document_model::{DocumentModel, DocumentPosition};
 
 /// Test DocumentModel with a small file (< 1MB) that has precise line indexing
 #[test]

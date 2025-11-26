@@ -1,4 +1,4 @@
-use crate::lsp::LspServerConfig;
+use crate::services::lsp::client::LspServerConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -462,7 +462,7 @@ impl Config {
                 args: vec!["--log-file".to_string(), ra_log_path],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 
@@ -474,7 +474,7 @@ impl Config {
                 args: vec![],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 
@@ -484,7 +484,7 @@ impl Config {
             args: vec!["--stdio".to_string()],
             enabled: true,
             auto_start: false,
-            process_limits: crate::process_limits::ProcessLimits::default(),
+            process_limits: crate::services::process_limits::ProcessLimits::default(),
         };
         lsp.insert("javascript".to_string(), ts_lsp.clone());
         lsp.insert("typescript".to_string(), ts_lsp);
@@ -497,7 +497,7 @@ impl Config {
                 args: vec!["--stdio".to_string()],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 
@@ -509,7 +509,7 @@ impl Config {
                 args: vec!["--stdio".to_string()],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 
@@ -521,7 +521,7 @@ impl Config {
                 args: vec![],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
         lsp.insert(
@@ -531,7 +531,7 @@ impl Config {
                 args: vec![],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 
@@ -543,7 +543,7 @@ impl Config {
                 args: vec![],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 
@@ -555,7 +555,7 @@ impl Config {
                 args: vec!["--stdio".to_string()],
                 enabled: true,
                 auto_start: false,
-                process_limits: crate::process_limits::ProcessLimits::default(),
+                process_limits: crate::services::process_limits::ProcessLimits::default(),
             },
         );
 

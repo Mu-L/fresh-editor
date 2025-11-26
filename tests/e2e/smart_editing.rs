@@ -237,7 +237,11 @@ fn test_skip_over_closing_parenthesis() {
     assert_eq!(content, "()", "Opening paren should auto-close");
 
     // Cursor should be between parens, at position 1
-    assert_eq!(harness.cursor_position(), 1, "Cursor should be between parens");
+    assert_eq!(
+        harness.cursor_position(),
+        1,
+        "Cursor should be between parens"
+    );
 
     // Type a closing paren - should skip over the existing one, not insert another
     harness.type_text(")").unwrap();
@@ -250,7 +254,11 @@ fn test_skip_over_closing_parenthesis() {
     );
 
     // Cursor should now be after the closing paren
-    assert_eq!(harness.cursor_position(), 2, "Cursor should be after the paren");
+    assert_eq!(
+        harness.cursor_position(),
+        2,
+        "Cursor should be after the paren"
+    );
 }
 
 /// Test that typing a closing bracket when cursor is before one just moves cursor
@@ -351,7 +359,9 @@ fn test_no_skip_when_different_char() {
     harness.open_file(&file_path).unwrap();
 
     // Move cursor to position 1 (before 'x')
-    harness.send_key(KeyCode::Right, KeyModifiers::NONE).unwrap();
+    harness
+        .send_key(KeyCode::Right, KeyModifiers::NONE)
+        .unwrap();
 
     // Type a closing paren - should insert because next char is 'x', not ')'
     harness.type_text(")").unwrap();
@@ -787,8 +797,8 @@ fn apply_test_diagnostics(
     diagnostics: Vec<lsp_types::Diagnostic>,
 ) {
     let state = harness.editor_mut().active_state_mut();
-    let theme = fresh::theme::Theme::dark();
-    fresh::lsp_diagnostics::apply_diagnostics_to_state(state, &diagnostics, &theme);
+    let theme = fresh::view::theme::Theme::dark();
+    fresh::services::lsp::diagnostics::apply_diagnostics_to_state(state, &diagnostics, &theme);
 }
 
 /// Create a simple diagnostic at a given position
@@ -1047,7 +1057,7 @@ fn test_block_selection_start() {
     let cursor = harness.editor().active_state().cursors.primary();
     assert_eq!(
         cursor.selection_mode,
-        fresh::cursor::SelectionMode::Block,
+        fresh::model::cursor::SelectionMode::Block,
         "Selection mode should be Block"
     );
 

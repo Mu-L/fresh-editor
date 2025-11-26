@@ -1,22 +1,22 @@
-use crate::cursor::{Cursor, Cursors};
-use crate::document_model::{
+use crate::model::buffer::{Buffer, LineNumber};
+use crate::model::cursor::{Cursor, Cursors};
+use crate::model::document_model::{
     DocumentCapabilities, DocumentModel, DocumentPosition, ViewportContent, ViewportLine,
 };
-use crate::event::{
+use crate::model::event::{
     Event, MarginContentData, MarginPositionData, OverlayFace as EventOverlayFace, PopupData,
     PopupPositionData,
 };
-use crate::highlighter::{Highlighter, Language};
-use crate::indent::IndentCalculator;
-use crate::margin::{MarginAnnotation, MarginContent, MarginManager, MarginPosition};
-use crate::marker::MarkerList;
-use crate::overlay::{Overlay, OverlayFace, OverlayManager, UnderlineStyle};
-use crate::popup::{Popup, PopupContent, PopupListItem, PopupManager, PopupPosition};
-use crate::semantic_highlight::SemanticHighlighter;
-use crate::text_buffer::{Buffer, LineNumber};
-use crate::text_property::TextPropertyManager;
-use crate::viewport::Viewport;
-use crate::virtual_text::VirtualTextManager;
+use crate::model::marker::MarkerList;
+use crate::primitives::highlighter::{Highlighter, Language};
+use crate::primitives::indent::IndentCalculator;
+use crate::primitives::semantic_highlight::SemanticHighlighter;
+use crate::primitives::text_property::TextPropertyManager;
+use crate::view::margin::{MarginAnnotation, MarginContent, MarginManager, MarginPosition};
+use crate::view::overlay::{Overlay, OverlayFace, OverlayManager, UnderlineStyle};
+use crate::view::popup::{Popup, PopupContent, PopupListItem, PopupManager, PopupPosition};
+use crate::view::viewport::Viewport;
+use crate::view::virtual_text::VirtualTextManager;
 use anyhow::Result;
 use ratatui::style::{Color, Style};
 use std::cell::RefCell;
@@ -98,7 +98,7 @@ pub struct EditorState {
     pub compose_column_guides: Option<Vec<u16>>,
 
     /// Optional transformed view payload for current viewport (tokens + map)
-    pub view_transform: Option<crate::plugin_api::ViewTransformPayload>,
+    pub view_transform: Option<crate::services::plugins::api::ViewTransformPayload>,
 }
 
 impl EditorState {
@@ -604,10 +604,10 @@ fn convert_event_face_to_overlay_face(event_face: &EventOverlayFace) -> OverlayF
     match event_face {
         EventOverlayFace::Underline { color, style } => {
             let underline_style = match style {
-                crate::event::UnderlineStyle::Straight => UnderlineStyle::Straight,
-                crate::event::UnderlineStyle::Wavy => UnderlineStyle::Wavy,
-                crate::event::UnderlineStyle::Dotted => UnderlineStyle::Dotted,
-                crate::event::UnderlineStyle::Dashed => UnderlineStyle::Dashed,
+                crate::model::event::UnderlineStyle::Straight => UnderlineStyle::Straight,
+                crate::model::event::UnderlineStyle::Wavy => UnderlineStyle::Wavy,
+                crate::model::event::UnderlineStyle::Dotted => UnderlineStyle::Dotted,
+                crate::model::event::UnderlineStyle::Dashed => UnderlineStyle::Dashed,
             };
             OverlayFace::Underline {
                 color: Color::Rgb(color.0, color.1, color.2),
@@ -649,8 +649,8 @@ fn convert_event_face_to_overlay_face(event_face: &EventOverlayFace) -> OverlayF
 /// Convert popup data to the actual popup object
 fn convert_popup_data_to_popup(data: &PopupData) -> Popup {
     let content = match &data.content {
-        crate::event::PopupContentData::Text(lines) => PopupContent::Text(lines.clone()),
-        crate::event::PopupContentData::List { items, selected } => PopupContent::List {
+        crate::model::event::PopupContentData::Text(lines) => PopupContent::Text(lines.clone()),
+        crate::model::event::PopupContentData::List { items, selected } => PopupContent::List {
             items: items
                 .iter()
                 .map(|item| PopupListItem {
@@ -765,7 +765,7 @@ impl EditorState {
     /// # Returns
     /// `Some((line_start_offset, line_content))` if successful, `None` if offset is invalid
     pub fn get_line_at_offset(&mut self, offset: usize) -> Option<(usize, String)> {
-        use crate::document_model::DocumentModel;
+        use crate::model::document_model::DocumentModel;
 
         // Find the start of the line containing this offset
         // Scan backwards to find the previous newline or start of buffer
@@ -783,7 +783,10 @@ impl EditorState {
 
         // Get a single line viewport starting at the line start
         let viewport = self
-            .get_viewport_content(crate::document_model::DocumentPosition::byte(line_start), 1)
+            .get_viewport_content(
+                crate::model::document_model::DocumentPosition::byte(line_start),
+                1,
+            )
             .ok()?;
 
         viewport
@@ -797,11 +800,13 @@ impl EditorState {
     /// This is a common pattern in editing operations. Uses DocumentModel
     /// for consistent behavior across file sizes.
     pub fn get_text_to_end_of_line(&mut self, cursor_pos: usize) -> Result<String> {
-        use crate::document_model::DocumentModel;
+        use crate::model::document_model::DocumentModel;
 
         // Get the line containing cursor
-        let viewport = self
-            .get_viewport_content(crate::document_model::DocumentPosition::byte(cursor_pos), 1)?;
+        let viewport = self.get_viewport_content(
+            crate::model::document_model::DocumentPosition::byte(cursor_pos),
+            1,
+        )?;
 
         if let Some(line) = viewport.lines.first() {
             let line_start = line.byte_offset;
@@ -874,7 +879,7 @@ impl DocumentModel for EditorState {
                     anyhow::bail!("Line indexing not available for this document");
                 }
                 // Use piece tree's position conversion
-                let position = crate::piece_tree::Position { line, column };
+                let position = crate::model::piece_tree::Position { line, column };
                 Ok(self.buffer.position_to_offset(position))
             }
         }
@@ -1013,7 +1018,7 @@ impl DocumentModel for EditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::CursorId;
+    use crate::model::event::CursorId;
 
     #[test]
     fn test_state_new() {
@@ -1156,7 +1161,7 @@ mod tests {
     // DocumentModel trait tests
     mod document_model_tests {
         use super::*;
-        use crate::document_model::{DocumentModel, DocumentPosition};
+        use crate::model::document_model::{DocumentModel, DocumentPosition};
 
         #[test]
         fn test_capabilities_small_file() {
@@ -1378,7 +1383,7 @@ mod tests {
     // Virtual text integration tests
     mod virtual_text_integration_tests {
         use super::*;
-        use crate::virtual_text::VirtualTextPosition;
+        use crate::view::virtual_text::VirtualTextPosition;
         use ratatui::style::Style;
 
         #[test]

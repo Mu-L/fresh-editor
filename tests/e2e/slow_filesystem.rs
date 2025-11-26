@@ -5,7 +5,7 @@
 
 use crate::common::harness::EditorTestHarness;
 use crossterm::event::{KeyCode, KeyModifiers};
-use fresh::fs::SlowFsConfig;
+use fresh::services::fs::SlowFsConfig;
 use std::time::Duration;
 
 #[test]

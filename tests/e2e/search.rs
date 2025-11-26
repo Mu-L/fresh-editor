@@ -105,7 +105,10 @@ fn test_find_previous_with_ctrl_shift_n() {
 
     // Find previous with Ctrl+Shift+N (alternative for Shift+F3)
     harness
-        .send_key(KeyCode::Char('n'), KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+        .send_key(
+            KeyCode::Char('n'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        )
         .unwrap();
     harness.process_async_and_render().unwrap();
 

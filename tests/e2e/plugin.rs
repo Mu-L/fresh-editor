@@ -4,8 +4,8 @@ use crate::common::harness::EditorTestHarness;
 use crate::common::tracing::init_tracing_from_env;
 use crossterm::event::{KeyCode, KeyModifiers};
 use fresh::config::Config;
-use fresh::lsp::LspServerConfig;
-use fresh::process_limits::ProcessLimits;
+use fresh::services::lsp::client::LspServerConfig;
+use fresh::services::process_limits::ProcessLimits;
 use std::fs;
 use std::time::Duration;
 

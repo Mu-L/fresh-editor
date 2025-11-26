@@ -85,7 +85,7 @@ fn test_margin_disable_line_numbers() {
 
     // Disable line numbers via event
     harness
-        .apply_event(fresh::event::Event::SetLineNumbers { enabled: false })
+        .apply_event(fresh::model::event::Event::SetLineNumbers { enabled: false })
         .unwrap();
     harness.render().unwrap();
 
@@ -112,10 +112,10 @@ fn test_margin_custom_annotations() {
 
     // Add a breakpoint annotation at line 2 (0-indexed)
     harness
-        .apply_event(fresh::event::Event::AddMarginAnnotation {
+        .apply_event(fresh::model::event::Event::AddMarginAnnotation {
             line: 2,
-            position: fresh::event::MarginPositionData::Left,
-            content: fresh::event::MarginContentData::Symbol {
+            position: fresh::model::event::MarginPositionData::Left,
+            content: fresh::model::event::MarginContentData::Symbol {
                 text: "●".to_string(),
                 color: Some((255, 0, 0)), // Red
             },
@@ -134,7 +134,7 @@ fn test_margin_custom_annotations() {
 
     // Remove the annotation
     harness
-        .apply_event(fresh::event::Event::RemoveMarginAnnotation {
+        .apply_event(fresh::model::event::Event::RemoveMarginAnnotation {
             annotation_id: "breakpoint-1".to_string(),
         })
         .unwrap();
@@ -277,7 +277,7 @@ fn test_margin_per_buffer_in_split_view() {
 
     // Now disable line numbers in the active buffer (file2)
     harness
-        .apply_event(fresh::event::Event::SetLineNumbers { enabled: false })
+        .apply_event(fresh::model::event::Event::SetLineNumbers { enabled: false })
         .unwrap();
 
     // Add a custom annotation to file1 (need to switch to file1 first)
@@ -285,10 +285,10 @@ fn test_margin_per_buffer_in_split_view() {
         .send_key(KeyCode::Char('o'), KeyModifiers::ALT)
         .unwrap(); // Switch to previous split
     harness
-        .apply_event(fresh::event::Event::AddMarginAnnotation {
+        .apply_event(fresh::model::event::Event::AddMarginAnnotation {
             line: 0,
-            position: fresh::event::MarginPositionData::Left,
-            content: fresh::event::MarginContentData::Symbol {
+            position: fresh::model::event::MarginPositionData::Left,
+            content: fresh::model::event::MarginContentData::Symbol {
                 text: "●".to_string(),
                 color: Some((255, 0, 0)),
             },

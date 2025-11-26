@@ -256,12 +256,8 @@ fn test_auto_revert_preserves_cursor_position() {
 
     // Move cursor to a specific position (end of line 3, which is "Line 3")
     use crossterm::event::{KeyCode, KeyModifiers};
-    harness
-        .send_key(KeyCode::Down, KeyModifiers::NONE)
-        .unwrap();
-    harness
-        .send_key(KeyCode::Down, KeyModifiers::NONE)
-        .unwrap(); // Now on line 3
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap(); // Now on line 3
     harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 

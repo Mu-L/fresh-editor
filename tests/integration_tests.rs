@@ -3,9 +3,9 @@
 mod common;
 
 use fresh::{
-    event::{CursorId, Event, EventLog},
-    overlay::OverlayNamespace,
+    model::event::{CursorId, Event, EventLog},
     state::EditorState,
+    view::overlay::OverlayNamespace,
 };
 
 /// Test that cursor positions are correctly adjusted after buffer edits
@@ -303,7 +303,7 @@ fn test_viewport_resize_maintains_cursor() {
 /// Test overlay events - adding and removing overlays
 #[test]
 fn test_overlay_events() {
-    use fresh::event::{OverlayFace, UnderlineStyle};
+    use fresh::model::event::{OverlayFace, UnderlineStyle};
 
     let mut state = EditorState::new(80, 24, fresh::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
@@ -374,7 +374,7 @@ fn test_overlay_events() {
 /// Test popup events - showing, navigating, and hiding popups
 #[test]
 fn test_popup_events() {
-    use fresh::event::{PopupContentData, PopupData, PopupListItemData, PopupPositionData};
+    use fresh::model::event::{PopupContentData, PopupData, PopupListItemData, PopupPositionData};
 
     let mut state = EditorState::new(80, 24, fresh::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
@@ -446,7 +446,7 @@ fn test_popup_events() {
 /// Test that overlays persist through undo/redo
 #[test]
 fn test_overlay_undo_redo() {
-    use fresh::event::{OverlayFace, UnderlineStyle};
+    use fresh::model::event::{OverlayFace, UnderlineStyle};
 
     let mut log = EventLog::new();
     let mut state = EditorState::new(80, 24, fresh::config::LARGE_FILE_THRESHOLD_BYTES as usize);
@@ -510,8 +510,8 @@ fn test_overlay_undo_redo() {
 #[test]
 fn test_lsp_diagnostic_to_overlay() {
     use fresh::{
-        config::LARGE_FILE_THRESHOLD_BYTES, lsp_diagnostics::diagnostic_to_overlay,
-        text_buffer::Buffer,
+        config::LARGE_FILE_THRESHOLD_BYTES, model::buffer::Buffer,
+        services::lsp::diagnostics::diagnostic_to_overlay,
     };
     use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
@@ -542,7 +542,7 @@ fn test_lsp_diagnostic_to_overlay() {
         data: None,
     };
 
-    let theme = fresh::theme::Theme::dark();
+    let theme = fresh::view::theme::Theme::dark();
     let result = diagnostic_to_overlay(&diagnostic, &buffer, &theme);
     assert!(result.is_some());
 
@@ -557,7 +557,7 @@ fn test_lsp_diagnostic_to_overlay() {
 
     // Check face (should use theme's error background color)
     match face {
-        fresh::overlay::OverlayFace::Background { color } => {
+        fresh::view::overlay::OverlayFace::Background { color } => {
             assert_eq!(color, theme.diagnostic_error_bg);
         }
         _ => panic!("Expected background face for error diagnostic"),
@@ -567,7 +567,7 @@ fn test_lsp_diagnostic_to_overlay() {
 /// Test overlay rendering with multiple priorities
 #[test]
 fn test_overlay_priority_layering() {
-    use fresh::event::{OverlayFace, UnderlineStyle};
+    use fresh::model::event::{OverlayFace, UnderlineStyle};
 
     let mut state = EditorState::new(80, 24, fresh::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
@@ -623,7 +623,7 @@ fn test_overlay_priority_layering() {
 #[test]
 fn test_diagnostic_overlay_visual_rendering() {
     use common::harness::EditorTestHarness;
-    use fresh::event::{OverlayFace, UnderlineStyle};
+    use fresh::model::event::{OverlayFace, UnderlineStyle};
     use ratatui::style::{Color, Modifier};
 
     let mut harness = EditorTestHarness::new(80, 24).unwrap();
@@ -694,8 +694,8 @@ fn test_diagnostic_overlay_visual_rendering() {
 
 /// Comprehensive tests for Event::inverse()
 mod event_inverse_tests {
-    use fresh::event::{CursorId, Event, OverlayFace, UnderlineStyle};
-    use fresh::overlay::{OverlayHandle, OverlayNamespace};
+    use fresh::model::event::{CursorId, Event, OverlayFace, UnderlineStyle};
+    use fresh::view::overlay::{OverlayHandle, OverlayNamespace};
 
     #[test]
     fn test_insert_inverse() {

@@ -44,8 +44,8 @@ pub mod layout {
         terminal_height.saturating_sub(TOTAL_RESERVED_ROWS)
     }
 }
-use fresh::fs::{BackendMetrics, FsBackend, LocalFsBackend, SlowFsBackend, SlowFsConfig};
-use fresh::{config::Config, editor::Editor};
+use fresh::services::fs::{BackendMetrics, FsBackend, LocalFsBackend, SlowFsBackend, SlowFsConfig};
+use fresh::{app::Editor, config::Config};
 use ratatui::{backend::TestBackend, Terminal};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -478,7 +478,7 @@ impl EditorTestHarness {
     }
 
     /// Apply an event directly to the active buffer
-    pub fn apply_event(&mut self, event: fresh::event::Event) -> io::Result<()> {
+    pub fn apply_event(&mut self, event: fresh::model::event::Event) -> io::Result<()> {
         self.editor.apply_event_to_active_buffer(&event);
         Ok(())
     }

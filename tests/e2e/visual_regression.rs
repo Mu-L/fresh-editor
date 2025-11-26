@@ -287,8 +287,8 @@ fn visual_multicursor() {
 /// Test LSP diagnostics with margin bullet points
 #[test]
 fn visual_lsp_diagnostics() {
-    use fresh::event::{Event, OverlayFace};
-    use fresh::overlay::OverlayNamespace;
+    use fresh::model::event::{Event, OverlayFace};
+    use fresh::view::overlay::OverlayNamespace;
     use ratatui::style::Color;
 
     let mut harness = EditorTestHarness::new(80, 24).unwrap();
@@ -362,7 +362,7 @@ fn visual_lsp_diagnostics() {
 #[test]
 #[ignore]
 fn visual_lsp_rename() {
-    use fresh::overlay::OverlayFace;
+    use fresh::view::overlay::OverlayFace;
     use lsp_types::{Position, Range, TextEdit, Uri, WorkspaceEdit};
     use ratatui::style::Color;
     use std::collections::HashMap;

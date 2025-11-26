@@ -1,5 +1,5 @@
 /// Comprehensive tests for LineIterator to catch position/content bugs
-use fresh::text_buffer::TextBuffer;
+use fresh::model::buffer::TextBuffer;
 
 #[test]
 fn test_line_iterator_simple() {

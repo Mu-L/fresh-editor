@@ -802,7 +802,7 @@ fn test_horizontal_split_separator_drag_resize() {
     let (split_id, direction, sep_x, sep_y, sep_length) = separators[0];
     assert_eq!(
         direction,
-        fresh::event::SplitDirection::Horizontal,
+        fresh::model::event::SplitDirection::Horizontal,
         "Should be a horizontal split"
     );
 
@@ -877,7 +877,7 @@ fn test_vertical_split_separator_drag_resize() {
     let (split_id, direction, sep_x, sep_y, sep_length) = separators[0];
     assert_eq!(
         direction,
-        fresh::event::SplitDirection::Vertical,
+        fresh::model::event::SplitDirection::Vertical,
         "Should be a vertical split"
     );
 
