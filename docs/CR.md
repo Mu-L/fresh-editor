@@ -13,6 +13,8 @@
 - ~~src/services/lsp/async_handler.rs:1543 — `run` ~490 lines~~ → Extracted `spawn_stdout_reader` and `replay_pending_commands` helpers (490→396 lines)
 - ~~src/view/ui/split_rendering.rs:1135 — `render_view_lines` ~750 lines~~ → Extracted `compute_char_style` and `render_left_margin` helpers (~750→~570 lines)
 - ~~src/app/mod.rs:5181 — `handle_rename_response` ~280 lines~~ → Extracted `apply_lsp_text_edits` helper (~280→~140 lines)
+- ~~src/app/file_explorer.rs — duplicate path/timestamp logic~~ → Extracted `get_parent_dir_path` and `timestamp_suffix` helpers
+- ~~src/app/plugin_commands.rs — duplicate menu lookup pattern~~ → Extracted `find_menu_by_label_mut` helper
 
 ## Large Functions
 - src/app/render.rs:5 — top-level `render` runs ~450 lines covering layout calculation, plugin hook firing, file explorer rendering, and status/prompt UI. The amount of responsibility in one function hurts readability and testing; factoring into helpers (layout, plugin hook prep, explorer rendering, status/prompt rendering) would make regressions easier to spot.
