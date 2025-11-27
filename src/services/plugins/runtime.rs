@@ -1184,6 +1184,17 @@ async fn op_fresh_kill_process(
     }
 }
 
+/// Sleep for the specified number of milliseconds
+///
+/// This allows plugins to implement delays and animation loops.
+/// Use in async functions: `await editor.sleep(33)` for ~30fps animation.
+///
+/// @param ms - Number of milliseconds to sleep
+#[op2(async)]
+async fn op_fresh_sleep(#[bigint] ms: u64) {
+    tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
+}
+
 /// Check if a background process is still running
 ///
 /// @param process_id - ID returned from spawnBackgroundProcess
@@ -2468,6 +2479,7 @@ extension!(
         op_fresh_spawn_process,
         op_fresh_spawn_background_process,
         op_fresh_kill_process,
+        op_fresh_sleep,
         op_fresh_is_process_running,
         op_fresh_get_buffer_info,
         op_fresh_list_buffers,
@@ -2842,6 +2854,9 @@ impl TypeScriptRuntime {
                     },
                     setVirtualBufferContent(bufferId, entries) {
                         return core.ops.op_fresh_set_virtual_buffer_content(bufferId, entries);
+                    },
+                    async sleep(ms) {
+                        return await core.ops.op_fresh_sleep(ms);
                     },
                 };
 

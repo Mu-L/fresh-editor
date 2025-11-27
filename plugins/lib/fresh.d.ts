@@ -517,6 +517,15 @@ interface EditorAPI {
    */
   killProcess(#[bigint] process_id: number): Promise<boolean>;
   /**
+   * Sleep for the specified number of milliseconds
+   *
+   * This allows plugins to implement delays and animation loops.
+   * Use in async functions: `await editor.sleep(33)` for ~30fps animation.
+   *
+   * @param ms - Number of milliseconds to sleep
+   */
+  sleep(#[bigint] ms: number): Promise<void>;
+  /**
    * Send an arbitrary LSP request and receive the raw JSON response
    * @param language - Language ID (e.g., "cpp")
    * @param method - Full LSP method (e.g., "textDocument/switchSourceHeader")

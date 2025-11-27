@@ -1,6 +1,6 @@
 /// <reference path="../types/fresh.d.ts" />
 
-import { VirtualBufferFactory } from "./lib/index.ts";
+import { VirtualBufferFactory, AsciiAnimation, FRESH_ART } from "./lib/index.ts";
 
 
 
@@ -34,19 +34,15 @@ const createEntriesFromLines = (lines: string[]): TextPropertyEntry[] =>
     properties: {},
   }));
 
+// Animation state
+let titleAnimation: AsciiAnimation | null = null;
+let manualBufferId: number | null = null;
 
-
-const buildManualEntries = (): TextPropertyEntry[] => {
+const buildManualEntries = (titleLines: string[]): TextPropertyEntry[] => {
   const C = COLORS;
   const manualText = [
-    // Content from example.html converted to ANSI
     "",
-    `${C.BOLD}${C.BRIGHT_GREEN}███████╗██████╗ ███████╗███████╗██╗  ██╗`,
-    `${C.BOLD}${C.BRIGHT_GREEN}██╔════╝██╔══██╗██╔════╝██╔════╝██║  ██║`,
-    `${C.BOLD}${C.BRIGHT_GREEN}█████╗  ██████╔╝█████╗  ███████╗███████║`,
-    `${C.BOLD}${C.BRIGHT_GREEN}██╔══╝  ██╔══██╗██╔══╝  ╚════██║██╔══██║`,
-    `${C.BOLD}${C.BRIGHT_GREEN}██║     ██║  ██║███████╗███████║██║  ██║`,
-    `${C.BOLD}${C.BRIGHT_GREEN}╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝${C.RESET}`,
+    ...titleLines,
     "",
     `${C.BOLD}${C.BRIGHT_YELLOW}The Terminal Text Editor${C.RESET}`,
     "",
@@ -177,8 +173,34 @@ const openVirtualBuffer = async (
 };
 
 const openManual = async (): Promise<void> => {
-  const entries = buildManualEntries();
-  await openVirtualBuffer("*Fresh Manual*", entries, MANUAL_MODE);
+  // Create animation for the FRESH title
+  titleAnimation = new AsciiAnimation(FRESH_ART);
+
+  // Get initial animated frame (starts pixelated, wave at far left)
+  const initialTitleLines = titleAnimation.render();
+  const entries = buildManualEntries(initialTitleLines);
+
+  try {
+    manualBufferId = await VirtualBufferFactory.create({
+      name: "*Fresh Manual*",
+      mode: MANUAL_MODE,
+      entries,
+      showLineNumbers: false,
+      editingDisabled: true,
+      readOnly: true,
+    });
+
+    // Start animation loop
+    titleAnimation.start((titleLines) => {
+      if (manualBufferId !== null) {
+        const updatedEntries = buildManualEntries(titleLines);
+        VirtualBufferFactory.updateContent(manualBufferId, updatedEntries);
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    editor.setStatus(`Failed to open Fresh Manual: ${message}`);
+  }
 };
 
 const openShortcuts = async (bindings: { key: string; action: string }[]): Promise<void> => {
@@ -207,6 +229,13 @@ editor.defineMode(
 );
 
 globalThis.manual_help_close = () => {
+  // Stop the title animation if running
+  if (titleAnimation) {
+    titleAnimation.stop();
+    titleAnimation = null;
+  }
+  manualBufferId = null;
+
   const bufferId = editor.getActiveBufferId();
   editor.closeBuffer(bufferId);
 };

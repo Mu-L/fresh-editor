@@ -782,6 +782,22 @@ killProcess(#[bigint] process_id: number): Promise<boolean>
 |------|------|-------------|
 | `#[bigint] process_id` | `number` | - |
 
+#### `sleep`
+
+Sleep for the specified number of milliseconds
+This allows plugins to implement delays and animation loops.
+Use in async functions: `await editor.sleep(33)` for ~30fps animation.
+
+```typescript
+sleep(#[bigint] ms: number): Promise<void>
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `#[bigint] ms` | `number` | - |
+
 #### `sendLspRequest`
 
 Send an arbitrary LSP request and receive the raw JSON response
