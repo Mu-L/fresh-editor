@@ -119,7 +119,7 @@ impl Editor {
         self.set_status_message("Editor focused".to_string());
     }
 
-    fn init_file_explorer(&mut self) {
+    pub(crate) fn init_file_explorer(&mut self) {
         let root_path = self.working_dir.clone();
 
         if let (Some(runtime), Some(bridge)) = (&self.tokio_runtime, &self.async_bridge) {

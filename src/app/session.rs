@@ -267,6 +267,12 @@ impl Editor {
         self.file_explorer_visible = session.file_explorer.visible;
         self.file_explorer_width_percent = session.file_explorer.width_percent;
 
+        // Initialize file explorer if it was visible in the session
+        // Note: We keep key_context as Normal so the editor has focus, not the explorer
+        if self.file_explorer_visible && self.file_explorer.is_none() {
+            self.init_file_explorer();
+        }
+
         // 5. Open files from the session and build buffer mappings
         // This is done by collecting all unique file paths from the split layout
         let file_paths = collect_file_paths(&session.split_layout);

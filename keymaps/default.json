@@ -594,7 +594,7 @@
       "comment": "Normal context - File explorer",
       "key": "b",
       "modifiers": ["ctrl"],
-      "action": "focus_file_explorer",
+      "action": "toggle_file_explorer",
       "args": {},
       "when": "normal"
     },
@@ -1311,7 +1311,7 @@
     {
       "key": "b",
       "modifiers": ["ctrl"],
-      "action": "focus_editor",
+      "action": "toggle_file_explorer",
       "args": {},
       "when": "file_explorer"
     },
