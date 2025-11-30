@@ -65,6 +65,11 @@ struct Args {
     /// Don't restore previous session (start fresh)
     #[arg(long)]
     no_session: bool,
+
+    /// Run the application in graphical user interface (GUI) mode using eframe/egui.
+    /// Note: This requires the application to be compiled with the 'gui' feature.
+    #[arg(long)]
+    gui: bool,
 }
 
 fn main() -> io::Result<()> {
@@ -75,6 +80,11 @@ fn main() -> io::Result<()> {
     if args.script_schema {
         println!("{}", fresh::app::script_control::get_command_schema());
         return Ok(());
+    }
+
+    // Handle GUI mode
+    if args.gui {
+        return run_gui(&args);
     }
 
     // Handle script control mode
@@ -390,4 +400,320 @@ fn coalesce_mouse_moves(
         }
     }
     Ok((latest, None))
+}
+
+/// Run the application in GUI mode using eframe/egui.
+/// This function is only available when compiled with the 'gui' feature.
+#[cfg(feature = "gui")]
+fn run_gui(args: &Args) -> io::Result<()> {
+    use eframe::egui;
+    use egui_ratatui::RataguiBackend;
+    use ratatui::Terminal;
+    use soft_ratatui::embedded_graphics_unicodefonts::{
+        mono_8x13_atlas, mono_8x13_bold_atlas, mono_8x13_italic_atlas,
+    };
+    use soft_ratatui::{EmbeddedGraphics, SoftBackend};
+
+    // Initialize tracing for GUI mode
+    if let Ok(log_file) = std::fs::File::create(&args.log_file) {
+        tracing_subscriber::registry()
+            .with(fmt::layer().with_writer(std::sync::Arc::new(log_file)))
+            .with(EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()))
+            .init();
+    }
+
+    tracing::info!("Starting GUI mode");
+
+    // Install signal handlers
+    signal_handler::install_signal_handlers();
+
+    // Load configuration
+    let editor_config = if let Some(config_path) = &args.config {
+        match config::Config::load_from_file(config_path) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                eprintln!(
+                    "Error: Failed to load config from {}: {}",
+                    config_path.display(),
+                    e
+                );
+                return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
+            }
+        }
+    } else {
+        config::Config::default()
+    };
+
+    // Determine working directory and file to open
+    let (working_dir, file_to_open, _show_file_explorer) = if let Some(path) = &args.file {
+        if path.is_dir() {
+            (Some(path.clone()), None, true)
+        } else {
+            (None, Some(path.clone()), false)
+        }
+    } else {
+        (None, None, false)
+    };
+
+    // Initial terminal size (will be resized based on window)
+    let initial_cols = 100u16;
+    let initial_rows = 40u16;
+
+    // Create fonts for soft_ratatui
+    let font_regular = mono_8x13_atlas();
+    let font_bold = mono_8x13_bold_atlas();
+    let font_italic = mono_8x13_italic_atlas();
+
+    // Create soft backend
+    let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
+        initial_cols,
+        initial_rows,
+        font_regular,
+        Some(font_bold),
+        Some(font_italic),
+    );
+
+    // Create ratatui backend wrapper for egui
+    let backend = RataguiBackend::new("fresh_gui", soft_backend);
+    let terminal = Terminal::new(backend)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
+    // Create editor
+    let editor = if args.no_plugins {
+        Editor::with_plugins_disabled(editor_config, initial_cols, initial_rows, working_dir)?
+    } else {
+        Editor::with_working_dir(editor_config, initial_cols, initial_rows, working_dir)?
+    };
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1024.0, 768.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Fresh Editor",
+        options,
+        Box::new(move |_cc| {
+            let mut app = GuiApp::new(terminal, editor);
+            // Open file if provided
+            if let Some(path) = file_to_open {
+                if let Err(e) = app.editor.open_file(&path) {
+                    tracing::error!("Failed to open file: {}", e);
+                }
+            }
+            Ok(Box::new(app))
+        }),
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+}
+
+/// GUI application using egui_ratatui to render the editor.
+#[cfg(feature = "gui")]
+struct GuiApp {
+    terminal: Terminal<egui_ratatui::RataguiBackend<soft_ratatui::EmbeddedGraphics>>,
+    editor: Editor,
+    last_size: (u16, u16),
+}
+
+#[cfg(feature = "gui")]
+impl GuiApp {
+    fn new(
+        terminal: Terminal<egui_ratatui::RataguiBackend<soft_ratatui::EmbeddedGraphics>>,
+        editor: Editor,
+    ) -> Self {
+        Self {
+            terminal,
+            editor,
+            last_size: (100, 40),
+        }
+    }
+
+    fn handle_keyboard_input(&mut self, ctx: &eframe::egui::Context) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        ctx.input(|input| {
+            for event in &input.events {
+                if let eframe::egui::Event::Key {
+                    key,
+                    pressed,
+                    modifiers,
+                    ..
+                } = event
+                {
+                    if !pressed {
+                        continue;
+                    }
+
+                    let mut key_modifiers = KeyModifiers::empty();
+                    if modifiers.ctrl {
+                        key_modifiers |= KeyModifiers::CONTROL;
+                    }
+                    if modifiers.shift {
+                        key_modifiers |= KeyModifiers::SHIFT;
+                    }
+                    if modifiers.alt {
+                        key_modifiers |= KeyModifiers::ALT;
+                    }
+
+                    let key_code = match key {
+                        eframe::egui::Key::A => KeyCode::Char('a'),
+                        eframe::egui::Key::B => KeyCode::Char('b'),
+                        eframe::egui::Key::C => KeyCode::Char('c'),
+                        eframe::egui::Key::D => KeyCode::Char('d'),
+                        eframe::egui::Key::E => KeyCode::Char('e'),
+                        eframe::egui::Key::F => KeyCode::Char('f'),
+                        eframe::egui::Key::G => KeyCode::Char('g'),
+                        eframe::egui::Key::H => KeyCode::Char('h'),
+                        eframe::egui::Key::I => KeyCode::Char('i'),
+                        eframe::egui::Key::J => KeyCode::Char('j'),
+                        eframe::egui::Key::K => KeyCode::Char('k'),
+                        eframe::egui::Key::L => KeyCode::Char('l'),
+                        eframe::egui::Key::M => KeyCode::Char('m'),
+                        eframe::egui::Key::N => KeyCode::Char('n'),
+                        eframe::egui::Key::O => KeyCode::Char('o'),
+                        eframe::egui::Key::P => KeyCode::Char('p'),
+                        eframe::egui::Key::Q => KeyCode::Char('q'),
+                        eframe::egui::Key::R => KeyCode::Char('r'),
+                        eframe::egui::Key::S => KeyCode::Char('s'),
+                        eframe::egui::Key::T => KeyCode::Char('t'),
+                        eframe::egui::Key::U => KeyCode::Char('u'),
+                        eframe::egui::Key::V => KeyCode::Char('v'),
+                        eframe::egui::Key::W => KeyCode::Char('w'),
+                        eframe::egui::Key::X => KeyCode::Char('x'),
+                        eframe::egui::Key::Y => KeyCode::Char('y'),
+                        eframe::egui::Key::Z => KeyCode::Char('z'),
+                        eframe::egui::Key::Num0 => KeyCode::Char('0'),
+                        eframe::egui::Key::Num1 => KeyCode::Char('1'),
+                        eframe::egui::Key::Num2 => KeyCode::Char('2'),
+                        eframe::egui::Key::Num3 => KeyCode::Char('3'),
+                        eframe::egui::Key::Num4 => KeyCode::Char('4'),
+                        eframe::egui::Key::Num5 => KeyCode::Char('5'),
+                        eframe::egui::Key::Num6 => KeyCode::Char('6'),
+                        eframe::egui::Key::Num7 => KeyCode::Char('7'),
+                        eframe::egui::Key::Num8 => KeyCode::Char('8'),
+                        eframe::egui::Key::Num9 => KeyCode::Char('9'),
+                        eframe::egui::Key::Enter => KeyCode::Enter,
+                        eframe::egui::Key::Escape => KeyCode::Esc,
+                        eframe::egui::Key::Tab => KeyCode::Tab,
+                        eframe::egui::Key::Backspace => KeyCode::Backspace,
+                        eframe::egui::Key::Delete => KeyCode::Delete,
+                        eframe::egui::Key::ArrowUp => KeyCode::Up,
+                        eframe::egui::Key::ArrowDown => KeyCode::Down,
+                        eframe::egui::Key::ArrowLeft => KeyCode::Left,
+                        eframe::egui::Key::ArrowRight => KeyCode::Right,
+                        eframe::egui::Key::Home => KeyCode::Home,
+                        eframe::egui::Key::End => KeyCode::End,
+                        eframe::egui::Key::PageUp => KeyCode::PageUp,
+                        eframe::egui::Key::PageDown => KeyCode::PageDown,
+                        eframe::egui::Key::Space => KeyCode::Char(' '),
+                        eframe::egui::Key::F1 => KeyCode::F(1),
+                        eframe::egui::Key::F2 => KeyCode::F(2),
+                        eframe::egui::Key::F3 => KeyCode::F(3),
+                        eframe::egui::Key::F4 => KeyCode::F(4),
+                        eframe::egui::Key::F5 => KeyCode::F(5),
+                        eframe::egui::Key::F6 => KeyCode::F(6),
+                        eframe::egui::Key::F7 => KeyCode::F(7),
+                        eframe::egui::Key::F8 => KeyCode::F(8),
+                        eframe::egui::Key::F9 => KeyCode::F(9),
+                        eframe::egui::Key::F10 => KeyCode::F(10),
+                        eframe::egui::Key::F11 => KeyCode::F(11),
+                        eframe::egui::Key::F12 => KeyCode::F(12),
+                        _ => continue,
+                    };
+
+                    // Apply shift to letter keys
+                    let key_code = if modifiers.shift {
+                        match key_code {
+                            KeyCode::Char(c) if c.is_ascii_lowercase() => {
+                                KeyCode::Char(c.to_ascii_uppercase())
+                            }
+                            other => other,
+                        }
+                    } else {
+                        key_code
+                    };
+
+                    if let Err(e) = self.editor.handle_key(key_code, key_modifiers) {
+                        tracing::error!("Error handling key: {}", e);
+                    }
+                }
+            }
+
+            // Handle text input for characters not covered by key events
+            for event in &input.events {
+                if let eframe::egui::Event::Text(text) = event {
+                    for c in text.chars() {
+                        // Skip control characters and already-handled keys
+                        if c.is_control() || c.is_ascii_alphabetic() || c.is_ascii_digit() || c == ' ' {
+                            continue;
+                        }
+                        if let Err(e) = self.editor.handle_key(KeyCode::Char(c), KeyModifiers::empty()) {
+                            tracing::error!("Error handling text input: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(feature = "gui")]
+impl eframe::App for GuiApp {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        // Process async messages from the editor
+        self.editor.process_async_messages();
+
+        // Handle keyboard input
+        self.handle_keyboard_input(ctx);
+
+        // Check if we should quit
+        if self.editor.should_quit() {
+            ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+            return;
+        }
+
+        // Render the editor to the terminal
+        if let Err(e) = self.terminal.draw(|frame| {
+            self.editor.render(frame);
+        }) {
+            tracing::error!("Failed to draw terminal: {}", e);
+        }
+
+        // Display the terminal in egui
+        eframe::egui::CentralPanel::default()
+            .frame(eframe::egui::Frame::NONE)
+            .show(ctx, |ui| {
+                // Calculate new size based on available space
+                let available = ui.available_size();
+                // Font is 8x13 pixels
+                let cols = (available.x / 8.0) as u16;
+                let rows = (available.y / 13.0) as u16;
+
+                // Resize if needed
+                if (cols, rows) != self.last_size && cols > 0 && rows > 0 {
+                    self.last_size = (cols, rows);
+                    self.editor.resize(cols, rows);
+
+                    // Resize the soft backend
+                    self.terminal.backend_mut().soft_backend.resize(cols, rows);
+                }
+
+                ui.add(self.terminal.backend_mut());
+            });
+
+        // Request continuous repainting for smooth updates
+        ctx.request_repaint();
+    }
+}
+
+/// Fallback stub for run_gui when the 'gui' feature is NOT compiled.
+#[cfg(not(feature = "gui"))]
+fn run_gui(_args: &Args) -> io::Result<()> {
+    eprintln!(
+        "Error: The GUI feature was not compiled. Please rebuild with 'cargo build --features gui'."
+    );
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "GUI feature not available",
+    ))
 }

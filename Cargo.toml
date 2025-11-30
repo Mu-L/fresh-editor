@@ -63,6 +63,10 @@ dirs = "6.0"  # For XDG/platform-specific directory detection
 pulldown-cmark = "0.13"  # Markdown parsing for LSP hover docs
 arboard = "3.6"  # Cross-platform system clipboard access
 notify = "8.2.0"
+eframe = { version = "0.33.2", optional = true }
+egui = { version = "0.33.2", optional = true }
+egui_ratatui = { version = "2.0.1", optional = true }
+soft_ratatui = { version = "0.1.2", optional = true, features = ["embedded-graphics", "unicodefonts"] }
 # tree-sitter-markdown = "0.7.1"  # Disabled due to tree-sitter version conflict (uses 0.19.5 instead of 0.25.x)
 
 [dev-dependencies]
@@ -79,5 +83,13 @@ debug = true
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[features]
+gui = [
+    "dep:eframe",
+    "dep:egui",
+    "dep:egui_ratatui",
+    "dep:soft_ratatui",
+]
 
 
