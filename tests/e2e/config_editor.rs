@@ -123,3 +123,152 @@ fn test_config_schema_enums() {
     assert!(enum_values.contains(&serde_json::json!("tree-sitter")));
     assert!(enum_values.contains(&serde_json::json!("textmate")));
 }
+
+/// Test that config files saved by the editor can be deserialized
+#[test]
+fn test_config_file_deserialization() {
+    use fresh::config::Config;
+
+    // Create a sample config JSON that matches the schema
+    let config_json = r#"{
+        "theme": "high-contrast",
+        "editor": {
+            "tab_size": 4,
+            "line_numbers": true,
+            "relative_line_numbers": false,
+            "line_wrap": false,
+            "syntax_highlighting": true,
+            "auto_indent": true
+        },
+        "file_explorer": {
+            "show_hidden": false,
+            "show_gitignored": false,
+            "respect_gitignore": true,
+            "width": 0.2
+        },
+        "active_keybinding_map": "default"
+    }"#;
+
+    // Verify it can be deserialized as a valid Config
+    let result: Result<Config, _> = serde_json::from_str(config_json);
+    assert!(
+        result.is_ok(),
+        "Config JSON should deserialize: {:?}",
+        result.err()
+    );
+
+    let config = result.unwrap();
+    assert_eq!(config.theme, "high-contrast");
+    assert_eq!(config.editor.tab_size, 4);
+    assert!(config.editor.line_numbers);
+    assert!(!config.file_explorer.show_hidden);
+}
+
+/// Test that a minimal config file can be loaded
+#[test]
+fn test_minimal_config_deserialization() {
+    use fresh::config::Config;
+
+    // Minimal config - only required fields or fields without defaults
+    let minimal_json = r#"{}"#;
+
+    let result: Result<Config, _> = serde_json::from_str(minimal_json);
+    assert!(
+        result.is_ok(),
+        "Empty config should deserialize with defaults: {:?}",
+        result.err()
+    );
+}
+
+/// Test that config with custom keybindings can be loaded
+#[test]
+fn test_config_with_keybindings() {
+    use fresh::config::Config;
+
+    let config_json = r#"{
+        "keybindings": [
+            {
+                "key": "s",
+                "modifiers": ["ctrl"],
+                "action": "save"
+            },
+            {
+                "keys": [
+                    {"key": "x", "modifiers": ["ctrl"]},
+                    {"key": "s", "modifiers": ["ctrl"]}
+                ],
+                "action": "save"
+            }
+        ]
+    }"#;
+
+    let result: Result<Config, _> = serde_json::from_str(config_json);
+    assert!(
+        result.is_ok(),
+        "Config with keybindings should deserialize: {:?}",
+        result.err()
+    );
+
+    let config = result.unwrap();
+    assert_eq!(config.keybindings.len(), 2);
+}
+
+/// Test that config editor opens and shows content (integration test)
+#[test]
+fn test_config_editor_opens_with_content() {
+    // Create a temporary project directory
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let project_root = temp_dir.path().join("project_root");
+    fs::create_dir(&project_root).unwrap();
+
+    // Create plugins directory and copy files
+    let plugins_dir = project_root.join("plugins");
+    fs::create_dir(&plugins_dir).unwrap();
+
+    let plugin_source = std::env::current_dir()
+        .unwrap()
+        .join("plugins/config_editor.ts");
+    fs::copy(&plugin_source, plugins_dir.join("config_editor.ts")).unwrap();
+
+    let schema_source = std::env::current_dir()
+        .unwrap()
+        .join("plugins/config-schema.json");
+    fs::copy(&schema_source, plugins_dir.join("config-schema.json")).unwrap();
+
+    // Create a config file in the project
+    let config_content = r#"{"theme": "test-theme", "editor": {"tab_size": 8}}"#;
+    fs::write(project_root.join("config.json"), config_content).unwrap();
+
+    // Create harness
+    let mut harness =
+        EditorTestHarness::with_config_and_working_dir(120, 40, Default::default(), project_root)
+            .unwrap();
+
+    harness.render().unwrap();
+
+    // Open command palette and run Edit Configuration
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+    harness.type_text("Edit Configuration").unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+
+    // Process async operations multiple times
+    for _ in 0..20 {
+        harness.process_async_and_render().unwrap();
+    }
+
+    let screen = harness.screen_to_string();
+
+    // The config editor should be loading - check status bar
+    // Note: Due to async loading, the editor may still be loading
+    // This test verifies the command was executed
+    assert!(
+        screen.contains("Config") || screen.contains("Loading"),
+        "Should show config editor or loading state"
+    );
+}

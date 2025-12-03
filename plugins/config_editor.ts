@@ -108,14 +108,14 @@ function findSchemaPath(): string {
 
   // Try several locations
   const candidates = [
-    editor.pathJoin([cwd, "plugins", "config-schema.json"]),
-    editor.pathJoin([cwd, "config-schema.json"]),
+    editor.pathJoin(cwd, "plugins", "config-schema.json"),
+    editor.pathJoin(cwd, "config-schema.json"),
   ];
 
   // Also try relative to HOME/.config/fresh
   const home = editor.getEnv("HOME");
   if (home) {
-    candidates.push(editor.pathJoin([home, ".config", "fresh", "plugins", "config-schema.json"]));
+    candidates.push(editor.pathJoin(home, ".config", "fresh", "plugins", "config-schema.json"));
   }
 
   for (const path of candidates) {
@@ -517,7 +517,7 @@ function findConfigPath(): string {
   const cwd = editor.getCwd();
 
   // Try local config first
-  const localConfig = editor.pathJoin([cwd, "config.json"]);
+  const localConfig = editor.pathJoin(cwd, "config.json");
   if (editor.fileExists(localConfig)) {
     return localConfig;
   }
@@ -525,7 +525,7 @@ function findConfigPath(): string {
   // Try ~/.config/fresh/config.json
   const home = editor.getEnv("HOME");
   if (home) {
-    const userConfig = editor.pathJoin([home, ".config", "fresh", "config.json"]);
+    const userConfig = editor.pathJoin(home, ".config", "fresh", "config.json");
     if (editor.fileExists(userConfig)) {
       return userConfig;
     }
@@ -1205,6 +1205,36 @@ globalThis.onConfigEditorCursorMoved = function(data: {
 
 editor.on("cursor_moved", "onConfigEditorCursorMoved");
 
+/**
+ * Track whether config editor commands are currently registered
+ */
+let commandsRegistered = false;
+
+/**
+ * Handle buffer activation - register commands when config editor becomes active
+ */
+globalThis.onConfigEditorBufferActivated = function(data: { buffer_id: number }): boolean {
+  if (state.isOpen && state.bufferId === data.buffer_id && !commandsRegistered) {
+    registerConfigEditorCommands();
+    commandsRegistered = true;
+  }
+  return true;
+};
+
+/**
+ * Handle buffer deactivation - unregister commands when config editor loses focus
+ */
+globalThis.onConfigEditorBufferDeactivated = function(data: { buffer_id: number }): boolean {
+  if (state.isOpen && state.bufferId === data.buffer_id && commandsRegistered) {
+    unregisterConfigEditorCommands();
+    commandsRegistered = false;
+  }
+  return true;
+};
+
+editor.on("buffer_activated", "onConfigEditorBufferActivated");
+editor.on("buffer_deactivated", "onConfigEditorBufferDeactivated");
+
 // =============================================================================
 // Public Commands
 // =============================================================================
@@ -1256,6 +1286,13 @@ globalThis.open_config_editor = async function(): Promise<void> {
     state.bufferId = result.buffer_id;
     state.splitId = result.split_id ?? null;
 
+    // Commands will be registered by buffer_activated hook
+    // Register them now as well in case the hook doesn't fire immediately
+    if (!commandsRegistered) {
+      registerConfigEditorCommands();
+      commandsRegistered = true;
+    }
+
     applyHighlighting();
     editor.setStatus("Config Editor | ↑/↓: navigate | RET: edit | s: save | q: quit");
   } else {
@@ -1283,6 +1320,12 @@ globalThis.config_editor_close = function(): void {
   // Focus source
   if (state.sourceSplitId !== null) {
     editor.focusSplit(state.sourceSplitId);
+  }
+
+  // Unregister commands since config editor is closed
+  if (commandsRegistered) {
+    unregisterConfigEditorCommands();
+    commandsRegistered = false;
   }
 
   // Reset state
@@ -1448,66 +1491,86 @@ globalThis.config_editor_show_help = function(): void {
 // Command Registration
 // =============================================================================
 
+/**
+ * Register commands that should only be available when config editor is open
+ */
+function registerConfigEditorCommands(): void {
+  editor.registerCommand(
+    "config_editor_close",
+    "Close the config editor",
+    "config_editor_close",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_edit_field",
+    "Edit the selected field",
+    "config_editor_edit_field",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_toggle_or_edit",
+    "Toggle boolean or edit field",
+    "config_editor_toggle_or_edit",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_toggle_section",
+    "Expand or collapse section",
+    "config_editor_toggle_section",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_reset_to_default",
+    "Reset field to default value",
+    "config_editor_reset_to_default",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_save",
+    "Save configuration",
+    "config_editor_save",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_reload",
+    "Reload configuration from file",
+    "config_editor_reload",
+    "normal"
+  );
+
+  editor.registerCommand(
+    "config_editor_show_help",
+    "Show config editor help",
+    "config_editor_show_help",
+    "normal"
+  );
+}
+
+/**
+ * Unregister commands when config editor is closed
+ */
+function unregisterConfigEditorCommands(): void {
+  editor.unregisterCommand("config_editor_close");
+  editor.unregisterCommand("config_editor_edit_field");
+  editor.unregisterCommand("config_editor_toggle_or_edit");
+  editor.unregisterCommand("config_editor_toggle_section");
+  editor.unregisterCommand("config_editor_reset_to_default");
+  editor.unregisterCommand("config_editor_save");
+  editor.unregisterCommand("config_editor_reload");
+  editor.unregisterCommand("config_editor_show_help");
+}
+
+// Register the open command permanently (always available)
 editor.registerCommand(
   "Edit Configuration",
   "Open the configuration editor",
   "open_config_editor",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_close",
-  "Close the config editor",
-  "config_editor_close",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_edit_field",
-  "Edit the selected field",
-  "config_editor_edit_field",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_toggle_or_edit",
-  "Toggle boolean or edit field",
-  "config_editor_toggle_or_edit",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_toggle_section",
-  "Expand or collapse section",
-  "config_editor_toggle_section",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_reset_to_default",
-  "Reset field to default value",
-  "config_editor_reset_to_default",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_save",
-  "Save configuration",
-  "config_editor_save",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_reload",
-  "Reload configuration from file",
-  "config_editor_reload",
-  "normal"
-);
-
-editor.registerCommand(
-  "config_editor_show_help",
-  "Show config editor help",
-  "config_editor_show_help",
   "normal"
 );
 
