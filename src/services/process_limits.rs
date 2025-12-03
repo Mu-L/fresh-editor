@@ -3,13 +3,14 @@
 /// Provides cross-platform support for limiting memory and CPU usage of spawned processes.
 /// On Linux, uses user-delegated cgroups v2 if available, otherwise falls back to setrlimit.
 /// Memory and CPU limits are decoupled - memory can work without CPU delegation.
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
 
 /// Configuration for process resource limits
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ProcessLimits {
     /// Maximum memory usage in megabytes (None = no limit)
     #[serde(default)]

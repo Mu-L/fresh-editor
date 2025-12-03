@@ -7,6 +7,7 @@ use lsp_types::{
     ServerCapabilities, TextDocumentContentChangeEvent, TextDocumentItem, Uri,
     VersionedTextDocumentIdentifier, WorkspaceFolder,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -450,7 +451,7 @@ impl Drop for LspClient {
 }
 
 /// Configuration for a language server
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LspServerConfig {
     /// Command to spawn the server
     pub command: String,

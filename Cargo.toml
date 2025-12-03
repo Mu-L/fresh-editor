@@ -13,6 +13,10 @@ categories = ["command-line-utilities", "text-editors"]
 name = "fresh"
 path = "src/main.rs"
 
+[[bin]]
+name = "generate_config_schema"
+path = "src/bin/generate_config_schema.rs"
+
 [lib]
 name = "fresh"
 path = "src/lib.rs"
@@ -65,6 +69,7 @@ pulldown-cmark = "0.13"  # Markdown parsing for LSP hover docs
 sha2 = "0.10"  # SHA-256 checksums for recovery file integrity
 arboard = "3.6"  # Cross-platform system clipboard access
 notify = "8.2.0"
+schemars = "0.8"  # JSON Schema generation for config editor
 syntect = "5.2"  # TextMate grammar support for syntax highlighting
 # tree-sitter-markdown = "0.7.1"  # Disabled due to tree-sitter version conflict (uses 0.19.5 instead of 0.25.x)
 

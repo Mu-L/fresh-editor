@@ -1,10 +1,11 @@
 use crate::services::lsp::client::LspServerConfig;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Config {
     #[serde(default = "default_theme_name")]
     pub theme: String,
@@ -47,7 +48,7 @@ fn default_theme_name() -> String {
 }
 
 /// Editor behavior configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EditorConfig {
     #[serde(default = "default_tab_size")]
     pub tab_size: usize,
@@ -171,7 +172,7 @@ impl Default for EditorConfig {
 }
 
 /// File explorer configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FileExplorerConfig {
     /// Whether to respect .gitignore files
     #[serde(default = "default_true")]
@@ -211,7 +212,7 @@ impl Default for FileExplorerConfig {
 }
 
 /// A single key in a sequence
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct KeyPress {
     /// Key name (e.g., "a", "Enter", "F1")
     pub key: String,
@@ -221,7 +222,7 @@ pub struct KeyPress {
 }
 
 /// Keybinding definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Keybinding {
     /// Key name (e.g., "a", "Enter", "F1") - for single-key bindings
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -249,7 +250,7 @@ pub struct Keybinding {
 }
 
 /// Keymap configuration (for built-in and user-defined keymaps)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct KeymapConfig {
     /// Optional parent keymap to inherit from
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -261,7 +262,7 @@ pub struct KeymapConfig {
 }
 
 /// Language-specific configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LanguageConfig {
     /// File extensions for this language
     pub extensions: Vec<String>,
@@ -288,7 +289,7 @@ pub struct LanguageConfig {
 }
 
 /// Preference for which syntax highlighting backend to use
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum HighlighterPreference {
     /// Use tree-sitter if available, fall back to TextMate
@@ -303,21 +304,21 @@ pub enum HighlighterPreference {
 }
 
 /// Menu bar configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MenuConfig {
     #[serde(default)]
     pub menus: Vec<Menu>,
 }
 
 /// A top-level menu in the menu bar
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Menu {
     pub label: String,
     pub items: Vec<MenuItem>,
 }
 
 /// A menu item (action, separator, or submenu)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum MenuItem {
     /// A separator line
