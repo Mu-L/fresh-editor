@@ -88,6 +88,10 @@ split-debuginfo = "packed"
 inherits = "release"
 lto = "thin"
 
+[package.metadata.dist]
+# Point dist at the changelog so GitHub Releases get populated
+changelog = "RELEASE_NOTES.md"
+
 # Debian package configuration for cargo-deb
 [package.metadata.deb]
 maintainer = "Noam Lewis"
