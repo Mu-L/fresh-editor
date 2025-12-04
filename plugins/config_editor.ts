@@ -550,6 +550,14 @@ function deleteNestedValue(obj: Record<string, unknown>, path: string): void {
 /**
  * Infer a schema from an actual object's structure
  * Used when JSON Schema doesn't provide explicit nestedSchema (e.g., anyOf/oneOf patterns)
+ *
+ * TODO: schemars generates broken schemas for Rust #[serde(untagged)] enums (like MenuItem).
+ * Instead of proper anyOf with object variants, it generates a string enum with field descriptions.
+ * Options to fix:
+ *   1. Custom schema post-processing in build.rs to detect and fix untagged enum patterns
+ *   2. Change MenuItem etc. to use tagged enums (changes JSON format but gives proper schemas)
+ *   3. Use a different schema generator that handles untagged enums better
+ * Option #2 is likely the cleanest - tagged enums are more explicit and self-documenting.
  */
 function inferSchemaFromObject(obj: Record<string, unknown>): Record<string, FieldSchema> {
   const schema: Record<string, FieldSchema> = {};

@@ -7,12 +7,15 @@ use std::path::Path;
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Config {
+    /// Color theme name (e.g., "high-contrast", "monokai", "solarized-dark")
     #[serde(default = "default_theme_name")]
     pub theme: String,
 
+    /// Editor behavior settings (indentation, line numbers, wrapping, etc.)
     #[serde(default)]
     pub editor: EditorConfig,
 
+    /// File explorer panel settings
     #[serde(default)]
     pub file_explorer: FileExplorerConfig,
 
@@ -29,12 +32,15 @@ pub struct Config {
     #[serde(default = "default_keybinding_map_name")]
     pub active_keybinding_map: String,
 
+    /// Per-language configuration overrides (tab size, formatters, etc.)
     #[serde(default)]
     pub languages: HashMap<String, LanguageConfig>,
 
+    /// LSP server configurations by language
     #[serde(default)]
     pub lsp: HashMap<String, LspServerConfig>,
 
+    /// Menu bar configuration
     #[serde(default)]
     pub menu: MenuConfig,
 }
@@ -50,30 +56,39 @@ fn default_theme_name() -> String {
 /// Editor behavior configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct EditorConfig {
+    /// Number of spaces per tab character
     #[serde(default = "default_tab_size")]
     pub tab_size: usize,
 
+    /// Automatically indent new lines based on the previous line
     #[serde(default = "default_true")]
     pub auto_indent: bool,
 
+    /// Show line numbers in the gutter
     #[serde(default = "default_true")]
     pub line_numbers: bool,
 
+    /// Show line numbers relative to cursor position
     #[serde(default = "default_false")]
     pub relative_line_numbers: bool,
 
+    /// Minimum lines to keep visible above/below cursor when scrolling
     #[serde(default = "default_scroll_offset")]
     pub scroll_offset: usize,
 
+    /// Enable syntax highlighting for code files
     #[serde(default = "default_true")]
     pub syntax_highlighting: bool,
 
+    /// Wrap long lines to fit the window width
     #[serde(default = "default_true")]
     pub line_wrap: bool,
 
+    /// Maximum time in milliseconds for syntax highlighting per frame
     #[serde(default = "default_highlight_timeout")]
     pub highlight_timeout_ms: u64,
 
+    /// Undo history snapshot interval (number of edits between snapshots)
     #[serde(default = "default_snapshot_interval")]
     pub snapshot_interval: usize,
 
@@ -306,6 +321,7 @@ pub enum HighlighterPreference {
 /// Menu bar configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MenuConfig {
+    /// List of top-level menus in the menu bar
     #[serde(default)]
     pub menus: Vec<Menu>,
 }
@@ -313,7 +329,9 @@ pub struct MenuConfig {
 /// A top-level menu in the menu bar
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Menu {
+    /// Display label for the menu (e.g., "File", "Edit")
     pub label: String,
+    /// Menu items (actions, separators, or submenus)
     pub items: Vec<MenuItem>,
 }
 
