@@ -284,6 +284,80 @@ jobs:
           name: artifacts-linux-packages-${{ matrix.arch }}
           path: packages/*
 
+  # Test .deb package installation on Ubuntu
+  test-deb-package:
+    needs:
+      - plan
+      - build-linux-packages
+    if: ${{ needs.plan.outputs.publishing == 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download .deb package
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-linux-packages-amd64
+          path: packages/
+      - name: Install .deb package
+        run: |
+          sudo dpkg -i packages/*.deb || sudo apt-get install -f -y
+      - name: Verify installation
+        run: |
+          echo "=== Checking installed files ==="
+          dpkg -L fresh-editor
+
+          echo ""
+          echo "=== Testing binary ==="
+          fresh --version
+
+          echo ""
+          echo "=== Checking plugins directory ==="
+          ls -la /usr/share/fresh-editor/plugins/
+
+          echo ""
+          echo "=== Checking plugin lib directory ==="
+          ls -la /usr/share/fresh-editor/plugins/lib/
+
+          echo ""
+          echo "✓ .deb package test PASSED"
+
+  # Test .rpm package installation on Fedora
+  test-rpm-package:
+    needs:
+      - plan
+      - build-linux-packages
+    if: ${{ needs.plan.outputs.publishing == 'true' }}
+    runs-on: ubuntu-22.04
+    container:
+      image: fedora:39
+    steps:
+      - name: Download .rpm package
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-linux-packages-amd64
+          path: packages/
+      - name: Install .rpm package
+        run: |
+          dnf install -y packages/*.rpm
+      - name: Verify installation
+        run: |
+          echo "=== Checking installed files ==="
+          rpm -ql fresh-editor
+
+          echo ""
+          echo "=== Testing binary ==="
+          fresh --version
+
+          echo ""
+          echo "=== Checking plugins directory ==="
+          ls -la /usr/share/fresh-editor/plugins/
+
+          echo ""
+          echo "=== Checking plugin lib directory ==="
+          ls -la /usr/share/fresh-editor/plugins/lib/
+
+          echo ""
+          echo "✓ .rpm package test PASSED"
+
   # Determines if we should publish/announce
   host:
     needs:
@@ -291,8 +365,10 @@ jobs:
       - build-local-artifacts
       - build-global-artifacts
       - build-linux-packages
-    # Only run if we're "publishing", and only if plan, local, global and linux-packages didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && (needs.build-linux-packages.result == 'skipped' || needs.build-linux-packages.result == 'success') }}
+      - test-deb-package
+      - test-rpm-package
+    # Only run if we're "publishing", and only if all build and test jobs succeeded (skipped is fine)
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && (needs.build-linux-packages.result == 'skipped' || needs.build-linux-packages.result == 'success') && (needs.test-deb-package.result == 'skipped' || needs.test-deb-package.result == 'success') && (needs.test-rpm-package.result == 'skipped' || needs.test-rpm-package.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"
