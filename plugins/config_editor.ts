@@ -509,6 +509,48 @@ function deleteNestedValue(obj: Record<string, unknown>, path: string): void {
 }
 
 /**
+ * Infer a schema from an actual object's structure
+ * Used when JSON Schema doesn't provide explicit nestedSchema (e.g., anyOf/oneOf patterns)
+ */
+function inferSchemaFromObject(obj: Record<string, unknown>): Record<string, FieldSchema> {
+  const schema: Record<string, FieldSchema> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    schema[key] = inferSchemaFromValue(value, key);
+  }
+  return schema;
+}
+
+/**
+ * Infer a field schema from a value's type
+ */
+function inferSchemaFromValue(value: unknown, name: string): FieldSchema {
+  if (value === null || value === undefined) {
+    return { type: "string", description: name };
+  }
+  if (typeof value === "boolean") {
+    return { type: "boolean", description: name };
+  }
+  if (typeof value === "number") {
+    return { type: "number", description: name };
+  }
+  if (typeof value === "string") {
+    return { type: "string", description: name };
+  }
+  if (Array.isArray(value)) {
+    const itemSchema = value.length > 0 ? inferSchemaFromValue(value[0], "item") : { type: "string" as FieldType, description: "item" };
+    return { type: "array", description: name, itemSchema };
+  }
+  if (typeof value === "object") {
+    return {
+      type: "object",
+      description: name,
+      nestedSchema: inferSchemaFromObject(value as Record<string, unknown>),
+    };
+  }
+  return { type: "string", description: name };
+}
+
+/**
  * Calculate UTF-8 byte length of a string without using TextEncoder
  * (TextEncoder is not available in Deno plugin runtime)
  */
@@ -793,13 +835,27 @@ function buildVisibleFields(): ConfigField[] {
             const itemPath = `${path}[${i}]`;
             const itemValue = arrayValue[i];
 
-            // Check if item is a complex object
-            if (itemSchema.type === "object" && itemSchema.nestedSchema) {
+            // Check if item is a complex object (either by schema or by actual value)
+            const isComplexObject = (itemSchema.type === "object" && itemSchema.nestedSchema) ||
+              (typeof itemValue === "object" && itemValue !== null && !Array.isArray(itemValue));
+
+            if (isComplexObject) {
               const itemExpanded = state.expandedSections.has(itemPath);
+
+              // Build schema from actual object keys if no nestedSchema defined
+              let effectiveSchema = itemSchema;
+              if (!itemSchema.nestedSchema && typeof itemValue === "object" && itemValue !== null) {
+                effectiveSchema = {
+                  ...itemSchema,
+                  type: "object" as FieldType,
+                  nestedSchema: inferSchemaFromObject(itemValue as Record<string, unknown>),
+                };
+              }
+
               fields.push({
                 path: itemPath,
                 name: `[${i}]`,
-                schema: { ...itemSchema, description: `Item ${i}` },
+                schema: { ...effectiveSchema, description: `Item ${i}` },
                 value: itemValue,
                 isDefault: false,
                 depth: depth + 1,
@@ -808,9 +864,9 @@ function buildVisibleFields(): ConfigField[] {
               });
 
               // Add nested fields if expanded
-              if (itemExpanded && itemSchema.nestedSchema) {
+              if (itemExpanded && effectiveSchema.nestedSchema) {
                 const itemData = (itemValue as Record<string, unknown>) || {};
-                addFieldsFromSchema(itemSchema.nestedSchema, itemPath, depth + 2, itemData);
+                addFieldsFromSchema(effectiveSchema.nestedSchema, itemPath, depth + 2, itemData);
               }
             } else {
               // Simple array item
