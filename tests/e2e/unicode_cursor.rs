@@ -1,5 +1,6 @@
 use crate::common::harness::EditorTestHarness;
 use crossterm::event::{KeyCode, KeyModifiers};
+use tempfile::TempDir;
 
 /// Test that cursor position stays in sync when editing lines with non-ASCII characters
 /// This reproduces the bug where visual cursor position drifts from actual position
@@ -154,4 +155,219 @@ fn test_mouse_click_on_non_ascii_text() {
     // Let's assume standard gutter of 8 chars for now: " " + "   1" + " │ "
 
     // This test may need adjustment based on actual gutter rendering
+}
+
+/// Test that backspace properly deletes entire UTF-8 characters, not just bytes
+/// This reproduces the bug where backspace removes only the last byte of a multi-byte character
+#[test]
+fn test_backspace_deletes_entire_utf8_character() {
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+
+    // Test 1: Euro sign (3 bytes: 0xE2 0x82 0xAC)
+    harness.type_text("€").unwrap();
+    harness.assert_buffer_content("€");
+
+    // Backspace should delete the entire euro sign, not just one byte
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("");
+
+    // Test 2: Norwegian characters (2 bytes each: æ=0xC3 0xA6, ø=0xC3 0xB8, å=0xC3 0xA5)
+    harness.type_text("æøå").unwrap();
+    harness.assert_buffer_content("æøå");
+
+    // Backspace should delete 'å' entirely
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("æø");
+
+    // Another backspace should delete 'ø' entirely
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("æ");
+
+    // Another backspace should delete 'æ' entirely
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("");
+
+    // Test 3: Emoji (4 bytes: 😀 = U+1F600)
+    harness.type_text("a😀b").unwrap();
+    harness.assert_buffer_content("a😀b");
+
+    // Backspace should delete 'b'
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("a😀");
+
+    // Backspace should delete the entire emoji (4 bytes), not just one byte
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("a");
+}
+
+/// Test that delete (forward) properly removes entire UTF-8 characters
+#[test]
+fn test_delete_forward_removes_entire_utf8_character() {
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+
+    // Type text with multi-byte characters
+    harness.type_text("a€b").unwrap();
+    harness.assert_buffer_content("a€b");
+
+    // Move to beginning
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+
+    // Delete 'a' - this should work fine (ASCII)
+    harness
+        .send_key(KeyCode::Delete, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("€b");
+
+    // Delete '€' - should delete entire 3-byte euro sign, not just one byte
+    harness
+        .send_key(KeyCode::Delete, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("b");
+}
+
+/// Test that selecting and deleting/replacing UTF-8 characters works correctly
+#[test]
+fn test_selection_delete_with_utf8_characters() {
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+
+    // Type text with multi-byte characters: a + æ(2) + ø(2) + å(2) + b
+    harness.type_text("aæøåb").unwrap();
+    harness.assert_buffer_content("aæøåb");
+
+    // Move to beginning
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+
+    // Move right once (past 'a')
+    harness
+        .send_key(KeyCode::Right, KeyModifiers::NONE)
+        .unwrap();
+
+    // Select the three Norwegian characters by shift+right 3 times
+    harness
+        .send_key(KeyCode::Right, KeyModifiers::SHIFT)
+        .unwrap();
+    harness
+        .send_key(KeyCode::Right, KeyModifiers::SHIFT)
+        .unwrap();
+    harness
+        .send_key(KeyCode::Right, KeyModifiers::SHIFT)
+        .unwrap();
+
+    // Delete the selection with backspace
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+    harness.assert_buffer_content("ab");
+}
+
+/// Test that selecting and replacing UTF-8 characters works correctly
+#[test]
+fn test_selection_replace_with_utf8_characters() {
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+
+    // Type text with emoji
+    harness.type_text("hello😀world").unwrap();
+    harness.assert_buffer_content("hello😀world");
+
+    // Move to beginning
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+
+    // Move right 5 times (past "hello")
+    for _ in 0..5 {
+        harness
+            .send_key(KeyCode::Right, KeyModifiers::NONE)
+            .unwrap();
+    }
+
+    // Select the emoji (1 character, 4 bytes)
+    harness
+        .send_key(KeyCode::Right, KeyModifiers::SHIFT)
+        .unwrap();
+
+    // Replace with a different character
+    harness.type_text("X").unwrap();
+    harness.assert_buffer_content("helloXworld");
+}
+
+/// Test loading a file with UTF-8 characters, backspacing, saving, and verifying file content
+/// This reproduces the exact bug where backspace removes only a byte, corrupting the file on save
+#[test]
+fn test_backspace_utf8_file_save_roundtrip() {
+    let temp_dir = TempDir::new().unwrap();
+
+    // Test 1: Euro sign (3 bytes: 0xE2 0x82 0xAC)
+    let euro_path = temp_dir.path().join("euro.txt");
+    std::fs::write(&euro_path, "€\n").unwrap();
+
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+    harness.open_file(&euro_path).unwrap();
+    harness.render().unwrap();
+
+    // Move to end of line (after €, before newline)
+    harness.send_key(KeyCode::End, KeyModifiers::NONE).unwrap();
+
+    // Backspace should delete the entire euro sign
+    harness
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+
+    // Save with Ctrl+S
+    harness
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Verify the file contains only a newline (euro sign fully deleted)
+    let saved = std::fs::read(&euro_path).unwrap();
+    assert_eq!(
+        saved,
+        b"\n",
+        "Euro sign should be fully deleted, file should contain only newline. Got: {:?}",
+        saved
+    );
+
+    // Test 2: Norwegian characters (æøå)
+    let norwegian_path = temp_dir.path().join("norwegian.txt");
+    std::fs::write(&norwegian_path, "æøå\n").unwrap();
+
+    let mut harness2 = EditorTestHarness::new(80, 24).unwrap();
+    harness2.open_file(&norwegian_path).unwrap();
+    harness2.render().unwrap();
+
+    // Move to end of line
+    harness2
+        .send_key(KeyCode::End, KeyModifiers::NONE)
+        .unwrap();
+
+    // Backspace should delete 'å' entirely (2 bytes)
+    harness2
+        .send_key(KeyCode::Backspace, KeyModifiers::NONE)
+        .unwrap();
+
+    // Save
+    harness2
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness2.render().unwrap();
+
+    // Verify
+    let saved2 = std::fs::read(&norwegian_path).unwrap();
+    assert_eq!(
+        saved2,
+        "æø\n".as_bytes(),
+        "Only 'å' should be deleted, leaving 'æø'. Got: {:?}",
+        String::from_utf8_lossy(&saved2)
+    );
 }

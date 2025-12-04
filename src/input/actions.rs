@@ -1318,9 +1318,11 @@ pub fn action_to_events(
                     if let Some(range) = cursor.selection_range() {
                         Some((*cursor_id, range))
                     } else if cursor.position > 0 {
-                        let delete_from = cursor.position.saturating_sub(1);
+                        // Use prev_char_boundary to properly handle multi-byte UTF-8 characters
+                        let delete_from = state.buffer.prev_char_boundary(cursor.position);
 
                         // Check for auto-pair deletion when auto_indent is enabled
+                        // Note: Auto-pairs are ASCII-only, so we can safely check single bytes
                         if auto_indent && cursor.position < state.buffer.len() {
                             let char_before = state
                                 .buffer
@@ -1377,7 +1379,9 @@ pub fn action_to_events(
                     if let Some(range) = cursor.selection_range() {
                         Some((*cursor_id, range))
                     } else if cursor.position < buffer_len {
-                        Some((*cursor_id, cursor.position..(cursor.position + 1)))
+                        // Use next_char_boundary to properly handle multi-byte UTF-8 characters
+                        let delete_to = state.buffer.next_char_boundary(cursor.position);
+                        Some((*cursor_id, cursor.position..delete_to))
                     } else {
                         None
                     }
