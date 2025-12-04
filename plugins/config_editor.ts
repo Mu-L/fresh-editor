@@ -982,6 +982,18 @@ function buildDisplayEntries(): TextPropertyEntry[] {
     const field = state.visibleFields[i];
     const indent = "  ".repeat(field.depth);
 
+    // Add description before the field if it has one (and it's not just the field name)
+    const desc = field.schema.description;
+    if (desc && desc !== field.name && !desc.startsWith("Item ")) {
+      // Show description as single line (collapse newlines to spaces)
+      const descText = desc.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+      const descIndent = indent + "  ";
+      entries.push({
+        text: `${descIndent}${descText}\n`,
+        properties: { type: "description", path: field.path },
+      });
+    }
+
     if (field.isSection) {
       // Section header with expand/collapse indicator
       const icon = field.expanded ? "▼" : "▶";
@@ -1080,19 +1092,17 @@ function updateDisplay(): void {
   state.cachedContent = entries.map(e => e.text).join("");
   editor.setVirtualBufferContent(state.bufferId, entries);
 
-  // Restore cursor to the same field (by path) or nearest valid position
+  // Restore cursor to the same field (by path) by finding it in the entries
   if (currentPath) {
-    const newIndex = state.visibleFields.findIndex(f => f.path === currentPath);
-    if (newIndex >= 0) {
-      // Calculate byte position for target line
-      // Header is 3 lines, so field index 0 is on line 4 (0-indexed: line 3)
-      const targetLineIndex = newIndex + 3; // 3 header lines (0-indexed)
-      const lines = state.cachedContent.split("\n");
-      let byteOffset = 0;
-      for (let i = 0; i < targetLineIndex && i < lines.length; i++) {
-        byteOffset += getUtf8ByteLength(lines[i] + "\n");
+    let byteOffset = 0;
+    for (const entry of entries) {
+      const props = entry.properties as Record<string, unknown>;
+      // Find the entry that is the actual field/section (not description)
+      if (props.path === currentPath && (props.type === "section" || props.type === "field")) {
+        editor.setBufferCursor(state.bufferId, byteOffset);
+        break;
       }
-      editor.setBufferCursor(state.bufferId, byteOffset);
+      byteOffset += getUtf8ByteLength(entry.text);
     }
   }
 
