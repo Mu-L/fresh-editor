@@ -93,7 +93,7 @@ lto = "thin"
 
 [package.metadata.dist]
 # Point dist at the changelog so GitHub Releases get populated
-changelog = "RELEASE_NOTES.md"
+changelog = "CHANGELOG.md"
 
 # Debian package configuration for cargo-deb
 [package.metadata.deb]
