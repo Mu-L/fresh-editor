@@ -188,6 +188,8 @@ fn max_cursor_position(buffer: &Buffer) -> usize {
 /// * `action` - The action to convert
 /// * `tab_size` - Number of spaces per tab
 /// * `auto_indent` - Whether auto-indent is enabled
+/// * `estimated_line_length` - Estimated bytes per line for large files
+/// * `viewport_height` - Height of the viewport in lines (for PageUp/PageDown)
 ///
 /// # Returns
 /// * `Some(Vec<Event>)` - Events to apply for this action
@@ -198,6 +200,7 @@ pub fn action_to_events(
     tab_size: usize,
     auto_indent: bool,
     estimated_line_length: usize,
+    viewport_height: u16,
 ) -> Option<Vec<Event>> {
     let mut events = Vec::new();
 
@@ -873,7 +876,7 @@ pub fn action_to_events(
         Action::MovePageUp => {
             for (cursor_id, cursor) in state.cursors.iter() {
                 // Move up by viewport height
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+                let lines_to_move = viewport_height.saturating_sub(1) as usize;
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -919,7 +922,7 @@ pub fn action_to_events(
         Action::MovePageDown => {
             for (cursor_id, cursor) in state.cursors.iter() {
                 // Move down by viewport height
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+                let lines_to_move = viewport_height.saturating_sub(1) as usize;
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -1184,7 +1187,7 @@ pub fn action_to_events(
 
         Action::SelectPageUp => {
             for (cursor_id, cursor) in state.cursors.iter() {
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+                let lines_to_move = viewport_height.saturating_sub(1) as usize;
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -1224,7 +1227,7 @@ pub fn action_to_events(
 
         Action::SelectPageDown => {
             for (cursor_id, cursor) in state.cursors.iter() {
-                let lines_to_move = state.viewport.height.saturating_sub(1);
+                let lines_to_move = viewport_height.saturating_sub(1) as usize;
                 let mut iter = state
                     .buffer
                     .line_iterator(cursor.position, estimated_line_length);
@@ -1863,7 +1866,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 6);
 
         // Press Backspace - should delete the newline at position 5
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80, 24).unwrap();
         println!("Generated events: {:?}", events);
 
         for event in events {
@@ -1900,7 +1903,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 0);
 
         // Move down - should go to position 6 (start of Line2)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -1913,7 +1916,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 6);
 
         // Move down again - should go to position 12 (start of Line3)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -1945,7 +1948,7 @@ mod tests {
         // Should go to end of Line2 (position 11, which is the newline, BUT we want column 5 which is position 11)
         // Wait, Line2 has content "Line2" (5 chars), so column 5 is position 6+5=11 (the newline)
         // This is technically correct but weird - we're on the newline
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -1966,7 +1969,7 @@ mod tests {
         // Current line is Line2 (starts at 6), column is 11-6=5
         // Previous line is Line1 (starts at 0), content "Line1" has length 5
         // So we go to position 0 + min(5, 5) = 5 (the newline after Line1)
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -2005,7 +2008,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 3);
 
         // Move down - should go to position 9 (column 3 of second line, which is end of "123")
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -2029,7 +2032,7 @@ mod tests {
         state.apply(&events[0]);
 
         // Move down again - should go to position 13 (column 3 of third line)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -2071,7 +2074,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 13);
 
         // Move up - should go to position 9 (column 3 of second line, which is end of "123")
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -2095,7 +2098,7 @@ mod tests {
         state.apply(&events[0]);
 
         // Move up again - should go to position 3 (column 3 of first line)
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor {
@@ -2135,7 +2138,7 @@ mod tests {
         });
 
         // Move down - should go to position 6 (start of second line)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -2169,7 +2172,7 @@ mod tests {
         });
 
         // Move up - should go to position 0 (start of first line)
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         assert_eq!(events.len(), 1);
 
         if let Event::MoveCursor { new_position, .. } = &events[0] {
@@ -2206,7 +2209,7 @@ mod tests {
         });
 
         // Move down - should go to position 6 (empty line)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         if let Event::MoveCursor { new_position, .. } = &events[0] {
             assert_eq!(*new_position, 6, "Cursor should move to empty line");
         }
@@ -2214,7 +2217,7 @@ mod tests {
         state.apply(&events[0]);
 
         // Move down again - should go to position 7 (start of Line3)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         if let Event::MoveCursor { new_position, .. } = &events[0] {
             assert_eq!(*new_position, 7, "Cursor should move to Line3");
         }
@@ -2244,7 +2247,7 @@ mod tests {
         });
 
         // Try to move up (no previous line exists)
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         assert_eq!(
             events.len(),
             0,
@@ -2252,7 +2255,7 @@ mod tests {
         );
 
         // Try to move down (no next line exists)
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         assert_eq!(
             events.len(),
             0,
@@ -2355,7 +2358,7 @@ mod tests {
         });
 
         // Move to line end
-        let events = action_to_events(&mut state, Action::MoveLineEnd, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveLineEnd, 4, false, 80, 24).unwrap();
         for event in events {
             println!("MoveLineEnd event: {:?}", event);
             state.apply(&event);
@@ -2398,7 +2401,7 @@ mod tests {
         );
 
         // Move to line start
-        let events = action_to_events(&mut state, Action::MoveLineStart, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveLineStart, 4, false, 80, 24).unwrap();
         for event in events {
             println!("MoveLineStart event from EOF: {:?}", event);
             state.apply(&event);
@@ -2461,7 +2464,7 @@ mod tests {
         );
 
         // Try to move up - this should work even if chunks aren't loaded
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         println!("MoveUp events: {:?}", events);
 
         assert!(
@@ -2525,7 +2528,7 @@ mod tests {
         );
 
         // Move down to second line
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         println!("MoveDown events: {:?}", events);
 
         if events.is_empty() {
@@ -2567,7 +2570,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 20); // End of text
 
         // Move up to first line
-        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveUp, 4, false, 80, 24).unwrap();
         for event in events {
             state.apply(&event);
         }
@@ -2577,7 +2580,7 @@ mod tests {
         );
 
         // Move to end of first line
-        let events = action_to_events(&mut state, Action::MoveLineEnd, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveLineEnd, 4, false, 80, 24).unwrap();
         for event in events {
             state.apply(&event);
         }
@@ -2588,7 +2591,7 @@ mod tests {
         );
 
         // Move down to second line
-        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveDown, 4, false, 80, 24).unwrap();
         for event in events {
             state.apply(&event);
         }
@@ -2598,7 +2601,7 @@ mod tests {
         );
 
         // Move to start of line (Home)
-        let events = action_to_events(&mut state, Action::MoveLineStart, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::MoveLineStart, 4, false, 80, 24).unwrap();
         for event in events {
             state.apply(&event);
         }
@@ -2610,7 +2613,7 @@ mod tests {
         );
 
         // Delete backward (should delete the newline)
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80, 24).unwrap();
         for event in events.iter() {
             println!("Event: {:?}", event);
             state.apply(event);
@@ -2645,7 +2648,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 0);
 
         // Insert opening parenthesis with auto_indent=true
-        let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80, 24).unwrap();
         println!("Events: {:?}", events);
 
         // Should have Insert event for "()" and MoveCursor to position between them
@@ -2670,7 +2673,7 @@ mod tests {
             EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
         // Insert opening curly brace with auto_indent=true
-        let events = action_to_events(&mut state, Action::InsertChar('{'), 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('{'), 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2690,7 +2693,7 @@ mod tests {
             EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
         // Insert opening square bracket
-        let events = action_to_events(&mut state, Action::InsertChar('['), 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('['), 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2706,7 +2709,7 @@ mod tests {
             EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
         // Insert double quote
-        let events = action_to_events(&mut state, Action::InsertChar('"'), 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('"'), 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2722,7 +2725,7 @@ mod tests {
             EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
         // Insert opening parenthesis with auto_indent=false
-        let events = action_to_events(&mut state, Action::InsertChar('('), 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('('), 4, false, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2757,7 +2760,7 @@ mod tests {
         });
 
         // Insert opening parenthesis before 'abc'
-        let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2809,7 +2812,7 @@ mod tests {
         });
 
         // Insert opening parenthesis at both cursors
-        let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::InsertChar('('), 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2846,7 +2849,7 @@ mod tests {
         assert_eq!(state.cursors.primary().position, 1);
 
         // Delete backward with auto_indent=true - should delete both characters
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2880,7 +2883,7 @@ mod tests {
         });
 
         // Delete backward - should delete both
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2913,7 +2916,7 @@ mod tests {
         });
 
         // Delete backward - should delete both quotes
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2946,7 +2949,7 @@ mod tests {
         });
 
         // Delete backward with auto_indent=false - should only delete opening bracket
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, false, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -2980,7 +2983,7 @@ mod tests {
         });
 
         // Delete backward - should only delete opening bracket since they don't match
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);
@@ -3014,7 +3017,7 @@ mod tests {
         });
 
         // Delete backward - should only delete 'a', not both brackets
-        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80).unwrap();
+        let events = action_to_events(&mut state, Action::DeleteBackward, 4, true, 80, 24).unwrap();
 
         for event in events {
             state.apply(&event);

@@ -17,7 +17,6 @@ use crate::primitives::text_property::TextPropertyManager;
 use crate::view::margin::{MarginAnnotation, MarginContent, MarginManager, MarginPosition};
 use crate::view::overlay::{Overlay, OverlayFace, OverlayManager, UnderlineStyle};
 use crate::view::popup::{Popup, PopupContent, PopupListItem, PopupManager, PopupPosition};
-use crate::view::viewport::Viewport;
 use crate::view::virtual_text::VirtualTextManager;
 use anyhow::Result;
 use ratatui::style::{Color, Style};
@@ -33,15 +32,16 @@ pub enum ViewMode {
 }
 
 /// The complete editor state - everything needed to represent the current editing session
+///
+/// NOTE: Viewport is NOT stored here - it lives in SplitViewState.
+/// This is because viewport is view-specific (each split can view the same buffer
+/// at different scroll positions), while EditorState represents the buffer content.
 pub struct EditorState {
     /// The text buffer
     pub buffer: Buffer,
 
     /// All cursors
     pub cursors: Cursors,
-
-    /// The viewport
-    pub viewport: Viewport,
 
     /// Syntax highlighter (tree-sitter or TextMate based on language)
     pub highlighter: HighlightEngine,
@@ -105,19 +105,13 @@ pub struct EditorState {
 
 impl EditorState {
     /// Create a new editor state with an empty buffer
-    pub fn new(width: u16, height: u16, large_file_threshold: usize) -> Self {
-        // Account for tab bar (1 line) and status bar (1 line)
-        let content_height = height.saturating_sub(2);
-        tracing::info!(
-            "EditorState::new: width={}, height={}, content_height={}",
-            width,
-            height,
-            content_height
-        );
+    ///
+    /// Note: width/height parameters are kept for backward compatibility but
+    /// are no longer used - viewport is now owned by SplitViewState.
+    pub fn new(_width: u16, _height: u16, large_file_threshold: usize) -> Self {
         Self {
             buffer: Buffer::new(large_file_threshold),
             cursors: Cursors::new(),
-            viewport: Viewport::new(width, content_height),
             highlighter: HighlightEngine::None, // No file path, so no syntax highlighting
             indent_calculator: RefCell::new(IndentCalculator::new()),
             overlays: OverlayManager::new(),
@@ -155,15 +149,16 @@ impl EditorState {
     }
 
     /// Create an editor state from a file
+    ///
+    /// Note: width/height parameters are kept for backward compatibility but
+    /// are no longer used - viewport is now owned by SplitViewState.
     pub fn from_file(
         path: &std::path::Path,
-        width: u16,
-        height: u16,
+        _width: u16,
+        _height: u16,
         large_file_threshold: usize,
         registry: &GrammarRegistry,
     ) -> std::io::Result<Self> {
-        // Account for tab bar (1 line) and status bar (1 line)
-        let content_height = height.saturating_sub(2);
         let buffer = Buffer::load_from_file(path, large_file_threshold)?;
 
         // Create highlighter using HighlightEngine (tree-sitter preferred, TextMate fallback)
@@ -194,7 +189,6 @@ impl EditorState {
         Ok(Self {
             buffer,
             cursors: Cursors::new(),
-            viewport: Viewport::new(width, content_height),
             highlighter,
             indent_calculator: RefCell::new(IndentCalculator::new()),
             overlays: OverlayManager::new(),
@@ -258,8 +252,6 @@ impl EditorState {
                 },
             };
         }
-
-        self.viewport.mark_needs_sync();
     }
 
     /// Handle a Delete event - adjusts markers, buffer, highlighter, cursors, and line numbers
@@ -306,8 +298,6 @@ impl EditorState {
                 },
             };
         }
-
-        self.viewport.mark_needs_sync();
     }
 
     /// Apply an event to the state - THE ONLY WAY TO MODIFY STATE
@@ -338,9 +328,6 @@ impl EditorState {
                     cursor.anchor = *new_anchor;
                     cursor.sticky_column = *new_sticky_column;
                 }
-
-                // Defer viewport sync to rendering time for better performance
-                self.viewport.mark_needs_sync();
 
                 // Update primary cursor line number if this is the primary cursor
                 // Try to get exact line number from buffer, or estimate for large files
@@ -582,28 +569,6 @@ impl EditorState {
         self.cursors.primary_mut()
     }
 
-    /// Get all cursor positions for rendering
-    pub fn cursor_positions(&mut self) -> Vec<(u16, u16)> {
-        let mut positions = Vec::new();
-        for (_, cursor) in self.cursors.iter() {
-            let pos = self
-                .viewport
-                .cursor_screen_position(&mut self.buffer, cursor);
-            positions.push(pos);
-        }
-        positions
-    }
-
-    /// Resize the viewport
-    pub fn resize(&mut self, width: u16, height: u16) {
-        // Account for tab bar (1 line) and status bar (1 line)
-        let content_height = height.saturating_sub(2);
-        self.viewport.resize(width, content_height);
-
-        // Ensure primary cursor is still visible after resize
-        let primary = *self.cursors.primary();
-        self.viewport.ensure_visible(&mut self.buffer, &primary);
-    }
 }
 
 /// Convert event overlay face to the actual overlay face
@@ -722,12 +687,10 @@ impl EditorState {
     ///
     /// This pre-loads all data that will be needed for rendering the current viewport,
     /// ensuring that subsequent read-only access during rendering will succeed.
-    pub fn prepare_for_render(&mut self) -> Result<()> {
-        let start_offset = match self.viewport.top_byte {
-            offset => offset,
-        };
-        let line_count = self.viewport.height as usize;
-        self.buffer.prepare_viewport(start_offset, line_count)?;
+    ///
+    /// Takes viewport parameters since viewport is now owned by SplitViewState.
+    pub fn prepare_for_render(&mut self, top_byte: usize, height: u16) -> Result<()> {
+        self.buffer.prepare_viewport(top_byte, height as usize)?;
         Ok(())
     }
 
@@ -1322,8 +1285,8 @@ mod tests {
                 EditorState::new(80, 24, crate::config::LARGE_FILE_THRESHOLD_BYTES as usize);
             state.buffer = Buffer::from_str_test("line1\nline2\nline3\nline4\nline5");
 
-            // Should not panic
-            state.prepare_for_render().unwrap();
+            // Should not panic - pass top_byte=0 and height=24 (typical viewport params)
+            state.prepare_for_render(0, 24).unwrap();
         }
 
         #[test]

@@ -487,16 +487,13 @@ impl Editor {
         let mut event_logs = HashMap::new();
 
         let buffer_id = BufferId(0);
-        let mut state = EditorState::new(
+        let state = EditorState::new(
             width,
             height,
             config.editor.large_file_threshold_bytes as usize,
         );
-        state.viewport.line_wrap_enabled = config.editor.line_wrap;
-        tracing::info!(
-            "EditorState created with viewport height: {}",
-            state.viewport.height
-        );
+        // Note: line_wrap_enabled is now stored in SplitViewState.viewport
+        tracing::info!("EditorState created for buffer {:?}", buffer_id);
         buffers.insert(buffer_id, state);
         event_logs.insert(buffer_id, EventLog::new());
 
@@ -1016,7 +1013,7 @@ impl Editor {
             new_state.buffer.set_file_path(path.to_path_buf());
             new_state
         };
-        state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+        // Note: line_wrap_enabled is set on SplitViewState.viewport when the split is created
 
         // Check if the buffer contains binary content
         let is_binary = state.buffer.is_binary();
@@ -1180,12 +1177,12 @@ impl Editor {
         let buffer_id = BufferId(self.next_buffer_id);
         self.next_buffer_id += 1;
 
-        let mut state = EditorState::new(
+        let state = EditorState::new(
             self.terminal_width,
             self.terminal_height,
             self.config.editor.large_file_threshold_bytes as usize,
         );
-        state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+        // Note: line_wrap_enabled is set on SplitViewState.viewport when the split is created
         self.buffers.insert(buffer_id, state);
         self.event_logs.insert(buffer_id, EventLog::new());
 
@@ -1218,7 +1215,7 @@ impl Editor {
             self.terminal_height,
             self.config.editor.large_file_threshold_bytes as usize,
         );
-        state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+        // Note: line_wrap_enabled is set on SplitViewState.viewport when the split is created
 
         // Set syntax highlighting based on buffer name (e.g., "*OURS*.c" will get C highlighting)
         state.set_language_from_name(&name, &self.grammar_registry);
@@ -1771,58 +1768,40 @@ impl Editor {
         self.set_status_message("Switched to previous split".to_string());
     }
 
-    /// Save the current split's cursor and viewport state
+    /// Save the current split's cursor state (viewport is owned by SplitViewState)
     fn save_current_split_view_state(&mut self) {
         let split_id = self.split_manager.active_split();
         if let Some(buffer_state) = self.buffers.get(&self.active_buffer) {
             if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
                 view_state.cursors = buffer_state.cursors.clone();
-                view_state.viewport = buffer_state.viewport.clone();
+                // Note: viewport is now owned by SplitViewState, no sync needed
             }
         }
     }
 
-    /// Restore the current split's cursor and viewport state
+    /// Restore the current split's cursor state (viewport is owned by SplitViewState)
     fn restore_current_split_view_state(&mut self) {
         let split_id = self.split_manager.active_split();
         // Update active_buffer based on the new split's buffer
         if let Some(buffer_id) = self.split_manager.active_buffer_id() {
             self.active_buffer = buffer_id;
         }
-        // Restore cursor and viewport from split view state
+        // Restore cursor from split view state (viewport stays in SplitViewState)
         self.sync_split_view_state_to_editor_state();
         // Ensure the active tab is visible in the newly active split
         // Use effective_tabs_width() to account for file explorer taking 30% of width
         self.ensure_active_tab_visible(split_id, self.active_buffer, self.effective_tabs_width());
     }
 
-    /// Sync SplitViewState's cursors and viewport to EditorState
-    /// Called when switching splits to restore the split's view state
+    /// Sync SplitViewState's cursors to EditorState
+    /// Called when switching splits to restore the split's cursor state
+    /// Note: Viewport is now owned by SplitViewState, not synced to EditorState
     fn sync_split_view_state_to_editor_state(&mut self) {
         let split_id = self.split_manager.active_split();
         if let Some(view_state) = self.split_view_states.get(&split_id) {
             if let Some(buffer_state) = self.buffers.get_mut(&self.active_buffer) {
                 buffer_state.cursors = view_state.cursors.clone();
-                buffer_state.viewport = view_state.viewport.clone();
-            }
-        }
-    }
-
-    /// Sync only viewport DIMENSIONS from SplitViewState to EditorState
-    /// Called before action_to_events to ensure correct viewport dimensions for PageDown/PageUp
-    /// Note: Does NOT sync scroll position (top_byte) - EditorState is authoritative for that
-    fn sync_viewport_from_split_view_state(&mut self) {
-        let split_id = self.split_manager.active_split();
-        if let Some(view_state) = self.split_view_states.get(&split_id) {
-            if let Some(buffer_state) = self.buffers.get_mut(&self.active_buffer) {
-                // Only sync dimensions, NOT scroll position
-                // EditorState's top_byte is authoritative (set by ensure_visible)
-                buffer_state.viewport.width = view_state.viewport.width;
-                buffer_state.viewport.height = view_state.viewport.height;
-                tracing::trace!(
-                    "sync_viewport_from_split: split {:?} dims {}x{} (keeping EditorState top_byte={})",
-                    split_id, view_state.viewport.width, view_state.viewport.height, buffer_state.viewport.top_byte
-                );
+                // Note: viewport is now owned by SplitViewState, no sync needed
             }
         }
     }
@@ -2117,6 +2096,18 @@ impl Editor {
         self.buffers.get_mut(&self.active_buffer).unwrap()
     }
 
+    /// Get the viewport for the active split
+    pub fn active_viewport(&self) -> &crate::view::viewport::Viewport {
+        let active_split = self.split_manager.active_split();
+        &self.split_view_states.get(&active_split).unwrap().viewport
+    }
+
+    /// Get the viewport for the active split (mutable)
+    pub fn active_viewport_mut(&mut self) -> &mut crate::view::viewport::Viewport {
+        let active_split = self.split_manager.active_split();
+        &mut self.split_view_states.get_mut(&active_split).unwrap().viewport
+    }
+
     /// Get the display name for a buffer (filename or virtual buffer name)
     pub fn get_buffer_display_name(&self, buffer_id: BufferId) -> String {
         self.buffer_metadata
@@ -2398,14 +2389,7 @@ impl Editor {
                 }
             }
         }
-
-        // Also sync to EditorState.viewport for the active split
-        // (rendering uses EditorState.viewport for the active split)
-        if let Some(state) = self.buffers.get_mut(&buffer_id) {
-            if let Some(view_state) = self.split_view_states.get(&active_split) {
-                state.viewport.top_byte = view_state.viewport.top_byte;
-            }
-        }
+        // Note: SplitViewState is now authoritative for viewport, no sync needed
     }
 
     /// Handle SetViewport event using SplitViewState's viewport
@@ -2470,25 +2454,18 @@ impl Editor {
         }
     }
 
-    /// Sync cursors and viewport from EditorState to SplitViewState
+    /// Sync cursors from EditorState to SplitViewState
     ///
-    /// This keeps SplitViewState's View state (cursors, viewport) in sync with
-    /// EditorState after events are applied. This is necessary because some
-    /// events (cursor movements, edits) still update EditorState directly.
+    /// This keeps SplitViewState's cursor state in sync with EditorState after
+    /// events are applied. This is necessary because cursor events (cursor
+    /// movements, edits) still update EditorState.cursors directly.
+    /// Note: Viewport is now owned by SplitViewState, no sync needed.
     fn sync_editor_state_to_split_view_state(&mut self) {
         let split_id = self.split_manager.active_split();
         if let Some(buffer_state) = self.buffers.get(&self.active_buffer) {
             if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
                 view_state.cursors = buffer_state.cursors.clone();
-                // Also sync viewport because cursor movements may trigger ensure_visible
-                // which updates EditorState's viewport
-                tracing::trace!(
-                    "sync_editor_to_split: EditorState top_byte={} -> split {:?} top_byte={}",
-                    buffer_state.viewport.top_byte,
-                    split_id,
-                    view_state.viewport.top_byte
-                );
-                view_state.viewport = buffer_state.viewport.clone();
+                // Note: viewport is now owned by SplitViewState, no sync needed
             }
         }
     }
@@ -2783,9 +2760,13 @@ impl Editor {
             return Ok(false);
         }
 
-        // Save scroll position and cursor positions before reloading
-        let old_top_byte = self.active_state().viewport.top_byte;
-        let old_left_column = self.active_state().viewport.left_column;
+        // Save scroll position (from SplitViewState) and cursor positions before reloading
+        let active_split = self.split_manager.active_split();
+        let (old_top_byte, old_left_column) = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| (vs.viewport.top_byte, vs.viewport.left_column))
+            .unwrap_or((0, 0));
         let old_cursors = self.active_state().cursors.clone();
 
         // Load the file content fresh from disk
@@ -2797,12 +2778,8 @@ impl Editor {
             &self.grammar_registry,
         )?;
 
-        // Restore scroll position (clamped to valid range for new file size)
-        let new_file_size = new_state.buffer.len();
-        new_state.viewport.top_byte = old_top_byte.min(new_file_size);
-        new_state.viewport.left_column = old_left_column;
-
         // Restore cursor positions (clamped to valid range for new file size)
+        let new_file_size = new_state.buffer.len();
         let mut restored_cursors = old_cursors;
         restored_cursors.map(|cursor| {
             cursor.position = cursor.position.min(new_file_size);
@@ -2815,8 +2792,14 @@ impl Editor {
         let buffer_id = self.active_buffer;
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
             *state = new_state;
-            // Apply line wrap setting from config
-            state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+            // Note: line_wrap_enabled is now in SplitViewState.viewport
+        }
+
+        // Restore scroll position in SplitViewState (clamped to valid range for new file size)
+        let active_split = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            view_state.viewport.top_byte = old_top_byte.min(new_file_size);
+            view_state.viewport.left_column = old_left_column;
         }
 
         // Clear the undo/redo history for this buffer
@@ -3572,12 +3555,7 @@ impl Editor {
         self.terminal_width = width;
         self.terminal_height = height;
 
-        // Resize all existing buffer EditorStates
-        for state in self.buffers.values_mut() {
-            state.resize(width, height);
-        }
-
-        // Resize all SplitViewState viewports
+        // Resize all SplitViewState viewports (viewport is now owned by SplitViewState)
         for view_state in self.split_view_states.values_mut() {
             view_state.viewport.resize(width, height);
         }
@@ -4461,13 +4439,18 @@ impl Editor {
                     })
                     .collect();
 
-                // Viewport
-                snapshot.viewport = Some(ViewportInfo {
-                    top_byte: active_state.viewport.top_byte,
-                    left_column: active_state.viewport.left_column,
-                    width: active_state.viewport.width,
-                    height: active_state.viewport.height,
-                });
+                // Viewport - get from SplitViewState (the authoritative source)
+                let active_split = self.split_manager.active_split();
+                if let Some(view_state) = self.split_view_states.get(&active_split) {
+                    snapshot.viewport = Some(ViewportInfo {
+                        top_byte: view_state.viewport.top_byte,
+                        left_column: view_state.viewport.left_column,
+                        width: view_state.viewport.width,
+                        height: view_state.viewport.height,
+                    });
+                } else {
+                    snapshot.viewport = None;
+                }
             } else {
                 snapshot.primary_cursor = None;
                 snapshot.all_cursors.clear();

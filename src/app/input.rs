@@ -712,8 +712,8 @@ impl Editor {
                 self.config.editor.line_wrap = !self.config.editor.line_wrap;
 
                 // Update all viewports to reflect the new line wrap setting
-                for state in self.buffers.values_mut() {
-                    state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
+                for view_state in self.split_view_states.values_mut() {
+                    view_state.viewport.line_wrap_enabled = self.config.editor.line_wrap;
                 }
 
                 let state = if self.config.editor.line_wrap {
@@ -773,11 +773,7 @@ impl Editor {
                 {
                     let state = self.active_state_mut();
                     state.view_mode = view_mode.clone();
-                    // In Compose mode, disable builtin line wrap - plugin handles wrapping.
-                    state.viewport.line_wrap_enabled = match view_mode {
-                        crate::state::ViewMode::Compose => false,
-                        crate::state::ViewMode::Source => default_wrap,
-                    };
+                    // Note: viewport.line_wrap_enabled is now handled in SplitViewState above
                     // Clear compose state when switching to Source mode
                     if matches!(view_mode, crate::state::ViewMode::Source) {
                         state.compose_width = None;
@@ -1110,9 +1106,12 @@ impl Editor {
                     self.apply_event_to_active_buffer(&batch);
 
                     // Ensure the primary cursor is visible after removing secondary cursors
-                    let state = self.active_state_mut();
-                    let primary = *state.cursors.primary();
-                    state.viewport.ensure_visible(&mut state.buffer, &primary);
+                    let active_split = self.split_manager.active_split();
+                    if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+                        let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+                        let primary = *state.cursors.primary();
+                        view_state.viewport.ensure_visible(&mut state.buffer, &primary);
+                    }
                 }
             }
 
@@ -2676,14 +2675,14 @@ impl Editor {
                 // Click on thumb - start drag from current position (don't jump)
                 self.mouse_state.dragging_scrollbar = Some(split_id);
                 self.mouse_state.drag_start_row = Some(row);
-                // Record the current viewport position
-                if let Some(state) = self.buffers.get(&buffer_id) {
-                    self.mouse_state.drag_start_top_byte = Some(state.viewport.top_byte);
+                // Record the current viewport position from SplitViewState
+                if let Some(view_state) = self.split_view_states.get(&split_id) {
+                    self.mouse_state.drag_start_top_byte = Some(view_state.viewport.top_byte);
                 }
             } else {
                 // Click on track - jump to position
                 self.mouse_state.dragging_scrollbar = Some(split_id);
-                self.handle_scrollbar_jump(col, row, buffer_id, scrollbar_rect)?;
+                self.handle_scrollbar_jump(col, row, split_id, buffer_id, scrollbar_rect)?;
             }
             return Ok(());
         }
@@ -2827,10 +2826,10 @@ impl Editor {
                     // Check if we started dragging from the thumb (have drag_start_row)
                     if self.mouse_state.drag_start_row.is_some() {
                         // Relative drag from thumb
-                        self.handle_scrollbar_drag_relative(row, *buffer_id, *scrollbar_rect)?;
+                        self.handle_scrollbar_drag_relative(row, *split_id, *buffer_id, *scrollbar_rect)?;
                     } else {
                         // Jump drag (started from track)
-                        self.handle_scrollbar_jump(col, row, *buffer_id, *scrollbar_rect)?;
+                        self.handle_scrollbar_jump(col, row, *split_id, *buffer_id, *scrollbar_rect)?;
                     }
                     return Ok(());
                 }
@@ -2900,10 +2899,16 @@ impl Editor {
             .get(&split_id)
             .cloned();
 
+        // Get fallback from SplitViewState viewport
+        let fallback = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| vs.viewport.top_byte)
+            .unwrap_or(0);
+
         // Calculate the target position from screen coordinates
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let gutter_width = state.margins.left_total_width() as u16;
-            let fallback = state.viewport.top_byte;
 
             let Some(target_position) = Self::screen_to_buffer_position(
                 col,
@@ -3106,6 +3111,7 @@ impl Editor {
     pub(super) fn handle_scrollbar_drag_relative(
         &mut self,
         row: u16,
+        split_id: SplitId,
         buffer_id: BufferId,
         scrollbar_rect: ratatui::layout::Rect,
     ) -> std::io::Result<()> {
@@ -3122,8 +3128,15 @@ impl Editor {
         // Calculate the offset in rows
         let row_offset = (row as i32) - (drag_start_row as i32);
 
-        // Get the buffer state
-        if let Some(state) = self.buffers.get_mut(&buffer_id) {
+        // Get viewport height from SplitViewState
+        let viewport_height = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| vs.viewport.height as usize)
+            .unwrap_or(10);
+
+        // Get the buffer state and calculate target position
+        let line_start = if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let scrollbar_height = scrollbar_rect.height as usize;
             if scrollbar_height == 0 {
                 return Ok(());
@@ -3131,7 +3144,6 @@ impl Editor {
 
             let buffer_len = state.buffer.len();
             let large_file_threshold = self.config.editor.large_file_threshold_bytes as usize;
-            let viewport_height = state.viewport.height as usize;
 
             // For small files, use precise line-based calculations
             // For large files, fall back to byte-based estimation
@@ -3203,14 +3215,18 @@ impl Editor {
 
             // Find the line start for this byte position
             let iter = state.buffer.line_iterator(new_top_byte, 80);
-            let line_start = iter.current_position();
+            iter.current_position()
+        } else {
+            return Ok(());
+        };
 
-            // Set viewport top to this position
-            state.viewport.top_byte = line_start;
+        // Set viewport top to this position in SplitViewState
+        if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+            view_state.viewport.top_byte = line_start;
         }
 
         // Move cursor to be visible in the new viewport (after releasing the state borrow)
-        self.move_cursor_to_visible_area(buffer_id);
+        self.move_cursor_to_visible_area(split_id, buffer_id);
 
         Ok(())
     }
@@ -3220,6 +3236,7 @@ impl Editor {
         &mut self,
         _col: u16,
         row: u16,
+        split_id: SplitId,
         buffer_id: BufferId,
         scrollbar_rect: ratatui::layout::Rect,
     ) -> std::io::Result<()> {
@@ -3238,11 +3255,17 @@ impl Editor {
             0.0
         };
 
-        // Get the buffer state
-        if let Some(state) = self.buffers.get_mut(&buffer_id) {
+        // Get viewport height from SplitViewState
+        let viewport_height = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| vs.viewport.height as usize)
+            .unwrap_or(10);
+
+        // Get the buffer state and calculate limited_line_start
+        let limited_line_start = if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let buffer_len = state.buffer.len();
             let large_file_threshold = self.config.editor.large_file_threshold_bytes as usize;
-            let viewport_height = state.viewport.height as usize;
 
             // For small files, use precise line-based calculations
             // For large files, fall back to byte-based estimation
@@ -3303,24 +3326,33 @@ impl Editor {
             } else {
                 buffer_len.saturating_sub(1)
             };
-            let limited_line_start = line_start.min(max_top_byte);
+            line_start.min(max_top_byte)
+        } else {
+            return Ok(());
+        };
 
-            // Set viewport top to this position
-            state.viewport.top_byte = limited_line_start;
+        // Set viewport top to this position in SplitViewState
+        if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+            view_state.viewport.top_byte = limited_line_start;
         }
 
         // Move cursor to be visible in the new viewport (after releasing the state borrow)
-        self.move_cursor_to_visible_area(buffer_id);
+        self.move_cursor_to_visible_area(split_id, buffer_id);
 
         Ok(())
     }
 
     /// Move the cursor to a visible position within the current viewport
     /// This is called after scrollbar operations to ensure the cursor is in view
-    pub(super) fn move_cursor_to_visible_area(&mut self, buffer_id: BufferId) {
+    pub(super) fn move_cursor_to_visible_area(&mut self, split_id: SplitId, buffer_id: BufferId) {
+        // Get viewport info from SplitViewState
+        let (top_byte, viewport_height) = if let Some(view_state) = self.split_view_states.get(&split_id) {
+            (view_state.viewport.top_byte, view_state.viewport.height as usize)
+        } else {
+            return;
+        };
+
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
-            let top_byte = state.viewport.top_byte;
-            let viewport_height = state.viewport.height as usize;
             let buffer_len = state.buffer.len();
 
             // Find the bottom byte of the viewport
@@ -3493,10 +3525,16 @@ impl Editor {
             .get(&split_id)
             .cloned();
 
+        // Get fallback from SplitViewState viewport
+        let fallback = self
+            .split_view_states
+            .get(&split_id)
+            .map(|vs| vs.viewport.top_byte)
+            .unwrap_or(0);
+
         // Calculate clicked position in buffer
         if let Some(state) = self.buffers.get_mut(&buffer_id) {
             let gutter_width = state.margins.left_total_width() as u16;
-            let fallback = state.viewport.top_byte;
 
             let Some(target_position) = Self::screen_to_buffer_position(
                 col,

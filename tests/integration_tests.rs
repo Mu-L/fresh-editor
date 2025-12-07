@@ -267,9 +267,9 @@ fn test_multi_cursor_normalization() {
     }
 }
 
-/// Test that viewport resizing maintains cursor visibility
+/// Test that cursor position is maintained within buffer bounds after edits
 #[test]
-fn test_viewport_resize_maintains_cursor() {
+fn test_cursor_within_buffer_bounds() {
     let mut state = EditorState::new(80, 24, fresh::config::LARGE_FILE_THRESHOLD_BYTES as usize);
 
     // Insert text and move cursor to middle
@@ -289,14 +289,11 @@ fn test_viewport_resize_maintains_cursor() {
         new_sticky_column: 0,
     });
 
-    // Resize to smaller height
-    state.resize(80, 5);
-
-    // Cursor should still be within buffer bounds
+    // Cursor should be within buffer bounds
     let cursor_pos = state.cursors.primary().position;
     assert!(
         cursor_pos <= state.buffer.len(),
-        "After resize, cursor should be within buffer bounds"
+        "Cursor should be within buffer bounds"
     );
 }
 

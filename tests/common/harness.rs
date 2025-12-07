@@ -1074,7 +1074,7 @@ impl EditorTestHarness {
 
     /// Get the top line number currently visible in the viewport
     pub fn top_line_number(&mut self) -> usize {
-        let top_byte = self.editor.active_state().viewport.top_byte;
+        let top_byte = self.editor.active_viewport().top_byte;
         self.editor
             .active_state_mut()
             .buffer
@@ -1083,12 +1083,12 @@ impl EditorTestHarness {
 
     /// Get the top byte position of the viewport
     pub fn top_byte(&self) -> usize {
-        self.editor.active_state().viewport.top_byte
+        self.editor.active_viewport().top_byte
     }
 
     /// Get the viewport height (number of content lines that can be displayed)
     pub fn viewport_height(&self) -> usize {
-        self.editor.active_state().viewport.height as usize
+        self.editor.active_viewport().height as usize
     }
 
     /// Get the content area row range on screen (start_row, end_row inclusive)

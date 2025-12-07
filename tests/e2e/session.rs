@@ -847,7 +847,7 @@ fn test_session_cursor_visible_in_splits_after_restore() {
 
         // Get cursor and scroll BEFORE first render from EditorState
         let cursor_before_render = harness.cursor_position();
-        let viewport_before = harness.editor().active_state().viewport.clone();
+        let viewport_before = harness.editor().active_viewport().clone();
         let (line_before, _) = harness
             .editor()
             .active_state()
@@ -866,7 +866,7 @@ fn test_session_cursor_visible_in_splits_after_restore() {
 
         // Get cursor and scroll AFTER render
         let cursor_after_render = harness.cursor_position();
-        let viewport_after = harness.editor().active_state().viewport.clone();
+        let viewport_after = harness.editor().active_viewport().clone();
         let (line_after, _) = harness
             .editor()
             .active_state()

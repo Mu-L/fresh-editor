@@ -117,6 +117,8 @@ struct LineRenderInput<'a> {
     is_active: bool,
     line_wrap: bool,
     estimated_lines: usize,
+    /// Left column offset for horizontal scrolling
+    left_column: usize,
 }
 
 /// Context for computing the style of a single character
@@ -501,14 +503,33 @@ impl SplitRenderer {
             let event_log_opt = event_logs.get_mut(&buffer_id);
 
             if let Some(state) = state_opt {
-                let saved_state =
+                // Get viewport from SplitViewState (authoritative source)
+                // We need to get it mutably for sync operations
+                let view_state_opt = split_view_states.and_then(|vs| vs.get(&split_id));
+                let viewport_clone = view_state_opt
+                    .map(|vs| vs.viewport.clone())
+                    .unwrap_or_else(|| {
+                        crate::view::viewport::Viewport::new(
+                            layout.content_rect.width,
+                            layout.content_rect.height,
+                        )
+                    });
+                let mut viewport = viewport_clone;
+
+                let saved_cursors =
                     Self::temporary_split_state(state, split_view_states, split_id, is_active);
-                Self::sync_viewport_to_content(state, layout.content_rect);
+                Self::sync_viewport_to_content(
+                    &mut viewport,
+                    &mut state.buffer,
+                    &state.cursors,
+                    layout.content_rect,
+                );
                 let view_prefs = Self::resolve_view_preferences(state, split_view_states, split_id);
 
                 let split_view_mappings = Self::render_buffer_in_split(
                     frame,
                     state,
+                    &mut viewport,
                     event_log_opt,
                     layout.content_rect,
                     is_active,
@@ -531,16 +552,15 @@ impl SplitRenderer {
 
                 // For small files, count actual lines for accurate scrollbar
                 // For large files, we'll use a constant thumb size
-                // NOTE: Calculate scrollbar BEFORE restoring state to use this split's viewport
                 let buffer_len = state.buffer.len();
                 let (total_lines, top_line) =
-                    Self::scrollbar_line_counts(state, large_file_threshold_bytes, buffer_len);
+                    Self::scrollbar_line_counts(state, &viewport, large_file_threshold_bytes, buffer_len);
 
                 // Render scrollbar for this split and get thumb position
-                // NOTE: Render scrollbar BEFORE restoring state to use this split's viewport
                 let (thumb_start, thumb_end) = Self::render_scrollbar(
                     frame,
                     state,
+                    &viewport,
                     layout.scrollbar_rect,
                     is_active,
                     theme,
@@ -549,8 +569,8 @@ impl SplitRenderer {
                     top_line,
                 );
 
-                // Restore the original cursors and viewport after rendering content and scrollbar
-                Self::restore_split_state(state, saved_state);
+                // Restore the original cursors after rendering content and scrollbar
+                Self::restore_split_state(state, saved_cursors);
 
                 // Store the areas for mouse handling
                 split_areas.push((
@@ -658,63 +678,53 @@ impl SplitRenderer {
         >,
         split_id: crate::model::event::SplitId,
         is_active: bool,
-    ) -> (
-        Option<crate::model::cursor::Cursors>,
-        Option<crate::view::viewport::Viewport>,
-    ) {
+    ) -> Option<crate::model::cursor::Cursors> {
         if is_active {
-            return (None, None);
+            return None;
         }
 
         if let Some(view_states) = split_view_states {
             if let Some(view_state) = view_states.get(&split_id) {
+                // Only save/restore cursors - viewport is now owned by SplitViewState
                 let saved_cursors = Some(std::mem::replace(
                     &mut state.cursors,
                     view_state.cursors.clone(),
                 ));
-                let saved_viewport = Some(std::mem::replace(
-                    &mut state.viewport,
-                    view_state.viewport.clone(),
-                ));
-                return (saved_cursors, saved_viewport);
+                return saved_cursors;
             }
         }
 
-        (None, None)
+        None
     }
 
     fn restore_split_state(
         state: &mut EditorState,
-        saved_state: (
-            Option<crate::model::cursor::Cursors>,
-            Option<crate::view::viewport::Viewport>,
-        ),
+        saved_cursors: Option<crate::model::cursor::Cursors>,
     ) {
-        let (saved_cursors, saved_viewport) = saved_state;
         if let Some(cursors) = saved_cursors {
             state.cursors = cursors;
         }
-        if let Some(viewport) = saved_viewport {
-            state.viewport = viewport;
-        }
     }
 
-    fn sync_viewport_to_content(state: &mut EditorState, content_rect: Rect) {
-        let size_changed = state.viewport.width != content_rect.width
-            || state.viewport.height != content_rect.height;
+    fn sync_viewport_to_content(
+        viewport: &mut crate::view::viewport::Viewport,
+        buffer: &mut crate::model::buffer::Buffer,
+        cursors: &crate::model::cursor::Cursors,
+        content_rect: Rect,
+    ) {
+        let size_changed =
+            viewport.width != content_rect.width || viewport.height != content_rect.height;
 
         if size_changed {
-            state
-                .viewport
-                .resize(content_rect.width, content_rect.height);
+            viewport.resize(content_rect.width, content_rect.height);
         }
 
         // Sync viewport with cursor if size changed or if marked for sync (cursor moved)
         // Note: We don't check skip_resize_sync here because it's checked in ensure_visible_in_layout
         // which is called during rendering and is the main place that could reset scroll position
-        if size_changed || state.viewport.needs_sync() {
-            let primary = *state.cursors.primary();
-            state.viewport.sync_with_cursor(&mut state.buffer, &primary);
+        if size_changed || viewport.needs_sync() {
+            let primary = *cursors.primary();
+            viewport.sync_with_cursor(buffer, &primary);
         }
     }
 
@@ -746,6 +756,7 @@ impl SplitRenderer {
 
     fn scrollbar_line_counts(
         state: &EditorState,
+        viewport: &crate::view::viewport::Viewport,
         large_file_threshold_bytes: u64,
         buffer_len: usize,
     ) -> (usize, usize) {
@@ -759,8 +770,8 @@ impl SplitRenderer {
             1
         };
 
-        let top_line = if state.viewport.top_byte < buffer_len {
-            state.buffer.get_line_number(state.viewport.top_byte)
+        let top_line = if viewport.top_byte < buffer_len {
+            state.buffer.get_line_number(viewport.top_byte)
         } else {
             0
         };
@@ -773,6 +784,7 @@ impl SplitRenderer {
     fn render_scrollbar(
         frame: &mut Frame,
         state: &EditorState,
+        viewport: &crate::view::viewport::Viewport,
         scrollbar_rect: Rect,
         is_active: bool,
         _theme: &crate::view::theme::Theme,
@@ -786,11 +798,11 @@ impl SplitRenderer {
         }
 
         let buffer_len = state.buffer.len();
-        let viewport_top = state.viewport.top_byte;
+        let viewport_top = viewport.top_byte;
         // Use the constant viewport height (allocated terminal rows), not visible_line_count()
         // which varies based on content. The scrollbar should represent the ratio of the
         // viewport AREA to total document size, remaining constant throughout scrolling.
-        let viewport_height_lines = state.viewport.height as usize;
+        let viewport_height_lines = viewport.height as usize;
 
         // Calculate scrollbar thumb position and size
         let (thumb_start, thumb_size) = if buffer_len > large_file_threshold_bytes as usize {
@@ -880,6 +892,7 @@ impl SplitRenderer {
 
     fn build_view_data(
         state: &mut EditorState,
+        viewport: &crate::view::viewport::Viewport,
         view_transform: Option<ViewTransformPayload>,
         estimated_line_length: usize,
         visible_count: usize,
@@ -893,7 +906,7 @@ impl SplitRenderer {
         // Build base token stream from source
         let base_tokens = Self::build_base_tokens(
             &mut state.buffer,
-            state.viewport.top_byte,
+            viewport.top_byte,
             estimated_line_length,
             visible_count,
             is_binary,
@@ -1733,6 +1746,7 @@ impl SplitRenderer {
             is_active,
             line_wrap,
             estimated_lines,
+            left_column,
         } = input;
 
         let selection_ranges = &selection.ranges;
@@ -1823,7 +1837,7 @@ impl SplitRenderer {
             lines_rendered += 1;
 
             // Apply horizontal scrolling - skip characters before left_column
-            let left_col = state.viewport.left_column;
+            let left_col = left_column;
 
             // Build line with selection highlighting
             let mut line_spans = Vec::new();
@@ -2332,6 +2346,7 @@ impl SplitRenderer {
     fn render_buffer_in_split(
         frame: &mut Frame,
         state: &mut EditorState,
+        viewport: &mut crate::view::viewport::Viewport,
         event_log: Option<&mut EventLog>,
         area: Rect,
         is_active: bool,
@@ -2350,14 +2365,14 @@ impl SplitRenderer {
     ) -> Vec<ViewLineMapping> {
         let _span = tracing::trace_span!("render_buffer_in_split").entered();
 
-        let line_wrap = state.viewport.line_wrap_enabled;
+        let line_wrap = viewport.line_wrap_enabled;
 
         let overlay_count = state.overlays.all().len();
         if overlay_count > 0 {
             tracing::trace!("render_content: {} overlays present", overlay_count);
         }
 
-        let visible_count = state.viewport.visible_line_count();
+        let visible_count = viewport.visible_line_count();
 
         let buffer_len = state.buffer.len();
         let estimated_lines = (buffer_len / 80).max(1);
@@ -2372,6 +2387,7 @@ impl SplitRenderer {
 
         let view_data = Self::build_view_data(
             state,
+            viewport,
             view_transform,
             estimated_line_length,
             visible_count,
@@ -2383,16 +2399,14 @@ impl SplitRenderer {
         // Ensure cursor is visible using Layout-aware check (handles virtual lines)
         // This detects when cursor is beyond the rendered view_lines and scrolls
         let primary = *state.cursors.primary();
-        let scrolled =
-            state
-                .viewport
-                .ensure_visible_in_layout(&view_data.lines, &primary, gutter_width);
+        let scrolled = viewport.ensure_visible_in_layout(&view_data.lines, &primary, gutter_width);
 
         // If we scrolled, rebuild view_data from new position WITH the view_transform
         // This ensures virtual lines are included in the rebuilt view
         let view_data = if scrolled {
             Self::build_view_data(
                 state,
+                viewport,
                 view_transform_for_rebuild,
                 estimated_line_length,
                 visible_count,
@@ -2404,7 +2418,7 @@ impl SplitRenderer {
             view_data
         };
 
-        let view_anchor = Self::calculate_view_anchor(&view_data.lines, state.viewport.top_byte);
+        let view_anchor = Self::calculate_view_anchor(&view_data.lines, viewport.top_byte);
         Self::render_compose_margins(frame, area, &compose_layout, &view_mode, theme);
 
         let selection = Self::selection_context(state);
@@ -2431,9 +2445,9 @@ impl SplitRenderer {
 
         let starting_line_num = state
             .buffer
-            .populate_line_cache(state.viewport.top_byte, visible_count);
+            .populate_line_cache(viewport.top_byte, visible_count);
 
-        let viewport_start = state.viewport.top_byte;
+        let viewport_start = viewport.top_byte;
         let viewport_end = Self::calculate_viewport_end(
             state,
             viewport_start,
@@ -2451,7 +2465,7 @@ impl SplitRenderer {
         );
 
         // Apply top_view_line_offset to skip virtual lines when scrolling through them
-        let view_line_offset = state.viewport.top_view_line_offset;
+        let view_line_offset = viewport.top_view_line_offset;
         let view_lines_to_render =
             if view_line_offset > 0 && view_line_offset < view_data.lines.len() {
                 &view_data.lines[view_line_offset..]
@@ -2474,10 +2488,11 @@ impl SplitRenderer {
             is_active,
             line_wrap,
             estimated_lines,
+            left_column: viewport.left_column,
         });
 
         let mut lines = render_output.lines;
-        let background_x_offset = state.viewport.left_column as usize;
+        let background_x_offset = viewport.left_column as usize;
 
         if let Some(bg) = ansi_background {
             Self::apply_background_to_lines(
@@ -2677,6 +2692,7 @@ mod tests {
     use super::*;
     use crate::model::buffer::Buffer;
     use crate::view::theme::Theme;
+    use crate::view::viewport::Viewport;
 
     fn render_output_for(
         content: &str,
@@ -2693,16 +2709,18 @@ mod tests {
         let mut state = EditorState::new(20, 6, 1024);
         state.buffer = Buffer::from_str(content, 1024);
         state.cursors.primary_mut().position = cursor_pos.min(state.buffer.len());
-        state.viewport.resize(20, 4);
+        // Create a standalone viewport (no longer part of EditorState)
+        let mut viewport = Viewport::new(20, 4);
         // Enable/disable line numbers/gutters based on parameter
         state.margins.left_config.enabled = gutters_enabled;
 
         let render_area = Rect::new(0, 0, 20, 4);
-        let visible_count = state.viewport.visible_line_count();
+        let visible_count = viewport.visible_line_count();
         let gutter_width = state.margins.left_total_width();
 
         let view_data = SplitRenderer::build_view_data(
             &mut state,
+            &viewport,
             None,
             content.len().max(1),
             visible_count,
@@ -2719,8 +2737,8 @@ mod tests {
         let selection = SplitRenderer::selection_context(&state);
         let starting_line_num = state
             .buffer
-            .populate_line_cache(state.viewport.top_byte, visible_count);
-        let viewport_start = state.viewport.top_byte;
+            .populate_line_cache(viewport.top_byte, visible_count);
+        let viewport_start = viewport.top_byte;
         let viewport_end = SplitRenderer::calculate_viewport_end(
             &mut state,
             viewport_start,
@@ -2750,8 +2768,9 @@ mod tests {
             visible_line_count: visible_count,
             lsp_waiting: false,
             is_active: true,
-            line_wrap: state.viewport.line_wrap_enabled,
+            line_wrap: viewport.line_wrap_enabled,
             estimated_lines,
+            left_column: viewport.left_column,
         });
 
         (

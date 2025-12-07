@@ -149,7 +149,7 @@ fn test_open_file_viewport_dimensions() {
     let expected_viewport_height = harness.viewport_height();
 
     // Initially, the default buffer has correct viewport dimensions
-    let initial_viewport_height = harness.editor().active_state().viewport.height as usize;
+    let initial_viewport_height = harness.editor().active_viewport().height as usize;
     assert_eq!(
         initial_viewport_height, expected_viewport_height,
         "Initial viewport should be {expected_viewport_height} (31 - 3 for menu bar, tab bar, status bar)"
@@ -159,7 +159,7 @@ fn test_open_file_viewport_dimensions() {
     harness.open_file(&file_path).unwrap();
 
     // After opening file, viewport height should still match terminal dimensions
-    let viewport_height_after_open = harness.editor().active_state().viewport.height as usize;
+    let viewport_height_after_open = harness.editor().active_viewport().height as usize;
     assert_eq!(
         viewport_height_after_open, expected_viewport_height,
         "After opening file, viewport height should be {expected_viewport_height}, but got {viewport_height_after_open}. \\
@@ -171,8 +171,7 @@ fn test_open_file_viewport_dimensions() {
 
     let visible_count = harness
         .editor()
-        .active_state()
-        .viewport
+        .active_viewport()
         .visible_line_count();
 
     assert_eq!(

@@ -635,7 +635,7 @@ fn test_search_highlights_update_on_scroll() {
     );
 
     // Verify the highlight is actually in the visible viewport
-    let viewport_top = state.viewport.top_byte;
+    let viewport_top = harness.editor().active_viewport().top_byte;
     let viewport_end = viewport_top + 1000; // Approximate visible range
     assert!(
         scrolled_highlight_pos >= viewport_top && scrolled_highlight_pos < viewport_end,

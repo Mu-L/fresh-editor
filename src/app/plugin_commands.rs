@@ -518,10 +518,9 @@ impl Editor {
                     );
 
                     // For the active split, also update the buffer state directly
-                    // (rendering uses buffer state for active split, split_view_states for others)
                     if is_active {
                         state.cursors.primary_mut().move_to(position, false);
-                        state.viewport = view_state.viewport.clone();
+                        // Note: viewport is now owned by SplitViewState, no sync needed
                     }
                 } else {
                     tracing::warn!(
@@ -632,12 +631,11 @@ impl Editor {
 
     /// Helper to jump to a line/column position in the active buffer
     pub(super) fn jump_to_line_column(&mut self, line: Option<usize>, column: Option<usize>) {
-        let state = self.active_state_mut();
-
         // Convert 1-indexed line/column to byte position
         let target_line = line.unwrap_or(1).saturating_sub(1); // Convert to 0-indexed
         let column_offset = column.unwrap_or(1).saturating_sub(1); // Convert to 0-indexed
 
+        let state = self.active_state_mut();
         let mut iter = state.buffer.line_iterator(0, 80);
         let mut target_byte = 0;
 
@@ -663,10 +661,14 @@ impl Editor {
         state.cursors.primary_mut().position = final_position.min(buffer_len);
         state.cursors.primary_mut().anchor = None;
 
-        // Ensure the position is visible
-        state
-            .viewport
-            .ensure_visible(&mut state.buffer, state.cursors.primary());
+        // Ensure the position is visible in the active split's viewport
+        let active_split = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+            view_state
+                .viewport
+                .ensure_visible(&mut state.buffer, state.cursors.primary());
+        }
     }
 
     /// Handle OpenFileAtLocation command

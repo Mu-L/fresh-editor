@@ -171,8 +171,7 @@ fn test_cursor_position_with_large_line_numbers() {
     let buffer_len = harness.editor().active_state().buffer.len();
     let gutter_width = harness
         .editor()
-        .active_state()
-        .viewport
+        .active_viewport()
         .gutter_width(&harness.editor().active_state().buffer);
 
     println!("\nBuffer length: {buffer_len} bytes");

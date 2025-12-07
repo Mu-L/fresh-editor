@@ -10,10 +10,17 @@ impl Editor {
         // correct content area dimensions. Don't sync here with incorrect EditorState viewport size.
 
         // Prepare all buffers for rendering (pre-load viewport data for lazy loading)
-        for (_, state) in &mut self.buffers {
-            if let Err(e) = state.prepare_for_render() {
-                tracing::error!("Failed to prepare buffer for render: {}", e);
-                // Continue with partial rendering
+        // Each split may have a different viewport position on the same buffer
+        for (split_id, view_state) in &self.split_view_states {
+            if let Some(buffer_id) = self.split_manager.get_buffer_id(*split_id) {
+                if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    let top_byte = view_state.viewport.top_byte;
+                    let height = view_state.viewport.height;
+                    if let Err(e) = state.prepare_for_render(top_byte, height) {
+                        tracing::error!("Failed to prepare buffer for render: {}", e);
+                        // Continue with partial rendering
+                    }
+                }
             }
         }
 
@@ -143,6 +150,13 @@ impl Editor {
 
             let mut total_new_lines = 0usize;
             for (split_id, buffer_id, split_area) in visible_buffers {
+                // Get viewport from SplitViewState (the authoritative source)
+                let viewport_top_byte = self
+                    .split_view_states
+                    .get(&split_id)
+                    .map(|vs| vs.viewport.top_byte)
+                    .unwrap_or(0);
+
                 if let Some(state) = self.buffers.get_mut(&buffer_id) {
                     // Fire render_start hook once per buffer
                     let render_start_args =
@@ -156,12 +170,12 @@ impl Editor {
                     let base_tokens =
                         crate::view::ui::split_rendering::SplitRenderer::build_base_tokens_for_hook(
                             &mut state.buffer,
-                            state.viewport.top_byte,
+                            viewport_top_byte,
                             self.config.editor.estimated_line_length,
                             visible_count,
                             is_binary,
                         );
-                    let viewport_start = state.viewport.top_byte;
+                    let viewport_start = viewport_top_byte;
                     let viewport_end = base_tokens
                         .last()
                         .and_then(|t| t.source_offset)
@@ -178,7 +192,7 @@ impl Editor {
 
                     // Use the split area height as visible line count
                     let visible_count = split_area.height as usize;
-                    let top_byte = state.viewport.top_byte;
+                    let top_byte = viewport_top_byte;
 
                     // Get or create the seen byte ranges set for this buffer
                     let seen_byte_ranges = self
@@ -451,13 +465,21 @@ impl Editor {
 
         // Collect popup information without holding a mutable borrow
         let popup_info: Vec<_> = {
+            // Get viewport from active split's SplitViewState
+            let active_split = self.split_manager.active_split();
+            let viewport = self
+                .split_view_states
+                .get(&active_split)
+                .map(|vs| vs.viewport.clone());
+
             let state = self.active_state_mut();
             if state.popups.is_visible() {
                 // Get the primary cursor position for popup positioning
                 let primary_cursor = state.cursors.primary();
-                let cursor_screen_pos = state
-                    .viewport
-                    .cursor_screen_position(&mut state.buffer, primary_cursor);
+                let cursor_screen_pos = viewport
+                    .as_ref()
+                    .map(|vp| vp.cursor_screen_position(&mut state.buffer, primary_cursor))
+                    .unwrap_or((0, 0));
 
                 // Adjust cursor position to account for tab bar (1 line offset)
                 let cursor_screen_pos = (cursor_screen_pos.0, cursor_screen_pos.1 + 1);
@@ -529,11 +551,13 @@ impl Editor {
             .get(&self.active_buffer)
             .map(|state| state.margins.show_line_numbers)
             .unwrap_or(true);
-        let line_wrap = self
-            .buffers
-            .get(&self.active_buffer)
-            .map(|state| state.viewport.line_wrap_enabled)
-            .unwrap_or(false);
+        let line_wrap = {
+            let active_split = self.split_manager.active_split();
+            self.split_view_states
+                .get(&active_split)
+                .map(|vs| vs.viewport.line_wrap_enabled)
+                .unwrap_or(false)
+        };
         let compose_mode = self
             .buffers
             .get(&self.active_buffer)
@@ -1439,21 +1463,25 @@ impl Editor {
     /// Convert an action into a list of events to apply to the active buffer
     /// Returns None for actions that don't generate events (like Quit)
     pub fn action_to_events(&mut self, action: Action) -> Option<Vec<Event>> {
-        // Sync viewport from SplitViewState to EditorState BEFORE action conversion
-        // This ensures action_to_events sees correct viewport dimensions for PageDown/PageUp
-        // (since scroll events now update SplitViewState's viewport directly)
-        // Note: We only sync viewport, NOT cursors - EditorState has authoritative cursor state
-        self.sync_viewport_from_split_view_state();
-
         let tab_size = self.config.editor.tab_size;
         let auto_indent = self.config.editor.auto_indent;
         let estimated_line_length = self.config.editor.estimated_line_length;
+
+        // Get viewport height from SplitViewState (the authoritative source)
+        let active_split = self.split_manager.active_split();
+        let viewport_height = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| vs.viewport.height)
+            .unwrap_or(24);
+
         convert_action_to_events(
             self.active_state_mut(),
             action,
             tab_size,
             auto_indent,
             estimated_line_length,
+            viewport_height,
         )
     }
 
@@ -1516,15 +1544,18 @@ impl Editor {
             }
         };
 
+        // Get viewport from active split's SplitViewState
+        let active_split = self.split_manager.active_split();
+        let (top_byte, visible_height) = self
+            .split_view_states
+            .get(&active_split)
+            .map(|vs| (vs.viewport.top_byte, vs.viewport.height.saturating_sub(2)))
+            .unwrap_or((0, 20));
+
         let state = self.active_state_mut();
 
         // Clear any existing search highlights
         state.overlays.clear_namespace(&ns, &mut state.marker_list);
-
-        // Get the visible viewport range
-        let viewport = &state.viewport;
-        let top_byte = viewport.top_byte;
-        let visible_height = viewport.height.saturating_sub(2); // Subtract tab bar and status bar
 
         // Get the visible content by iterating through visible lines
         let visible_start = top_byte;
@@ -1667,12 +1698,17 @@ impl Editor {
         // Move cursor to the first match
         let match_pos = matches[current_match_index];
         {
+            let active_split = self.split_manager.active_split();
             let state = self.active_state_mut();
             state.cursors.primary_mut().position = match_pos;
             state.cursors.primary_mut().anchor = None;
-            state
-                .viewport
-                .ensure_visible(&mut state.buffer, state.cursors.primary());
+            // Ensure cursor is visible - get viewport from SplitViewState
+            if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+                let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+                view_state
+                    .viewport
+                    .ensure_visible(&mut state.buffer, state.cursors.primary());
+            }
         }
 
         let num_matches = matches.len();
@@ -1728,12 +1764,17 @@ impl Editor {
             let matches_len = search_state.matches.len();
 
             {
+                let active_split = self.split_manager.active_split();
                 let state = self.active_state_mut();
                 state.cursors.primary_mut().position = match_pos;
                 state.cursors.primary_mut().anchor = None;
-                state
-                    .viewport
-                    .ensure_visible(&mut state.buffer, state.cursors.primary());
+                // Ensure cursor is visible - get viewport from SplitViewState
+                if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+                    let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+                    view_state
+                        .viewport
+                        .ensure_visible(&mut state.buffer, state.cursors.primary());
+                }
             }
 
             self.set_status_message(format!("Match {} of {}", next_index + 1, matches_len));
@@ -1764,12 +1805,17 @@ impl Editor {
             let matches_len = search_state.matches.len();
 
             {
+                let active_split = self.split_manager.active_split();
                 let state = self.active_state_mut();
                 state.cursors.primary_mut().position = match_pos;
                 state.cursors.primary_mut().anchor = None;
-                state
-                    .viewport
-                    .ensure_visible(&mut state.buffer, state.cursors.primary());
+                // Ensure cursor is visible - get viewport from SplitViewState
+                if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+                    let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+                    view_state
+                        .viewport
+                        .ensure_visible(&mut state.buffer, state.cursors.primary());
+                }
             }
 
             self.set_status_message(format!("Match {} of {}", prev_index + 1, matches_len));
@@ -1916,12 +1962,19 @@ impl Editor {
         });
 
         // Move cursor to first match
-        let state = self.active_state_mut();
-        state.cursors.primary_mut().position = first_match_pos;
-        state.cursors.primary_mut().anchor = None;
-        state
-            .viewport
-            .ensure_visible(&mut state.buffer, state.cursors.primary());
+        let active_split = self.split_manager.active_split();
+        {
+            let state = self.active_state_mut();
+            state.cursors.primary_mut().position = first_match_pos;
+            state.cursors.primary_mut().anchor = None;
+        }
+        // Ensure cursor is visible - get viewport from SplitViewState
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+            view_state
+                .viewport
+                .ensure_visible(&mut state.buffer, state.cursors.primary());
+        }
 
         // Show the query-replace prompt
         self.prompt = Some(Prompt::new(
@@ -2193,12 +2246,19 @@ impl Editor {
     /// Move cursor to the current match in interactive replace
     pub(super) fn move_to_current_match(&mut self, ir_state: &InteractiveReplaceState) {
         let match_pos = ir_state.current_match_pos;
-        let state = self.active_state_mut();
-        state.cursors.primary_mut().position = match_pos;
-        state.cursors.primary_mut().anchor = None;
-        state
-            .viewport
-            .ensure_visible(&mut state.buffer, state.cursors.primary());
+        let active_split = self.split_manager.active_split();
+        {
+            let state = self.active_state_mut();
+            state.cursors.primary_mut().position = match_pos;
+            state.cursors.primary_mut().anchor = None;
+        }
+        // Ensure cursor is visible - get viewport from SplitViewState
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            let state = self.buffers.get_mut(&self.active_buffer).unwrap();
+            view_state
+                .viewport
+                .ensure_visible(&mut state.buffer, state.cursors.primary());
+        }
 
         // Update the prompt message (show [Wrapped] if we've wrapped around)
         let msg = if ir_state.has_wrapped {

@@ -538,7 +538,7 @@ impl Editor {
                         );
                     }
 
-                    // Also set in EditorState (authoritative)
+                    // Also set cursor in EditorState (authoritative for cursors)
                     if let Some(editor_state) = self.buffers.get_mut(&active_id) {
                         let max_pos = editor_state.buffer.len();
                         let cursor_pos = file_state.cursor.position.min(max_pos);
@@ -547,13 +547,7 @@ impl Editor {
                             file_state.cursor.anchor.map(|a| a.min(max_pos));
                         editor_state.cursors.primary_mut().sticky_column =
                             file_state.cursor.sticky_column;
-
-                        editor_state.viewport.top_byte = file_state.scroll.top_byte.min(max_pos);
-                        editor_state.viewport.top_view_line_offset =
-                            file_state.scroll.top_view_line_offset;
-                        editor_state.viewport.left_column = file_state.scroll.left_column;
-                        // Mark viewport to skip sync on first resize after session restore
-                        editor_state.viewport.set_skip_resize_sync();
+                        // Note: viewport is now exclusively owned by SplitViewState (restored above)
                     }
                     break;
                 }
