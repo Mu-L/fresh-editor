@@ -3007,6 +3007,13 @@ impl Editor {
         row: u16,
         delta: i32,
     ) -> std::io::Result<()> {
+        // Sync viewport from EditorState to SplitViewState before scrolling.
+        // This is necessary because rendering updates EditorState.viewport via ensure_visible,
+        // but that change isn't automatically synced to SplitViewState. Without this sync,
+        // mouse scroll would use a stale viewport position after keyboard navigation.
+        // (Bug #248: Mouse wheel stopped working properly after keyboard use)
+        self.sync_editor_state_to_split_view_state();
+
         // Check if scroll is over the file explorer
         if let Some(explorer_area) = self.cached_layout.file_explorer_area {
             if col >= explorer_area.x

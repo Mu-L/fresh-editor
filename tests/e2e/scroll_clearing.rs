@@ -288,6 +288,98 @@ fn test_scroll_clearing_with_scroll_wheel() {
     println!("=== END FINAL SCREEN ===");
 }
 
+/// Test mouse wheel scrolling AFTER keyboard navigation
+/// Bug #248: Mouse wheel stops working properly in main editor after keyboard use
+#[test]
+fn test_mouse_wheel_after_keyboard_navigation() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+
+    let test_file_path = scroll_test_file_path();
+
+    let terminal_width = 80;
+    let terminal_height = 24;
+    let mut harness = EditorTestHarness::new(terminal_width, terminal_height).unwrap();
+
+    harness.open_file(&test_file_path).unwrap();
+    harness.render().unwrap();
+
+    println!("\n=== Testing mouse wheel after keyboard navigation (Bug #248) ===");
+
+    let initial_screen = harness.screen_to_string();
+    println!("Initial screen:");
+    println!("{}", initial_screen);
+
+    // First, do some keyboard navigation
+    println!("\n--- Navigating with keyboard (Down arrow) ---");
+    for i in 1..=10 {
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+        harness.render().unwrap();
+        println!("After Down #{}", i);
+    }
+
+    let after_keyboard = harness.screen_to_string();
+    println!("\nAfter keyboard navigation:");
+    println!("{}", after_keyboard);
+
+    // Record the top line visible after keyboard navigation
+    let top_line_after_keyboard = harness.top_line_number();
+    println!("Top line after keyboard: {}", top_line_after_keyboard);
+
+    // Now try mouse wheel scrolling
+    println!("\n--- Now attempting mouse wheel scroll ---");
+    let (content_first_row, _) = harness.content_area_rows();
+
+    let screen_before_mouse = harness.screen_to_string();
+
+    // Scroll down with mouse wheel
+    for i in 1..=5 {
+        let scroll_event = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 40,
+            row: (content_first_row + 5) as u16,
+            modifiers: KeyModifiers::empty(),
+        };
+        harness.send_mouse(scroll_event).unwrap();
+        harness.render().unwrap();
+
+        let current_screen = harness.screen_to_string();
+        let top_line_now = harness.top_line_number();
+        println!("After mouse ScrollDown #{}: top_line={}", i, top_line_now);
+
+        if current_screen == screen_before_mouse {
+            println!("WARNING: Screen unchanged after mouse scroll!");
+        }
+    }
+
+    let after_mouse_scroll = harness.screen_to_string();
+    let top_line_after_mouse = harness.top_line_number();
+
+    println!("\nAfter mouse wheel scrolling:");
+    println!("{}", after_mouse_scroll);
+    println!("Top line after mouse scroll: {}", top_line_after_mouse);
+
+    // The top line should have changed after mouse scroll
+    // Each ScrollDown scrolls 3 lines, so after 5 scrolls we should be 15 lines further
+    let expected_scroll = 15; // 5 scrolls * 3 lines each
+    let actual_scroll = top_line_after_mouse.saturating_sub(top_line_after_keyboard);
+
+    println!(
+        "\nExpected scroll: {} lines, Actual scroll: {} lines",
+        expected_scroll, actual_scroll
+    );
+
+    // Allow some tolerance since we might hit the end of file
+    if actual_scroll == 0 {
+        panic!(
+            "BUG #248 REPRODUCED: Mouse wheel scroll had no effect after keyboard navigation!\n\
+             Top line stayed at {} after 5 scroll events.",
+            top_line_after_keyboard
+        );
+    }
+
+    println!("\n=== Test passed: Mouse wheel works after keyboard navigation ===");
+}
+
 /// Test that specifically looks for leftover characters after the last line of content
 /// This is the most common manifestation of the scroll clearing bug
 #[test]
