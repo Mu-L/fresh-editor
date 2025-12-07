@@ -363,6 +363,12 @@ fn test_cursor_x_position_after_enter_at_end_of_line() {
 /// Test: Ctrl+Up scrolls view up without moving cursor
 #[test]
 fn test_ctrl_up_scrolls_view_up() {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .try_init();
+
     let mut harness = EditorTestHarness::new(80, 15).unwrap();
 
     // Create a file with 50 lines (more than the 15-line viewport)
@@ -383,12 +389,19 @@ fn test_ctrl_up_scrolls_view_up() {
     // Record cursor position before scroll
     let cursor_pos_before = harness.cursor_position();
     let (_, screen_y_before) = harness.screen_cursor_position();
+    let top_byte_before = harness.editor().active_viewport().top_byte;
+    eprintln!("BEFORE: cursor_pos={}, screen_y={}, top_byte={}", cursor_pos_before, screen_y_before, top_byte_before);
 
     // Press Ctrl+Up to scroll view up (content moves down, we see earlier lines)
     harness
         .send_key(KeyCode::Up, KeyModifiers::CONTROL)
         .unwrap();
+    let top_byte_after_key = harness.editor().active_viewport().top_byte;
+    eprintln!("AFTER KEY (before render): top_byte={}", top_byte_after_key);
+
     harness.render().unwrap();
+    let top_byte_after_render = harness.editor().active_viewport().top_byte;
+    eprintln!("AFTER RENDER: top_byte={}", top_byte_after_render);
 
     // Cursor buffer position should NOT change
     let cursor_pos_after = harness.cursor_position();
@@ -399,6 +412,7 @@ fn test_ctrl_up_scrolls_view_up() {
 
     // Screen cursor Y should move down by 1 (since view scrolled up)
     let (_, screen_y_after) = harness.screen_cursor_position();
+    eprintln!("AFTER: cursor_pos={}, screen_y={}", cursor_pos_after, screen_y_after);
     assert_eq!(
         screen_y_after,
         screen_y_before + 1,

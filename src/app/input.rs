@@ -36,6 +36,13 @@ impl Editor {
             modifiers
         );
 
+        // Clear skip_ensure_visible flag so cursor becomes visible after key press
+        // (scroll actions will set it again if needed)
+        let active_split = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            view_state.viewport.clear_skip_ensure_visible();
+        }
+
         // Determine the current context first
         let mut context = self.get_key_context();
 
@@ -3083,6 +3090,7 @@ impl Editor {
         let view_state = self.split_view_states.get_mut(&active_split);
 
         if let (Some(buffer), Some(view_state)) = (buffer, view_state) {
+            let top_byte_before = view_state.viewport.top_byte;
             if let Some(tokens) = view_transform_tokens {
                 // Use view-aware scrolling with the transform's tokens
                 use crate::view::ui::view_pipeline::ViewLineIterator;
@@ -3102,6 +3110,12 @@ impl Editor {
                     view_state.viewport.scroll_down(buffer, lines_to_scroll);
                 }
             }
+            // Skip ensure_visible so the scroll position isn't undone during render
+            view_state.viewport.set_skip_ensure_visible();
+            tracing::trace!(
+                "handle_mouse_scroll: delta={}, top_byte {} -> {}",
+                delta, top_byte_before, view_state.viewport.top_byte
+            );
         }
 
         Ok(())
@@ -3223,6 +3237,8 @@ impl Editor {
         // Set viewport top to this position in SplitViewState
         if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
             view_state.viewport.top_byte = line_start;
+            // Skip ensure_visible so the scroll position isn't undone during render
+            view_state.viewport.set_skip_ensure_visible();
         }
 
         // Move cursor to be visible in the new viewport (after releasing the state borrow)
@@ -3334,6 +3350,8 @@ impl Editor {
         // Set viewport top to this position in SplitViewState
         if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
             view_state.viewport.top_byte = limited_line_start;
+            // Skip ensure_visible so the scroll position isn't undone during render
+            view_state.viewport.set_skip_ensure_visible();
         }
 
         // Move cursor to be visible in the new viewport (after releasing the state borrow)

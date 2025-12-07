@@ -575,8 +575,14 @@ impl SplitRenderer {
 
                 // Write back updated viewport to SplitViewState
                 // This is crucial for cursor visibility tracking (ensure_visible_in_layout updates)
+                // NOTE: We do NOT clear skip_ensure_visible here - it should persist across
+                // renders until something actually needs cursor visibility check
                 if let Some(view_states) = split_view_states.as_deref_mut() {
                     if let Some(view_state) = view_states.get_mut(&split_id) {
+                        tracing::trace!(
+                            "Writing back viewport: top_byte={}, skip_ensure_visible={}",
+                            viewport.top_byte, viewport.should_skip_ensure_visible()
+                        );
                         view_state.viewport = viewport.clone();
                     }
                 }

@@ -2388,6 +2388,8 @@ impl Editor {
                         .scroll_up(buffer, line_offset.unsigned_abs());
                 }
             }
+            // Mark to skip ensure_visible on next render so the scroll isn't undone
+            view_state.viewport.set_skip_ensure_visible();
         }
         // Note: SplitViewState is now authoritative for viewport, no sync needed
     }
@@ -2403,6 +2405,8 @@ impl Editor {
 
         if let (Some(buffer), Some(view_state)) = (buffer, view_state) {
             view_state.viewport.scroll_to(buffer, top_line);
+            // Skip ensure_visible so the explicit scroll position isn't undone during render
+            view_state.viewport.set_skip_ensure_visible();
         }
     }
 

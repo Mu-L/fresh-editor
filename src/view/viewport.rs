@@ -43,6 +43,11 @@ pub struct Viewport {
     /// This is set when restoring a session to prevent the restored scroll position
     /// from being overwritten by ensure_visible during the first render
     skip_resize_sync: bool,
+
+    /// Whether to skip ensure_visible on next render
+    /// This is set after scroll actions (Ctrl+Up/Down) to prevent the scroll
+    /// from being immediately undone by ensure_visible
+    skip_ensure_visible: bool,
 }
 
 impl Viewport {
@@ -59,6 +64,7 @@ impl Viewport {
             line_wrap_enabled: false,
             needs_sync: false,
             skip_resize_sync: false,
+            skip_ensure_visible: false,
         }
     }
 
@@ -73,6 +79,25 @@ impl Viewport {
         let skip = self.skip_resize_sync;
         self.skip_resize_sync = false;
         skip
+    }
+
+    /// Mark viewport to skip ensure_visible on next render
+    /// This is used after scroll actions to prevent the scroll from being undone
+    pub fn set_skip_ensure_visible(&mut self) {
+        tracing::trace!("set_skip_ensure_visible: setting flag to true");
+        self.skip_ensure_visible = true;
+    }
+
+    /// Check if ensure_visible should be skipped (does NOT consume the flag)
+    /// Returns true if ensure_visible should be skipped
+    pub fn should_skip_ensure_visible(&self) -> bool {
+        self.skip_ensure_visible
+    }
+
+    /// Clear the skip_ensure_visible flag
+    /// This should be called after all ensure_visible calls in a render pass
+    pub fn clear_skip_ensure_visible(&mut self) {
+        self.skip_ensure_visible = false;
     }
 
     /// Set the scroll offset
@@ -246,6 +271,14 @@ impl Viewport {
         if self.should_skip_resize_sync() {
             return false;
         }
+
+        // Check if we should skip ensure_visible due to scroll action
+        // This prevents scroll actions (Ctrl+Up/Down) from being immediately undone
+        if self.should_skip_ensure_visible() {
+            tracing::trace!("ensure_visible_in_layout: SKIPPING due to skip_ensure_visible flag");
+            return false;
+        }
+        tracing::trace!("ensure_visible_in_layout: NOT skipping, skip_ensure_visible={}", self.skip_ensure_visible);
 
         let viewport_height = self.visible_line_count();
         if view_lines.is_empty() || viewport_height == 0 {
@@ -555,8 +588,17 @@ impl Viewport {
         // Check if we should skip sync due to session restore
         // This prevents the restored scroll position from being overwritten
         if self.should_skip_resize_sync() {
+            tracing::trace!("ensure_visible: SKIPPING due to skip_resize_sync");
             return;
         }
+
+        // Check if we should skip ensure_visible due to scroll action
+        // This prevents scroll actions (Ctrl+Up/Down) from being immediately undone
+        if self.should_skip_ensure_visible() {
+            tracing::trace!("ensure_visible: SKIPPING due to skip_ensure_visible flag");
+            return;
+        }
+        tracing::trace!("ensure_visible: NOT skipping, skip_ensure_visible={}", self.skip_ensure_visible);
 
         // For large files with lazy loading, ensure data around cursor is loaded
         let viewport_lines = self.visible_line_count().max(1);
