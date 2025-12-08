@@ -567,6 +567,12 @@ impl Editor {
         let file_explorer_focused =
             self.key_context == crate::input::keybindings::KeyContext::FileExplorer;
         let mouse_capture = self.mouse_enabled;
+        let mouse_hover = self.config.editor.mouse_hover_enabled;
+        let lsp_available = self
+            .buffer_metadata
+            .get(&self.active_buffer)
+            .map(|metadata| metadata.lsp_enabled)
+            .unwrap_or(false);
         let show_hidden = self
             .file_explorer
             .as_ref()
@@ -587,6 +593,8 @@ impl Editor {
             .set(context_keys::FILE_EXPLORER, file_explorer_exists)
             .set(context_keys::FILE_EXPLORER_FOCUSED, file_explorer_focused)
             .set(context_keys::MOUSE_CAPTURE, mouse_capture)
+            .set(context_keys::MOUSE_HOVER, mouse_hover)
+            .set(context_keys::LSP_AVAILABLE, lsp_available)
             .set(context_keys::FILE_EXPLORER_SHOW_HIDDEN, show_hidden)
             .set(context_keys::FILE_EXPLORER_SHOW_GITIGNORED, show_gitignored)
             .set(context_keys::HAS_SELECTION, has_selection);

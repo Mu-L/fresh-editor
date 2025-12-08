@@ -953,11 +953,17 @@ impl Editor {
 
     /// Check if mouse hover timer has expired and trigger LSP hover request
     ///
-    /// This implements debounced hover - we wait 500ms before sending the request
-    /// to avoid spamming the LSP server on every mouse move.
+    /// This implements debounced hover - we wait for the configured delay before
+    /// sending the request to avoid spamming the LSP server on every mouse move.
     /// Returns true if a hover request was triggered.
     pub fn check_mouse_hover_timer(&mut self) -> bool {
-        const HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+        // Check if mouse hover is enabled
+        if !self.config.editor.mouse_hover_enabled {
+            return false;
+        }
+
+        let hover_delay =
+            std::time::Duration::from_millis(self.config.editor.mouse_hover_delay_ms);
 
         // Get hover state without borrowing self
         let hover_info = match self.mouse_state.lsp_hover_state {
@@ -965,7 +971,7 @@ impl Editor {
                 if self.mouse_state.lsp_hover_request_sent {
                     return false; // Already sent request for this position
                 }
-                if start_time.elapsed() < HOVER_DELAY {
+                if start_time.elapsed() < hover_delay {
                     return false; // Timer hasn't expired yet
                 }
                 Some((byte_pos, screen_x, screen_y))
@@ -2044,6 +2050,25 @@ impl Editor {
     /// Check if mouse capture is enabled
     pub fn is_mouse_enabled(&self) -> bool {
         self.mouse_enabled
+    }
+
+    /// Toggle mouse hover for LSP on/off
+    pub fn toggle_mouse_hover(&mut self) {
+        self.config.editor.mouse_hover_enabled = !self.config.editor.mouse_hover_enabled;
+
+        if self.config.editor.mouse_hover_enabled {
+            self.set_status_message("Mouse hover enabled".to_string());
+        } else {
+            // Clear any pending hover state
+            self.mouse_state.lsp_hover_state = None;
+            self.mouse_state.lsp_hover_request_sent = false;
+            self.set_status_message("Mouse hover disabled".to_string());
+        }
+    }
+
+    /// Check if mouse hover is enabled
+    pub fn is_mouse_hover_enabled(&self) -> bool {
+        self.config.editor.mouse_hover_enabled
     }
 
     /// Set GPM active flag (enables software mouse cursor rendering)

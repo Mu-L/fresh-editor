@@ -1085,6 +1085,7 @@ impl Editor {
             Action::ToggleFileExplorer => self.toggle_file_explorer(),
             Action::ToggleLineNumbers => self.toggle_line_numbers(),
             Action::ToggleMouseCapture => self.toggle_mouse_capture(),
+            Action::ToggleMouseHover => self.toggle_mouse_hover(),
             Action::FocusFileExplorer => self.focus_file_explorer(),
             Action::FocusEditor => self.focus_editor(),
             Action::FileExplorerUp => self.file_explorer_navigate_up(),

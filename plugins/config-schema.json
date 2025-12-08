@@ -96,6 +96,14 @@
           "type": "boolean",
           "description": "Wrap long lines to fit the window width"
         },
+        "mouse_hover_delay_ms": {
+          "type": "integer",
+          "description": "Delay in milliseconds before a mouse hover triggers an LSP hover request.\nLower values show hover info faster but may cause more LSP server load.\nDefault: 500ms"
+        },
+        "mouse_hover_enabled": {
+          "type": "boolean",
+          "description": "Whether mouse hover triggers LSP hover requests.\nWhen enabled, hovering over code with the mouse will show documentation.\nDefault: true"
+        },
         "recovery_enabled": {
           "type": "boolean",
           "description": "Whether to enable file recovery (Emacs-style auto-save)\nWhen enabled, buffers are periodically saved to recovery files\nso they can be recovered if the editor crashes."

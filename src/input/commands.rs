@@ -741,6 +741,14 @@ pub fn get_all_commands() -> Vec<Command> {
             source: CommandSource::Builtin,
         },
         Command {
+            name: "Toggle Mouse Hover".to_string(),
+            description: "Toggle LSP hover info on mouse hover".to_string(),
+            action: Action::ToggleMouseHover,
+            contexts: vec![],
+            custom_contexts: vec![],
+            source: CommandSource::Builtin,
+        },
+        Command {
             name: "Navigate Back".to_string(),
             description: "Go back in navigation history".to_string(),
             action: Action::NavigateBack,

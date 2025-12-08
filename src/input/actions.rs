@@ -1711,6 +1711,7 @@ pub fn action_to_events(
         | Action::LspRestart
         | Action::LspStop
         | Action::ToggleInlayHints
+        | Action::ToggleMouseHover
         | Action::ToggleLineNumbers
         | Action::ToggleMouseCapture
         | Action::DumpConfig

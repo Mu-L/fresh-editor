@@ -410,6 +410,7 @@ pub enum Action {
     LspRestart,
     LspStop,
     ToggleInlayHints,
+    ToggleMouseHover,
 
     // View toggles
     ToggleLineNumbers,
@@ -684,6 +685,7 @@ impl Action {
             "lsp_restart" => Some(Action::LspRestart),
             "lsp_stop" => Some(Action::LspStop),
             "toggle_inlay_hints" => Some(Action::ToggleInlayHints),
+            "toggle_mouse_hover" => Some(Action::ToggleMouseHover),
 
             "toggle_line_numbers" => Some(Action::ToggleLineNumbers),
             "toggle_mouse_capture" => Some(Action::ToggleMouseCapture),
@@ -1498,6 +1500,7 @@ impl KeybindingResolver {
             Action::LspRestart => "LSP: Start/restart server for current language".to_string(),
             Action::LspStop => "LSP: Stop a running server".to_string(),
             Action::ToggleInlayHints => "Toggle inlay hints".to_string(),
+            Action::ToggleMouseHover => "Toggle LSP hover on mouse".to_string(),
             Action::ToggleLineNumbers => "Toggle line numbers".to_string(),
             Action::ToggleMouseCapture => "Toggle mouse support".to_string(),
             Action::SetBackground => "Set ANSI background file".to_string(),

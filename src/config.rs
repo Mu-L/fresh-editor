@@ -129,6 +129,18 @@ pub struct EditorConfig {
     /// Default: 10KB (10000 bytes)
     #[serde(default = "default_highlight_context_bytes")]
     pub highlight_context_bytes: usize,
+
+    /// Whether mouse hover triggers LSP hover requests.
+    /// When enabled, hovering over code with the mouse will show documentation.
+    /// Default: true
+    #[serde(default = "default_true")]
+    pub mouse_hover_enabled: bool,
+
+    /// Delay in milliseconds before a mouse hover triggers an LSP hover request.
+    /// Lower values show hover info faster but may cause more LSP server load.
+    /// Default: 500ms
+    #[serde(default = "default_mouse_hover_delay")]
+    pub mouse_hover_delay_ms: u64,
 }
 
 fn default_tab_size() -> usize {
@@ -176,6 +188,10 @@ fn default_highlight_context_bytes() -> usize {
     10_000 // 10KB context for accurate syntax highlighting
 }
 
+fn default_mouse_hover_delay() -> u64 {
+    500 // 500ms delay before showing hover info
+}
+
 impl Default for EditorConfig {
     fn default() -> Self {
         Self {
@@ -194,6 +210,8 @@ impl Default for EditorConfig {
             recovery_enabled: true,
             auto_save_interval_secs: default_auto_save_interval(),
             highlight_context_bytes: default_highlight_context_bytes(),
+            mouse_hover_enabled: true,
+            mouse_hover_delay_ms: default_mouse_hover_delay(),
         }
     }
 }
@@ -1114,6 +1132,110 @@ impl Config {
                     MenuItem::Action {
                         label: "Command Palette...".to_string(),
                         action: "command_palette".to_string(),
+                        args: HashMap::new(),
+                        when: None,
+                        checkbox: None,
+                    },
+                ],
+            },
+            // LSP menu (Language Server Protocol operations)
+            Menu {
+                label: "LSP".to_string(),
+                items: vec![
+                    MenuItem::Action {
+                        label: "Show Hover Info".to_string(),
+                        action: "lsp_hover".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Go to Definition".to_string(),
+                        action: "lsp_goto_definition".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Find References".to_string(),
+                        action: "lsp_references".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Rename Symbol".to_string(),
+                        action: "lsp_rename".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Separator { separator: true },
+                    MenuItem::Action {
+                        label: "Show Completions".to_string(),
+                        action: "lsp_completion".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Show Signature Help".to_string(),
+                        action: "lsp_signature_help".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Code Actions".to_string(),
+                        action: "lsp_code_actions".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Separator { separator: true },
+                    MenuItem::Action {
+                        label: "Toggle Inlay Hints".to_string(),
+                        action: "toggle_inlay_hints".to_string(),
+                        args: HashMap::new(),
+                        when: Some(
+                            crate::view::ui::context_keys::LSP_AVAILABLE.to_string(),
+                        ),
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Toggle Mouse Hover".to_string(),
+                        action: "toggle_mouse_hover".to_string(),
+                        args: HashMap::new(),
+                        when: None,
+                        checkbox: Some(
+                            crate::view::ui::context_keys::MOUSE_HOVER.to_string(),
+                        ),
+                    },
+                    MenuItem::Separator { separator: true },
+                    MenuItem::Action {
+                        label: "Restart Server".to_string(),
+                        action: "lsp_restart".to_string(),
+                        args: HashMap::new(),
+                        when: None,
+                        checkbox: None,
+                    },
+                    MenuItem::Action {
+                        label: "Stop Server".to_string(),
+                        action: "lsp_stop".to_string(),
                         args: HashMap::new(),
                         when: None,
                         checkbox: None,

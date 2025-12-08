@@ -66,6 +66,13 @@
       "when": "global"
     },
     {
+      "key": "l",
+      "modifiers": ["alt"],
+      "action": "menu_open",
+      "args": {"name": "LSP"},
+      "when": "global"
+    },
+    {
       "comment": "Normal context - Close tab",
       "key": "w",
       "modifiers": ["alt"],
