@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Delay between file writes to ensure filesystem notifications are received.
 /// - Many filesystems (ext4, HFS+) have 1-second mtime granularity
 /// - macOS FSEvents has 500ms-2s coalescing latency by default
-const FILE_CHANGE_DELAY: Duration = Duration::from_millis(1100);
+const FILE_CHANGE_DELAY: Duration = Duration::from_millis(2100);
 
 /// Test that the notify-based auto-revert flow works correctly.
 /// This test validates that external file changes are detected and
