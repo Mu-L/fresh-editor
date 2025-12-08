@@ -568,10 +568,22 @@ impl Editor {
             self.key_context == crate::input::keybindings::KeyContext::FileExplorer;
         let mouse_capture = self.mouse_enabled;
         let mouse_hover = self.config.editor.mouse_hover_enabled;
+        // Check if LSP is enabled for this buffer AND the server is running and ready
         let lsp_available = self
             .buffer_metadata
             .get(&self.active_buffer)
-            .map(|metadata| metadata.lsp_enabled)
+            .and_then(|metadata| {
+                if !metadata.lsp_enabled {
+                    return None;
+                }
+                // Get file path and detect language
+                metadata.file_path().and_then(|path| {
+                    detect_language(path, &self.config.languages).and_then(|language| {
+                        // Check if LSP server for this language is ready
+                        self.lsp.as_ref().map(|lsp| lsp.is_server_ready(&language))
+                    })
+                })
+            })
             .unwrap_or(false);
         let show_hidden = self
             .file_explorer

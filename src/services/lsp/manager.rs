@@ -405,6 +405,14 @@ impl LspManager {
         self.handles.keys().cloned().collect()
     }
 
+    /// Check if an LSP server for a language is running and ready to serve requests
+    pub fn is_server_ready(&self, language: &str) -> bool {
+        self.handles
+            .get(language)
+            .map(|handle| handle.state().can_send_requests())
+            .unwrap_or(false)
+    }
+
     /// Shutdown a specific language server
     ///
     /// This marks the server as disabled, preventing auto-restart until the user
