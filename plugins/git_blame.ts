@@ -249,9 +249,12 @@ async function fetchFileContent(filePath: string, commit: string | null): Promis
     }
   }
 
-  // Get current file content
-  const result = await editor.spawnProcess("cat", [filePath]);
-  return result.exit_code === 0 ? result.stdout : "";
+  // Get current file content using editor API (cross-platform)
+  try {
+    return await editor.readFile(filePath);
+  } catch {
+    return "";
+  }
 }
 
 /**
