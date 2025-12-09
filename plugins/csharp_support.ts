@@ -32,10 +32,39 @@ interface AfterFileOpenData {
 // Track which directories we've already restored to avoid repeated restores
 const restoredDirectories = new Set<string>();
 
+// Cache whether dotnet is available (null = not checked yet)
+let dotnetAvailable: boolean | null = null;
+
+/**
+ * Check if dotnet CLI is available
+ */
+async function isDotnetAvailable(): Promise<boolean> {
+  if (dotnetAvailable !== null) {
+    return dotnetAvailable;
+  }
+
+  try {
+    const result = await editor.spawnProcess("dotnet", ["--version"]);
+    dotnetAvailable = result.exit_code === 0;
+  } catch {
+    dotnetAvailable = false;
+  }
+
+  if (!dotnetAvailable) {
+    editor.debug("csharp_support: dotnet CLI not found, C# support will be limited");
+  }
+
+  return dotnetAvailable;
+}
+
 /**
  * Run dotnet restore for a project
  */
 async function restoreProject(projectPath: string): Promise<void> {
+  if (!await isDotnetAvailable()) {
+    return;
+  }
+
   editor.setStatus(`Restoring NuGet packages for ${projectPath}...`);
   editor.debug(`csharp_support: Running dotnet restore for ${projectPath}`);
 
@@ -50,8 +79,9 @@ async function restoreProject(projectPath: string): Promise<void> {
       editor.debug(`csharp_support: dotnet restore failed: ${result.stderr}`);
     }
   } catch (e) {
-    editor.setStatus(`NuGet restore error: ${e}`);
-    editor.debug(`csharp_support: dotnet restore error: ${e}`);
+    const err = e instanceof Error ? e : new Error(String(e));
+    editor.setStatus(`NuGet restore error: ${err.message}`);
+    editor.debug(`csharp_support: dotnet restore error: ${err.message}`);
   }
 }
 
