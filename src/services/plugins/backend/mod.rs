@@ -2,41 +2,56 @@
 //!
 //! This module provides an abstraction layer for JavaScript runtime backends.
 //!
-//! # Current Implementation
+//! # Available Backends
 //!
-//! Currently, only the embedded `deno_core` backend is supported. This uses V8
-//! directly embedded in the binary, requiring no external dependencies for users.
+//! - **QuickJS** (default): Lightweight embedded JS engine (~700KB) with oxc for
+//!   TypeScript transpilation. Best for smaller binary size.
 //!
-//! # Future Possibilities
+//! - **deno_core**: Embedded V8 engine with deno_ast for TypeScript. Larger but
+//!   more compatible with modern JavaScript features.
 //!
-//! The `JsBackend` trait is designed to allow alternative implementations such as:
-//! - External Bun process (would require users to install Bun)
-//! - External Deno CLI process (would require users to install Deno)
-//! - QuickJS for a smaller binary footprint
+//! # Feature Flags
 //!
-//! These are not currently implemented to keep the editor self-contained.
+//! - `js-quickjs` (default): Use QuickJS + oxc backend
+//! - `js-deno-core`: Use deno_core + V8 backend
 
 use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand, PluginResponse};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-// The embedded deno_core backend (default, only supported backend)
+/// Information about a loaded TypeScript plugin
+#[derive(Debug, Clone)]
+pub struct PluginInfo {
+    /// Plugin name
+    pub name: String,
+    /// Plugin file path
+    pub path: PathBuf,
+    /// Whether the plugin is enabled
+    pub enabled: bool,
+}
+
+// QuickJS backend (default)
+#[cfg(feature = "js-quickjs")]
+pub mod quickjs_backend;
+
+// deno_core backend (optional)
+#[cfg(feature = "js-deno-core")]
 pub mod deno_core_backend;
 
 /// Pending response senders type alias for convenience
-pub type PendingResponses = Arc<
-    std::sync::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<PluginResponse>>>,
->;
+pub type PendingResponses =
+    Arc<std::sync::Mutex<HashMap<u64, tokio::sync::oneshot::Sender<PluginResponse>>>>;
 
 /// JavaScript Runtime Backend Trait
 ///
 /// This trait abstracts the JavaScript runtime, allowing different backends
-/// to be used interchangeably. Currently only `deno_core` is implemented.
+/// to be used interchangeably.
 ///
 /// Note: This trait does NOT require `Send` because JavaScript runtimes
-/// (like V8) are typically not thread-safe. The runtime is designed to
-/// run on a dedicated plugin thread.
+/// (like V8 and QuickJS) are typically not thread-safe. The runtime is
+/// designed to run on a dedicated plugin thread.
 #[allow(async_fn_in_trait)]
 pub trait JsBackend {
     /// Create a new backend instance with the given configuration
@@ -72,20 +87,34 @@ pub trait JsBackend {
     fn pending_responses(&self) -> &PendingResponses;
 }
 
-// Re-export the default backend type
+// Re-export the selected backend type based on feature flag
+#[cfg(feature = "js-quickjs")]
+pub use quickjs_backend::QuickJsBackend;
+
+#[cfg(feature = "js-deno-core")]
 pub use deno_core_backend::DenoCoreBackend;
 
-/// The selected backend type (currently always deno_core)
+/// The selected backend type
+#[cfg(feature = "js-quickjs")]
+pub type SelectedBackend = QuickJsBackend;
+
+#[cfg(all(feature = "js-deno-core", not(feature = "js-quickjs")))]
 pub type SelectedBackend = DenoCoreBackend;
 
 /// Get the name of the current JS backend
+#[cfg(feature = "js-quickjs")]
+pub fn backend_name() -> &'static str {
+    "QuickJS + oxc"
+}
+
+#[cfg(all(feature = "js-deno-core", not(feature = "js-quickjs")))]
 pub fn backend_name() -> &'static str {
     "deno_core (embedded V8)"
 }
 
 /// Check if the selected runtime is available on the system
 pub fn check_runtime_available() -> Result<()> {
-    // deno_core is always available (embedded)
+    // Both backends are embedded, always available
     Ok(())
 }
 
