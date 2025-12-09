@@ -1,11 +1,7 @@
 // EditorTestHarness - Virtual terminal environment for E2E testing
-
-// Initialize V8 early - must happen before any Editor/JsRuntime is created
-// and only once per process. Using ctor ensures this runs at test startup.
-#[ctor::ctor]
-fn init_v8_for_tests() {
-    fresh::v8_init::init();
-}
+//
+// Note: QuickJS (used for JavaScript plugins) doesn't require any special
+// initialization, unlike V8 which needed early init_v8_for_tests().
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 

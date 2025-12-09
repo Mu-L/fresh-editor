@@ -22,14 +22,15 @@ use std::sync::{Arc, RwLock};
 
 /// Transpile TypeScript to JavaScript using oxc
 ///
-/// Note: For now, only parses and regenerates the code.
-/// TypeScript type stripping will be added when oxc API stabilizes.
-#[allow(dead_code)]
+/// Uses oxc_transformer to strip TypeScript type annotations and syntax,
+/// producing valid JavaScript that QuickJS can execute.
 fn transpile_typescript(source: &str, filename: &str) -> Result<String> {
     use oxc_allocator::Allocator;
     use oxc_codegen::Codegen;
     use oxc_parser::Parser;
+    use oxc_semantic::SemanticBuilder;
     use oxc_span::SourceType;
+    use oxc_transformer::{TransformOptions, Transformer};
 
     let allocator = Allocator::default();
 
@@ -43,9 +44,36 @@ fn transpile_typescript(source: &str, filename: &str) -> Result<String> {
         return Err(anyhow!("TypeScript parse errors: {}", errors.join(", ")));
     }
 
-    // Generate JavaScript output (oxc parser handles TS syntax)
+    // Get mutable program for transformation
+    let mut program = parser_ret.program;
+
+    // Build semantic information for scoping
+    let semantic_ret = SemanticBuilder::new()
+        .with_excess_capacity(2.0) // Transformer may expand code
+        .build(&program);
+
+    if !semantic_ret.errors.is_empty() {
+        let errors: Vec<String> = semantic_ret.errors.iter().map(|e| e.to_string()).collect();
+        return Err(anyhow!("Semantic analysis errors: {}", errors.join(", ")));
+    }
+
+    let scoping = semantic_ret.semantic.into_scoping();
+
+    // Set up transform options for TypeScript stripping
+    let transform_options = TransformOptions::default();
+
+    // Transform the program to strip TypeScript
+    let transformer_ret = Transformer::new(&allocator, std::path::Path::new(filename), &transform_options)
+        .build_with_scoping(scoping, &mut program);
+
+    if !transformer_ret.errors.is_empty() {
+        let errors: Vec<String> = transformer_ret.errors.iter().map(|e| e.to_string()).collect();
+        return Err(anyhow!("TypeScript transform errors: {}", errors.join(", ")));
+    }
+
+    // Generate JavaScript output
     let codegen = Codegen::new();
-    let output = codegen.build(&parser_ret.program);
+    let output = codegen.build(&program);
 
     Ok(output.code)
 }
@@ -159,9 +187,9 @@ impl QuickJsBackend {
     }
 
     /// Add all editor.* methods to the editor object
-    fn add_editor_methods(
-        ctx: &rquickjs::Ctx<'_>,
-        editor: &Object<'_>,
+    fn add_editor_methods<'js>(
+        ctx: &rquickjs::Ctx<'js>,
+        editor: &Object<'js>,
         state: &Rc<RefCell<QuickJsState>>,
     ) -> Result<()> {
         // === Status and logging ===
@@ -641,15 +669,237 @@ impl QuickJsBackend {
                 .map_err(|e| anyhow!("Failed to set setBufferCursor: {}", e))?;
         }
 
+        // === Stub implementations for less-common operations ===
+        // These log warnings but allow plugins to load without crashing
+
+        // editor.defineMode(name, parent, bindings) - stub for modal keybinding support
+        {
+            let define_mode = Function::new(ctx.clone(), |name: String, _parent: Value, _bindings: Value| {
+                tracing::debug!("QuickJS stub: defineMode '{}' not implemented", name);
+            })
+            .map_err(|e| anyhow!("Failed to create defineMode: {}", e))?;
+            editor
+                .set("defineMode", define_mode)
+                .map_err(|e| anyhow!("Failed to set defineMode: {}", e))?;
+        }
+
+        // editor.addOverlay(bufferId, namespace, start, end, style) - stub
+        {
+            let add_overlay = Function::new(ctx.clone(), |_buffer_id: usize, namespace: String, _start: usize, _end: usize| {
+                tracing::debug!("QuickJS stub: addOverlay namespace '{}' not implemented", namespace);
+            })
+            .map_err(|e| anyhow!("Failed to create addOverlay: {}", e))?;
+            editor
+                .set("addOverlay", add_overlay)
+                .map_err(|e| anyhow!("Failed to set addOverlay: {}", e))?;
+        }
+
+        // editor.clearNamespace(bufferId, namespace) - stub
+        {
+            let clear_namespace = Function::new(ctx.clone(), |_buffer_id: usize, namespace: String| {
+                tracing::debug!("QuickJS stub: clearNamespace '{}' not implemented", namespace);
+            })
+            .map_err(|e| anyhow!("Failed to create clearNamespace: {}", e))?;
+            editor
+                .set("clearNamespace", clear_namespace)
+                .map_err(|e| anyhow!("Failed to set clearNamespace: {}", e))?;
+        }
+
+        // editor.spawnProcess(command, args, options) - stub
+        {
+            let spawn_process = Function::new(ctx.clone(), |command: String, _args: Value| {
+                tracing::debug!("QuickJS stub: spawnProcess '{}' not implemented", command);
+            })
+            .map_err(|e| anyhow!("Failed to create spawnProcess: {}", e))?;
+            editor
+                .set("spawnProcess", spawn_process)
+                .map_err(|e| anyhow!("Failed to set spawnProcess: {}", e))?;
+        }
+
+        // editor.pathJoin(...parts) - actual implementation
+        {
+            let path_join = Function::new(ctx.clone(), |parts: Vec<String>| -> String {
+                let mut path = std::path::PathBuf::new();
+                for part in parts {
+                    path.push(part);
+                }
+                path.to_string_lossy().to_string()
+            })
+            .map_err(|e| anyhow!("Failed to create pathJoin: {}", e))?;
+            editor
+                .set("pathJoin", path_join)
+                .map_err(|e| anyhow!("Failed to set pathJoin: {}", e))?;
+        }
+
+        // editor.setPromptSuggestions(suggestions) - stub
+        {
+            let set_prompt_suggestions = Function::new(ctx.clone(), |_suggestions: Value| {
+                tracing::debug!("QuickJS stub: setPromptSuggestions not implemented");
+            })
+            .map_err(|e| anyhow!("Failed to create setPromptSuggestions: {}", e))?;
+            editor
+                .set("setPromptSuggestions", set_prompt_suggestions)
+                .map_err(|e| anyhow!("Failed to set setPromptSuggestions: {}", e))?;
+        }
+
+        // editor.startPrompt(prefix, mode) - stub
+        {
+            let start_prompt = Function::new(ctx.clone(), |prefix: String, _mode: String| {
+                tracing::debug!("QuickJS stub: startPrompt '{}' not implemented", prefix);
+            })
+            .map_err(|e| anyhow!("Failed to create startPrompt: {}", e))?;
+            editor
+                .set("startPrompt", start_prompt)
+                .map_err(|e| anyhow!("Failed to set startPrompt: {}", e))?;
+        }
+
+        // editor.refreshLines(bufferId, startLine, endLine) - stub
+        {
+            let refresh_lines = Function::new(ctx.clone(), |_buffer_id: usize, _start: usize, _end: usize| {
+                tracing::debug!("QuickJS stub: refreshLines not implemented");
+            })
+            .map_err(|e| anyhow!("Failed to create refreshLines: {}", e))?;
+            editor
+                .set("refreshLines", refresh_lines)
+                .map_err(|e| anyhow!("Failed to set refreshLines: {}", e))?;
+        }
+
+        // editor.getTextPropertiesAtCursor() - stub returning undefined (None -> undefined in JS)
+        {
+            let get_text_props = Function::new(ctx.clone(), || -> Option<()> {
+                tracing::debug!("QuickJS stub: getTextPropertiesAtCursor not implemented");
+                None
+            })
+            .map_err(|e| anyhow!("Failed to create getTextPropertiesAtCursor: {}", e))?;
+            editor
+                .set("getTextPropertiesAtCursor", get_text_props)
+                .map_err(|e| anyhow!("Failed to set getTextPropertiesAtCursor: {}", e))?;
+        }
+
+        // editor.getBufferInfo(bufferId) - stub returning undefined
+        {
+            let get_buffer_info = Function::new(ctx.clone(), |_buffer_id: usize| -> Option<()> {
+                tracing::debug!("QuickJS stub: getBufferInfo not implemented");
+                None
+            })
+            .map_err(|e| anyhow!("Failed to create getBufferInfo: {}", e))?;
+            editor
+                .set("getBufferInfo", get_buffer_info)
+                .map_err(|e| anyhow!("Failed to set getBufferInfo: {}", e))?;
+        }
+
+        // editor.createVirtualBufferInSplit(splitId, name, content) - stub returning 0
+        {
+            let create_virtual_buffer = Function::new(ctx.clone(), |_split_id: usize, name: String, _content: String| -> usize {
+                tracing::debug!("QuickJS stub: createVirtualBufferInSplit '{}' not implemented", name);
+                0
+            })
+            .map_err(|e| anyhow!("Failed to create createVirtualBufferInSplit: {}", e))?;
+            editor
+                .set("createVirtualBufferInSplit", create_virtual_buffer)
+                .map_err(|e| anyhow!("Failed to set createVirtualBufferInSplit: {}", e))?;
+        }
+
+        // editor.setVirtualBufferContent(bufferId, content) - stub
+        {
+            let set_virtual_content = Function::new(ctx.clone(), |_buffer_id: usize, _content: String| {
+                tracing::debug!("QuickJS stub: setVirtualBufferContent not implemented");
+            })
+            .map_err(|e| anyhow!("Failed to create setVirtualBufferContent: {}", e))?;
+            editor
+                .set("setVirtualBufferContent", set_virtual_content)
+                .map_err(|e| anyhow!("Failed to set setVirtualBufferContent: {}", e))?;
+        }
+
+        // editor.closeSplit(splitId) - stub
+        {
+            let close_split = Function::new(ctx.clone(), |_split_id: usize| {
+                tracing::debug!("QuickJS stub: closeSplit not implemented");
+            })
+            .map_err(|e| anyhow!("Failed to create closeSplit: {}", e))?;
+            editor
+                .set("closeSplit", close_split)
+                .map_err(|e| anyhow!("Failed to set closeSplit: {}", e))?;
+        }
+
+        // editor.setSplitBuffer(splitId, bufferId) - stub
+        {
+            let set_split_buffer = Function::new(ctx.clone(), |_split_id: usize, _buffer_id: usize| {
+                tracing::debug!("QuickJS stub: setSplitBuffer not implemented");
+            })
+            .map_err(|e| anyhow!("Failed to create setSplitBuffer: {}", e))?;
+            editor
+                .set("setSplitBuffer", set_split_buffer)
+                .map_err(|e| anyhow!("Failed to set setSplitBuffer: {}", e))?;
+        }
+
+        // editor.clearLineIndicators(bufferId, namespace) - stub
+        {
+            let clear_line_indicators = Function::new(ctx.clone(), |_buffer_id: usize, namespace: String| {
+                tracing::debug!("QuickJS stub: clearLineIndicators '{}' not implemented", namespace);
+            })
+            .map_err(|e| anyhow!("Failed to create clearLineIndicators: {}", e))?;
+            editor
+                .set("clearLineIndicators", clear_line_indicators)
+                .map_err(|e| anyhow!("Failed to set clearLineIndicators: {}", e))?;
+        }
+
+        // editor.setLineIndicator(...) - stub (takes multiple args, use variadic)
+        {
+            let set_line_indicator = Function::new(ctx.clone(), |_args: Value| {
+                tracing::debug!("QuickJS stub: setLineIndicator not implemented");
+            })
+            .map_err(|e| anyhow!("Failed to create setLineIndicator: {}", e))?;
+            editor
+                .set("setLineIndicator", set_line_indicator)
+                .map_err(|e| anyhow!("Failed to set setLineIndicator: {}", e))?;
+        }
+
+        // editor.getBufferSavedDiff(bufferId) - stub returning undefined
+        {
+            let get_buffer_saved_diff = Function::new(ctx.clone(), |_buffer_id: usize| -> Option<()> {
+                tracing::debug!("QuickJS stub: getBufferSavedDiff not implemented");
+                None
+            })
+            .map_err(|e| anyhow!("Failed to create getBufferSavedDiff: {}", e))?;
+            editor
+                .set("getBufferSavedDiff", get_buffer_saved_diff)
+                .map_err(|e| anyhow!("Failed to set getBufferSavedDiff: {}", e))?;
+        }
+
         Ok(())
     }
 
     /// Execute JavaScript code
     fn execute_script(&mut self, code: &str) -> Result<()> {
         self.context.with(|ctx| {
-            ctx.eval::<Value, _>(code)
-                .map_err(|e| anyhow!("Script execution error: {}", e))?;
-            Ok(())
+            match ctx.eval::<Value, _>(code) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    // Try to get detailed error information
+                    let error_str = if let rquickjs::Error::Exception = e {
+                        // Get the exception value for more details
+                        let exc_val = ctx.catch();
+                        // Try to extract error message and stack from the exception
+                        if let Some(exc) = exc_val.as_exception() {
+                            let msg = exc.message().unwrap_or_default();
+                            let stack = exc.stack().unwrap_or_default();
+                            if stack.is_empty() {
+                                msg
+                            } else {
+                                format!("{}\n{}", msg, stack)
+                            }
+                        } else if let Some(s) = exc_val.as_string() {
+                            s.to_string().unwrap_or_else(|_| "Unknown string error".to_string())
+                        } else {
+                            "Unknown exception".to_string()
+                        }
+                    } else {
+                        format!("{}", e)
+                    };
+                    Err(anyhow!("Script execution error: {}", error_str))
+                }
+            }
         })
     }
 }
@@ -685,8 +935,13 @@ impl JsBackend for QuickJsBackend {
             source
         };
 
+        // Wrap in IIFE to create isolated scope for each plugin
+        // This prevents `const` redeclaration conflicts between plugins
+        // while still allowing plugins to set globalThis.* for event handlers
+        let wrapped_code = format!("(function() {{\n{}\n}})();", code);
+
         // Execute the code
-        self.execute_script(&code)?;
+        self.execute_script(&wrapped_code)?;
 
         // Clear plugin source
         {
