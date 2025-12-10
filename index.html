@@ -337,6 +337,59 @@
             }
         }
 
+        .installation-full-width {
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .installation-full-width p {
+            margin-bottom: 10px;
+        }
+
+        /* Copyable code block styles */
+        .copyable {
+            display: inline-flex;
+            align-items: center;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 4px 10px 4px 4px;
+            margin: 4px 0;
+        }
+
+        .copy-btn {
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            padding: 4px 6px;
+            margin-right: 8px;
+            flex-shrink: 0;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #444;
+            border-color: #777;
+        }
+
+        .copy-btn img {
+            width: 14px;
+            height: 14px;
+            filter: invert(1);
+            vertical-align: middle;
+            display: block;
+        }
+
+        .copy-btn.copied {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        .copy-btn.copied img {
+            filter: invert(0);
+        }
+
         /* --- Footer Styles --- */
         footer {
             background-color: #0d0d0d; /* Slightly darker than main black */
@@ -387,37 +440,38 @@
             <div class="installation-grid">
                 <p>
                     <b>macOS (<a href="https://github.com/sinelaw/homebrew-fresh" target="_blank">Homebrew</a>):</b><br>
-                    <code class="c-green">brew tap sinelaw/fresh</code><br>
-                    <code class="c-green">brew install fresh-editor</code>
+                    <span class="copyable"><button class="copy-btn" onclick="copyCode('cmd-brew', this)"><img src="docs/copy-icon.svg" alt="Copy"></button><code id="cmd-brew" class="c-green">brew tap sinelaw/fresh && brew install fresh-editor</code></span>
                 </p>
                 <p>
                     <b>Arch Linux (<a href="https://aur.archlinux.org/packages/fresh-editor" target="_blank">AUR</a>):</b><br>
-                    <code class="c-green">yay -S fresh-editor</code>
+                    <span class="copyable"><button class="copy-btn" onclick="copyCode('cmd-aur', this)"><img src="docs/copy-icon.svg" alt="Copy"></button><code id="cmd-aur" class="c-green">yay -S fresh-editor</code></span>
                 </p>
                 <p>
-                    <b>Debian/Ubuntu (.deb):</b><br>
-                    <a href="https://github.com/sinelaw/fresh/releases" target="_blank">Download</a>, then: <code class="c-green">sudo dpkg -i fresh-editor_*.deb</code>
+                    <b>npm:</b><br>
+                    <span class="copyable"><button class="copy-btn" onclick="copyCode('cmd-npm', this)"><img src="docs/copy-icon.svg" alt="Copy"></button><code id="cmd-npm" class="c-green">npm install -g @fresh-editor/fresh-editor</code></span><br>
+                    Or try it: <span class="copyable"><button class="copy-btn" onclick="copyCode('cmd-npx', this)"><img src="docs/copy-icon.svg" alt="Copy"></button><code id="cmd-npx" class="c-green">npx @fresh-editor/fresh-editor</code></span>
                 </p>
                 <p>
-                    <b>Fedora/RHEL (.rpm):</b><br>
-                    <a href="https://github.com/sinelaw/fresh/releases" target="_blank">Download</a>, then: <code class="c-green">sudo rpm -i fresh-editor-*.rpm</code>
+                    <b>From crates.io:</b><br>
+                    <span class="copyable"><button class="copy-btn" onclick="copyCode('cmd-cargo', this)"><img src="docs/copy-icon.svg" alt="Copy"></button><code id="cmd-cargo" class="c-green">cargo install fresh-editor</code></span>
                 </p>
                 <p>
                     <b>Pre-built binaries:</b><br>
                     Download from <a href="https://github.com/sinelaw/fresh/releases" target="_blank">GitHub Releases</a>.
                 </p>
                 <p>
-                    <b>npm:</b><br>
-                    <code class="c-green">npm install -g @fresh-editor/fresh-editor</code><br>
-                    Or try it: <code class="c-green">npx @fresh-editor/fresh-editor</code>
-                </p>
-                <p>
-                    <b>From crates.io:</b><br>
-                    <code class="c-green">cargo install fresh-editor</code>
-                </p>
-                <p>
                     <b>From source:</b><br>
                     <a href="https://github.com/sinelaw/fresh" target="_blank">GitHub</a>
+                </p>
+            </div>
+            <div class="installation-full-width">
+                <p>
+                    <b>Debian/Ubuntu (.deb):</b><br>
+                    <a href="https://github.com/sinelaw/fresh/releases" target="_blank">Download .deb</a>, then: <code class="c-green">sudo dpkg -i fresh-editor_*.deb</code>
+                </p>
+                <p>
+                    <b>Fedora/RHEL (.rpm):</b><br>
+                    <a href="https://github.com/sinelaw/fresh/releases" target="_blank">Download .rpm</a>, then: <code class="c-green">sudo rpm -i fresh-editor-*.rpm</code>
                 </p>
             </div>
         </div>
@@ -587,6 +641,14 @@
             generateFlippingBlocks();
             setTimeout(playIntroWave, 1000);
         };
+
+        function copyCode(elementId, btn) {
+            const text = document.getElementById(elementId).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                btn.classList.add('copied');
+                setTimeout(() => btn.classList.remove('copied'), 2000);
+            });
+        }
     </script>
 <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0858f4857c744e418bce27f9577ea9d2"}'></script><!-- End Cloudflare Web Analytics -->
 
