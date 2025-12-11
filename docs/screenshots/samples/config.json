@@ -1,0 +1,19 @@
+{
+    "editor": {
+        "theme": "dark",
+        "fontSize": 14,
+        "fontFamily": "JetBrains Mono",
+        "tabSize": 4,
+        "wordWrap": true
+    },
+    "keybindings": {
+        "save": "Ctrl+S",
+        "find": "Ctrl+F",
+        "palette": "Ctrl+Shift+P"
+    },
+    "plugins": [
+        "color-highlighter",
+        "todo-highlighter",
+        "path-complete"
+    ]
+}
