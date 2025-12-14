@@ -664,9 +664,23 @@ impl SettingsState {
 
     /// Toggle dropdown open/closed
     pub fn dropdown_toggle(&mut self) {
+        let mut opened = false;
         if let Some(item) = self.current_item_mut() {
             if let SettingControl::Dropdown(ref mut d) = item.control {
                 d.toggle_open();
+                opened = d.open;
+            }
+        }
+
+        // When dropdown opens, update content height and ensure it's visible
+        if opened {
+            // Update content height since item is now taller
+            let selected_item = self.selected_item;
+            if let Some(page) = self.pages.get(self.selected_category) {
+                self.scroll_panel.update_content_height(&page.items);
+                // Ensure the dropdown item is visible with its new expanded height
+                self.scroll_panel
+                    .ensure_focused_visible(&page.items, selected_item, None);
             }
         }
     }

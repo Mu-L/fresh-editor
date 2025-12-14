@@ -68,6 +68,15 @@ impl SettingControl {
                     .sum();
                 (base + expanded_height) as u16
             }
+            // Dropdown needs extra height when open to show options
+            SettingControl::Dropdown(state) => {
+                if state.open {
+                    // 1 for label/button + number of options (max 8 visible)
+                    1 + state.options.len().min(8) as u16
+                } else {
+                    1
+                }
+            }
             // All other controls fit in 1 line
             _ => 1,
         }
