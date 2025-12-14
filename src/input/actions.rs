@@ -1789,7 +1789,8 @@ pub fn action_to_events(
         | Action::SettingsSave
         | Action::SettingsReset
         | Action::SettingsToggleFocus
-        | Action::SettingsActivate => return None,
+        | Action::SettingsActivate
+        | Action::SettingsSearch => return None,
 
         // Block/rectangular selection actions
         Action::BlockSelectLeft => {

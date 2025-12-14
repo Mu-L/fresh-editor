@@ -5,6 +5,7 @@
 
 use super::items::{control_to_value, SettingControl, SettingItem, SettingsPage};
 use super::schema::{parse_schema, SettingCategory};
+use super::search::{search_settings, SearchResult};
 use crate::config::Config;
 use crate::view::controls::FocusState;
 use std::collections::HashMap;
@@ -32,6 +33,10 @@ pub struct SettingsState {
     pub search_query: String,
     /// Whether search is active
     pub search_active: bool,
+    /// Current search results
+    pub search_results: Vec<SearchResult>,
+    /// Selected search result index
+    pub selected_search_result: usize,
 }
 
 impl SettingsState {
@@ -52,6 +57,8 @@ impl SettingsState {
             visible: false,
             search_query: String::new(),
             search_active: false,
+            search_results: Vec::new(),
+            selected_search_result: 0,
         })
     }
 
@@ -235,12 +242,68 @@ impl SettingsState {
     pub fn start_search(&mut self) {
         self.search_active = true;
         self.search_query.clear();
+        self.search_results.clear();
+        self.selected_search_result = 0;
     }
 
     /// Cancel search mode
     pub fn cancel_search(&mut self) {
         self.search_active = false;
         self.search_query.clear();
+        self.search_results.clear();
+        self.selected_search_result = 0;
+    }
+
+    /// Update search query and refresh results
+    pub fn set_search_query(&mut self, query: String) {
+        self.search_query = query;
+        self.search_results = search_settings(&self.pages, &self.search_query);
+        self.selected_search_result = 0;
+    }
+
+    /// Add a character to the search query
+    pub fn search_push_char(&mut self, c: char) {
+        self.search_query.push(c);
+        self.search_results = search_settings(&self.pages, &self.search_query);
+        self.selected_search_result = 0;
+    }
+
+    /// Remove the last character from the search query
+    pub fn search_pop_char(&mut self) {
+        self.search_query.pop();
+        self.search_results = search_settings(&self.pages, &self.search_query);
+        self.selected_search_result = 0;
+    }
+
+    /// Navigate to previous search result
+    pub fn search_prev(&mut self) {
+        if !self.search_results.is_empty() && self.selected_search_result > 0 {
+            self.selected_search_result -= 1;
+        }
+    }
+
+    /// Navigate to next search result
+    pub fn search_next(&mut self) {
+        if !self.search_results.is_empty()
+            && self.selected_search_result + 1 < self.search_results.len()
+        {
+            self.selected_search_result += 1;
+        }
+    }
+
+    /// Jump to the currently selected search result
+    pub fn jump_to_search_result(&mut self) {
+        if let Some(result) = self.search_results.get(self.selected_search_result) {
+            self.selected_category = result.page_index;
+            self.selected_item = result.item_index;
+            self.category_focus = false;
+            self.cancel_search();
+        }
+    }
+
+    /// Get the currently selected search result
+    pub fn current_search_result(&self) -> Option<&SearchResult> {
+        self.search_results.get(self.selected_search_result)
     }
 }
 

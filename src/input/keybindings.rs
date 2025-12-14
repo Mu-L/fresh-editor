@@ -479,6 +479,7 @@ pub enum Action {
     SettingsReset,      // Reset current setting to default
     SettingsToggleFocus, // Toggle focus between category and settings panels
     SettingsActivate,   // Activate/toggle the current setting
+    SettingsSearch,     // Start search in settings
 
     // Terminal operations
     OpenTerminal,          // Open a new terminal in the current split
@@ -781,6 +782,7 @@ impl Action {
             "settings_reset" => Some(Action::SettingsReset),
             "settings_toggle_focus" => Some(Action::SettingsToggleFocus),
             "settings_activate" => Some(Action::SettingsActivate),
+            "settings_search" => Some(Action::SettingsSearch),
 
             _ => None,
         }
@@ -1693,6 +1695,7 @@ impl KeybindingResolver {
             Action::SettingsReset => "Reset setting to default".to_string(),
             Action::SettingsToggleFocus => "Toggle settings panel focus".to_string(),
             Action::SettingsActivate => "Activate setting".to_string(),
+            Action::SettingsSearch => "Search settings".to_string(),
             Action::None => "No action".to_string(),
         }
     }

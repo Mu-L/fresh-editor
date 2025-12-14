@@ -799,7 +799,17 @@ The current `plugins/config_editor.ts` provides similar functionality via the pl
 
 ## Implementation Plan
 
-### Phase 1: Core Controls Module
+### Status Summary
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Controls Module | ✅ DONE | All controls implemented with tests |
+| Phase 2: Schema Generation | ✅ DONE | 5-line binary replaces 620-line build.rs |
+| Phase 3: Settings UI | ✅ DONE | Basic modal with navigation working |
+| Phase 4: Search & Polish | 🔲 TODO | Fuzzy search, help overlay |
+| Phase 5: Migration | 🔲 TODO | Command palette, menu integration |
+
+### Phase 1: Core Controls Module ✅
 
 Create reusable form controls that can be used independently of settings.
 

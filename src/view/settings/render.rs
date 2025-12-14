@@ -4,6 +4,7 @@
 
 use super::items::SettingControl;
 use super::layout::SettingsLayout;
+use super::search::SearchResult;
 use super::state::SettingsState;
 use crate::view::controls::{
     render_button, render_dropdown, render_number_input, render_text_input, render_text_list,
@@ -56,12 +57,30 @@ pub fn render_settings(
         modal_area.height.saturating_sub(2),
     );
 
+    // Render search header if search is active
+    let (search_header_height, content_area) = if state.search_active {
+        let search_area = Rect::new(inner_area.x, inner_area.y, inner_area.width, 2);
+        render_search_header(frame, search_area, state, theme);
+        (
+            2,
+            Rect::new(
+                inner_area.x,
+                inner_area.y + 2,
+                inner_area.width,
+                inner_area.height.saturating_sub(2),
+            ),
+        )
+    } else {
+        (0, inner_area)
+    };
+    let _ = search_header_height; // suppress unused warning
+
     // Layout: [left panel (categories)] | [right panel (settings)]
     let chunks = Layout::horizontal([
         Constraint::Length(25),
         Constraint::Min(40),
     ])
-    .split(inner_area);
+    .split(content_area);
 
     let categories_area = chunks[0];
     let settings_area = chunks[1];
@@ -81,14 +100,19 @@ pub fn render_settings(
     );
     render_separator(frame, separator_area, theme);
 
-    // Render settings (right panel)
+    // Render settings (right panel) or search results
     let settings_inner = Rect::new(
         settings_area.x + 1,
         settings_area.y,
         settings_area.width.saturating_sub(1),
         settings_area.height,
     );
-    render_settings_panel(frame, settings_inner, state, theme, &mut layout);
+
+    if state.search_active && !state.search_results.is_empty() {
+        render_search_results(frame, settings_inner, state, theme, &mut layout);
+    } else {
+        render_settings_panel(frame, settings_inner, state, theme, &mut layout);
+    }
 
     // Render footer with buttons
     render_footer(frame, modal_area, state, theme, &mut layout);
@@ -372,7 +396,7 @@ fn render_footer(
 
     // Help text on the left
     let help = if state.search_active {
-        "Type to search, Esc to cancel"
+        "Type to search, ↑↓:Navigate  Enter:Jump  Esc:Cancel"
     } else {
         "↑↓:Navigate  Tab:Switch panel  Enter:Edit  /:Search  Esc:Close"
     };
@@ -381,6 +405,187 @@ fn render_footer(
         Paragraph::new(help).style(help_style),
         Rect::new(footer_area.x, footer_y, reset_x - footer_area.x - 1, 1),
     );
+}
+
+/// Render the search header with query input
+fn render_search_header(
+    frame: &mut Frame,
+    area: Rect,
+    state: &SettingsState,
+    theme: &Theme,
+) {
+    // First line: Search input
+    let search_style = Style::default().fg(theme.popup_text_fg);
+    let cursor_style = Style::default()
+        .fg(theme.menu_highlight_fg)
+        .add_modifier(Modifier::UNDERLINED);
+
+    let spans = vec![
+        Span::styled("🔍 ", search_style),
+        Span::styled(&state.search_query, search_style),
+        Span::styled("█", cursor_style), // Cursor
+    ];
+    let line = Line::from(spans);
+    frame.render_widget(Paragraph::new(line), Rect::new(area.x, area.y, area.width, 1));
+
+    // Second line: Result count
+    let result_count = state.search_results.len();
+    let count_text = if result_count == 0 {
+        if state.search_query.is_empty() {
+            String::new()
+        } else {
+            "No results found".to_string()
+        }
+    } else if result_count == 1 {
+        "1 result".to_string()
+    } else {
+        format!("{} results", result_count)
+    };
+
+    let count_style = Style::default().fg(theme.line_number_fg);
+    frame.render_widget(
+        Paragraph::new(count_text).style(count_style),
+        Rect::new(area.x, area.y + 1, area.width, 1),
+    );
+}
+
+/// Render search results with breadcrumbs
+fn render_search_results(
+    frame: &mut Frame,
+    area: Rect,
+    state: &SettingsState,
+    theme: &Theme,
+    layout: &mut SettingsLayout,
+) {
+    let mut y = area.y;
+
+    for (idx, result) in state.search_results.iter().enumerate() {
+        if y >= area.y + area.height.saturating_sub(3) {
+            break;
+        }
+
+        let is_selected = idx == state.selected_search_result;
+        let item_area = Rect::new(area.x, y, area.width, 3);
+
+        render_search_result_item(frame, item_area, result, is_selected, theme, layout);
+        y += 3;
+    }
+}
+
+/// Render a single search result with breadcrumb
+fn render_search_result_item(
+    frame: &mut Frame,
+    area: Rect,
+    result: &SearchResult,
+    is_selected: bool,
+    theme: &Theme,
+    layout: &mut SettingsLayout,
+) {
+    // Draw selection highlight background
+    if is_selected {
+        let bg_style = Style::default().bg(theme.current_line_bg);
+        for row in 0..area.height.min(3) {
+            let row_area = Rect::new(area.x, area.y + row, area.width, 1);
+            frame.render_widget(Paragraph::new("").style(bg_style), row_area);
+        }
+    }
+
+    // First line: Setting name with highlighting
+    let name_style = if is_selected {
+        Style::default().fg(theme.menu_highlight_fg)
+    } else {
+        Style::default().fg(theme.popup_text_fg)
+    };
+
+    // Build name with match highlighting
+    let name_line = build_highlighted_text(
+        &result.item.name,
+        &result.name_matches,
+        name_style,
+        Style::default()
+            .fg(theme.diagnostic_warning_fg)
+            .add_modifier(Modifier::BOLD),
+    );
+    frame.render_widget(
+        Paragraph::new(name_line),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+
+    // Second line: Breadcrumb
+    let breadcrumb_style = Style::default()
+        .fg(theme.line_number_fg)
+        .add_modifier(Modifier::ITALIC);
+    let breadcrumb = format!("  {} > {}", result.breadcrumb, result.item.path);
+    let breadcrumb_line = Line::from(Span::styled(breadcrumb, breadcrumb_style));
+    frame.render_widget(
+        Paragraph::new(breadcrumb_line),
+        Rect::new(area.x, area.y + 1, area.width, 1),
+    );
+
+    // Third line: Description (if any)
+    if let Some(ref desc) = result.item.description {
+        let desc_style = Style::default().fg(theme.line_number_fg);
+        let truncated_desc = if desc.len() > area.width as usize - 2 {
+            format!("  {}...", &desc[..area.width as usize - 5])
+        } else {
+            format!("  {}", desc)
+        };
+        frame.render_widget(
+            Paragraph::new(truncated_desc).style(desc_style),
+            Rect::new(area.x, area.y + 2, area.width, 1),
+        );
+    }
+
+    // Track this item in layout
+    layout.add_search_result(result.page_index, result.item_index, area);
+}
+
+/// Build a line with highlighted match positions
+fn build_highlighted_text(
+    text: &str,
+    matches: &[usize],
+    normal_style: Style,
+    highlight_style: Style,
+) -> Line<'static> {
+    if matches.is_empty() {
+        return Line::from(Span::styled(text.to_string(), normal_style));
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut in_highlight = false;
+
+    for (idx, ch) in chars.iter().enumerate() {
+        let should_highlight = matches.contains(&idx);
+
+        if should_highlight != in_highlight {
+            if !current.is_empty() {
+                let style = if in_highlight {
+                    highlight_style
+                } else {
+                    normal_style
+                };
+                spans.push(Span::styled(current, style));
+                current = String::new();
+            }
+            in_highlight = should_highlight;
+        }
+
+        current.push(*ch);
+    }
+
+    // Push remaining
+    if !current.is_empty() {
+        let style = if in_highlight {
+            highlight_style
+        } else {
+            normal_style
+        };
+        spans.push(Span::styled(current, style));
+    }
+
+    Line::from(spans)
 }
 
 #[cfg(test)]

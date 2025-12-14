@@ -14,12 +14,25 @@ pub struct SettingsLayout {
     pub categories: Vec<(usize, Rect)>,
     /// Setting items (index, path, area, control_layout)
     pub items: Vec<ItemLayout>,
+    /// Search result items (page_index, item_index, area)
+    pub search_results: Vec<SearchResultLayout>,
     /// Save button area
     pub save_button: Option<Rect>,
     /// Cancel button area
     pub cancel_button: Option<Rect>,
     /// Reset button area
     pub reset_button: Option<Rect>,
+}
+
+/// Layout info for a search result
+#[derive(Debug, Clone)]
+pub struct SearchResultLayout {
+    /// Page index (category)
+    pub page_index: usize,
+    /// Item index within the page
+    pub item_index: usize,
+    /// Full area for this result
+    pub area: Rect,
 }
 
 /// Layout info for a setting item
@@ -42,6 +55,7 @@ impl SettingsLayout {
             modal_area,
             categories: Vec::new(),
             items: Vec::new(),
+            search_results: Vec::new(),
             save_button: None,
             cancel_button: None,
             reset_button: None,
@@ -60,6 +74,15 @@ impl SettingsLayout {
             path,
             area,
             control,
+        });
+    }
+
+    /// Add a search result to the layout
+    pub fn add_search_result(&mut self, page_index: usize, item_index: usize, area: Rect) {
+        self.search_results.push(SearchResultLayout {
+            page_index,
+            item_index,
+            area,
         });
     }
 

@@ -268,19 +268,73 @@ impl Editor {
             return Ok(());
         }
 
-        // Handle settings context navigation (intercept MoveUp/MoveDown)
+        // Handle settings context (including search mode)
         if matches!(context, crate::input::keybindings::KeyContext::Settings) {
-            match action {
-                Action::MoveUp => {
-                    self.settings_navigate_up();
-                    return Ok(());
+            // Check if search is active
+            let search_active = self
+                .settings_state
+                .as_ref()
+                .map_or(false, |s| s.search_active);
+
+            if search_active {
+                // In search mode, handle input specially
+                match code {
+                    crossterm::event::KeyCode::Char(c) if modifiers.is_empty() => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.search_push_char(c);
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Backspace => {
+                        if let Some(ref mut state) = self.settings_state {
+                            if state.search_query.is_empty() {
+                                state.cancel_search();
+                            } else {
+                                state.search_pop_char();
+                            }
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Esc => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.cancel_search();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Enter => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.jump_to_search_result();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Up => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.search_prev();
+                        }
+                        return Ok(());
+                    }
+                    crossterm::event::KeyCode::Down => {
+                        if let Some(ref mut state) = self.settings_state {
+                            state.search_next();
+                        }
+                        return Ok(());
+                    }
+                    _ => {}
                 }
-                Action::MoveDown => {
-                    self.settings_navigate_down();
-                    return Ok(());
+            } else {
+                // Not in search mode - normal settings navigation
+                match action {
+                    Action::MoveUp => {
+                        self.settings_navigate_up();
+                        return Ok(());
+                    }
+                    Action::MoveDown => {
+                        self.settings_navigate_down();
+                        return Ok(());
+                    }
+                    // Other settings actions are handled by handle_action
+                    _ => {}
                 }
-                // Other settings actions are handled by handle_action
-                _ => {}
             }
         }
 
@@ -1720,6 +1774,11 @@ impl Editor {
             }
             Action::SettingsActivate => {
                 self.settings_activate_current();
+            }
+            Action::SettingsSearch => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.start_search();
+                }
             }
             Action::PromptConfirm => {
                 // Handle prompt confirmation (same logic as in handle_key)

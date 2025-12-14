@@ -15,8 +15,10 @@ pub mod items;
 pub mod layout;
 pub mod render;
 pub mod schema;
+pub mod search;
 pub mod state;
 
 pub use layout::{SettingsHit, SettingsLayout};
 pub use render::render_settings;
+pub use search::{search_settings, SearchResult};
 pub use state::SettingsState;
