@@ -806,8 +806,18 @@ The current `plugins/config_editor.ts` provides similar functionality via the pl
 | Phase 1: Controls Module | ✅ DONE | All controls implemented with tests |
 | Phase 2: Schema Generation | ✅ DONE | 5-line binary replaces 620-line build.rs |
 | Phase 3: Settings UI | ✅ DONE | Basic modal with navigation working |
-| Phase 4: Search & Polish | 🔲 TODO | Fuzzy search, help overlay |
-| Phase 5: Migration | 🔲 TODO | Command palette, menu integration |
+| Phase 4: Search & Polish | 🟡 PARTIAL | Help overlay done, confirmation dialog done (has bugs), search UI exists but broken |
+| Phase 5: Migration | ✅ DONE | Command palette, menu integration, keybinding added |
+
+### Known Bugs (found during testing)
+
+| Bug | Severity | Description |
+|-----|----------|-------------|
+| Ctrl+, keybinding broken | Critical | Inserts comma character instead of opening settings. Must use command palette. |
+| Search text input broken | High | Typing in search mode doesn't display characters in the search box. |
+| Confirmation dialog empty | Medium | "Unsaved Changes" dialog doesn't list what changed (shows empty list). |
+| No button selection indicator | Medium | In confirmation dialog, can't see which button is selected when using arrow keys. |
+| No panel focus indicator | Low | Can't visually tell if categories or settings panel has focus. |
 
 ### Phase 1: Core Controls Module ✅
 
