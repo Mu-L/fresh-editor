@@ -814,6 +814,10 @@ The current `plugins/config_editor.ts` provides similar functionality via the pl
 | Bug | Severity | Status | Description |
 |-----|----------|--------|-------------|
 | Ctrl+, keybinding broken | Critical | Open | Inserts comma character instead of opening settings. Must use command palette. |
+| Dropdown editing doesn't work | High | Open | Enter/arrows on dropdown don't open menu or change value. |
+| Number input editing not implemented | High | Open | No way to change number values (no +/- buttons active, no text entry). |
+| No settings item selection indicator | Medium | Open | Can't see which setting is selected in the settings panel. |
+| View doesn't scroll to selection | Medium | Open | After search jump, view doesn't scroll to show the selected item. |
 | Search text input broken | High | ✅ Fixed | Settings actions weren't routed to handle_action. |
 | Confirmation dialog empty | Medium | ✅ Fixed | Dialog height calculation was off by 1, causing changes to overlap with separator. |
 | No button selection indicator | Medium | ✅ Fixed | Added ▶ indicator and bold styling for selected button. |
