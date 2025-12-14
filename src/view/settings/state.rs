@@ -394,6 +394,48 @@ impl SettingsState {
         self.showing_help = false;
     }
 
+    /// Get the maximum scroll offset for the current page
+    pub fn max_scroll(&self) -> usize {
+        self.current_page()
+            .map(|p| p.items.len().saturating_sub(self.visible_items))
+            .unwrap_or(0)
+    }
+
+    /// Scroll up by a given number of items
+    /// Returns true if the scroll offset changed
+    pub fn scroll_up(&mut self, delta: usize) -> bool {
+        if self.scroll_offset > 0 {
+            let old = self.scroll_offset;
+            self.scroll_offset = self.scroll_offset.saturating_sub(delta);
+            return old != self.scroll_offset;
+        }
+        false
+    }
+
+    /// Scroll down by a given number of items
+    /// Returns true if the scroll offset changed
+    pub fn scroll_down(&mut self, delta: usize) -> bool {
+        let max_scroll = self.max_scroll();
+        if self.scroll_offset < max_scroll {
+            let old = self.scroll_offset;
+            self.scroll_offset = (self.scroll_offset + delta).min(max_scroll);
+            return old != self.scroll_offset;
+        }
+        false
+    }
+
+    /// Scroll to a position based on a ratio (0.0 to 1.0)
+    /// Returns true if the scroll offset changed
+    pub fn scroll_to_ratio(&mut self, ratio: f32) -> bool {
+        let max_scroll = self.max_scroll();
+        let new_offset = ((ratio * max_scroll as f32) as usize).min(max_scroll);
+        if self.scroll_offset != new_offset {
+            self.scroll_offset = new_offset;
+            return true;
+        }
+        false
+    }
+
     /// Start text editing mode for TextList controls
     pub fn start_editing(&mut self) {
         if let Some(item) = self.current_item() {

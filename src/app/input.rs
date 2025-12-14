@@ -3909,6 +3909,15 @@ impl Editor {
                 }
                 return Ok(false);
             }
+            MouseEventKind::ScrollUp => {
+                return Ok(self.settings_scroll_up(3));
+            }
+            MouseEventKind::ScrollDown => {
+                return Ok(self.settings_scroll_down(3));
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                return Ok(self.settings_scrollbar_drag(col, row));
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 // Handle click below
             }
@@ -4011,9 +4020,71 @@ impl Editor {
             SettingsHit::Background => {
                 // Click on background inside modal - do nothing
             }
+            SettingsHit::Scrollbar => {
+                self.settings_scrollbar_click(row);
+            }
+            SettingsHit::SettingsPanel => {
+                // Click on settings panel area - do nothing (scroll handled above)
+            }
         }
 
         Ok(true)
+    }
+
+    /// Scroll settings panel up by delta items
+    fn settings_scroll_up(&mut self, delta: usize) -> bool {
+        self.settings_state
+            .as_mut()
+            .map(|state| state.scroll_up(delta))
+            .unwrap_or(false)
+    }
+
+    /// Scroll settings panel down by delta items
+    fn settings_scroll_down(&mut self, delta: usize) -> bool {
+        self.settings_state
+            .as_mut()
+            .map(|state| state.scroll_down(delta))
+            .unwrap_or(false)
+    }
+
+    /// Handle scrollbar click at the given row position
+    fn settings_scrollbar_click(&mut self, row: u16) {
+        if let Some(ref scrollbar_area) = self
+            .cached_layout
+            .settings_layout
+            .as_ref()
+            .and_then(|l| l.scrollbar_area)
+        {
+            if scrollbar_area.height > 0 {
+                let relative_y = row.saturating_sub(scrollbar_area.y);
+                let ratio = relative_y as f32 / scrollbar_area.height as f32;
+                if let Some(ref mut state) = self.settings_state {
+                    state.scroll_to_ratio(ratio);
+                }
+            }
+        }
+    }
+
+    /// Handle scrollbar drag at the given position
+    fn settings_scrollbar_drag(&mut self, col: u16, row: u16) -> bool {
+        if let Some(ref scrollbar_area) = self
+            .cached_layout
+            .settings_layout
+            .as_ref()
+            .and_then(|l| l.scrollbar_area)
+        {
+            // Check if we're in or near the scrollbar area (allow some horizontal tolerance)
+            let in_scrollbar_x = col >= scrollbar_area.x.saturating_sub(1)
+                && col <= scrollbar_area.x + scrollbar_area.width;
+            if in_scrollbar_x && scrollbar_area.height > 0 {
+                let relative_y = row.saturating_sub(scrollbar_area.y);
+                let ratio = relative_y as f32 / scrollbar_area.height as f32;
+                if let Some(ref mut state) = self.settings_state {
+                    return state.scroll_to_ratio(ratio);
+                }
+            }
+        }
+        false
     }
 
     /// Handle mouse wheel scroll event

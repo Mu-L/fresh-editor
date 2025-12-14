@@ -22,6 +22,10 @@ pub struct SettingsLayout {
     pub cancel_button: Option<Rect>,
     /// Reset button area
     pub reset_button: Option<Rect>,
+    /// Settings panel area (for scroll hit testing)
+    pub settings_panel_area: Option<Rect>,
+    /// Scrollbar area (for drag detection)
+    pub scrollbar_area: Option<Rect>,
 }
 
 /// Layout info for a search result
@@ -59,6 +63,8 @@ impl SettingsLayout {
             save_button: None,
             cancel_button: None,
             reset_button: None,
+            settings_panel_area: None,
+            scrollbar_area: None,
         }
     }
 
@@ -169,6 +175,20 @@ impl SettingsLayout {
             }
         }
 
+        // Check scrollbar area (for drag detection)
+        if let Some(ref scrollbar) = self.scrollbar_area {
+            if self.contains(*scrollbar, x, y) {
+                return Some(SettingsHit::Scrollbar);
+            }
+        }
+
+        // Check settings panel area (for scroll wheel)
+        if let Some(ref panel) = self.settings_panel_area {
+            if self.contains(*panel, x, y) {
+                return Some(SettingsHit::SettingsPanel);
+            }
+        }
+
         Some(SettingsHit::Background)
     }
 
@@ -209,6 +229,10 @@ pub enum SettingsHit {
     CancelButton,
     /// Click on reset button
     ResetButton,
+    /// Click on settings panel scrollbar
+    Scrollbar,
+    /// Click on settings panel (scrollable area)
+    SettingsPanel,
 }
 
 #[cfg(test)]

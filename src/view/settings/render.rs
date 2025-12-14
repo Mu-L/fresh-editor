@@ -277,9 +277,18 @@ fn render_settings_panel(
         current_y += item_h;
     }
 
+    // Track the settings panel area for scroll hit testing
+    let panel_content_height = current_y.saturating_sub(items_start_y);
+    layout.settings_panel_area = Some(Rect::new(
+        area.x,
+        items_start_y,
+        content_width,
+        panel_content_height.max(1),
+    ));
+
     // Render scrollbar if needed
     if total_items > visible_items {
-        let scrollbar_height = current_y.saturating_sub(items_start_y).max(1);
+        let scrollbar_height = panel_content_height.max(1);
         let scrollbar_area = Rect::new(
             area.x + content_width,
             items_start_y,
@@ -289,6 +298,9 @@ fn render_settings_panel(
         let scrollbar_state = ScrollbarState::new(total_items, visible_items, scroll_offset);
         let scrollbar_colors = ScrollbarColors::from_theme(theme);
         render_scrollbar(frame, scrollbar_area, &scrollbar_state, &scrollbar_colors);
+
+        // Track the scrollbar area for drag detection
+        layout.scrollbar_area = Some(scrollbar_area);
     }
 }
 
