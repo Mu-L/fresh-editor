@@ -2,6 +2,7 @@
 //!
 //! This module contains all presentation and rendering components.
 
+pub mod controls;
 pub mod file_tree;
 pub mod margin;
 pub mod overlay;
