@@ -296,41 +296,63 @@ fn render_setting_item(
 ) {
     let is_selected = !state.category_focus && idx == state.selected_item;
 
-    // Draw selection highlight background (cover name line + control area)
+    // Controls that render their own label don't need the top-level name
+    let control_has_own_label = matches!(
+        &item.control,
+        SettingControl::TextList(_) | SettingControl::Map(_)
+    );
+
+    // Draw selection highlight background
     if is_selected {
         let bg_style = Style::default().bg(theme.current_line_bg);
-        let highlight_height = 1 + item.control.control_height(); // name line + control
+        let highlight_height = if control_has_own_label {
+            item.control.control_height()
+        } else {
+            1 + item.control.control_height() // name line + control
+        };
         for row in 0..highlight_height.min(area.height) {
             let row_area = Rect::new(area.x, area.y + row, area.width, 1);
             frame.render_widget(Paragraph::new("").style(bg_style), row_area);
         }
     }
 
-    // Setting name with modification indicator
-    let name_style = if is_selected {
-        Style::default().fg(theme.menu_highlight_fg)
-    } else if item.modified {
-        Style::default()
-            .fg(theme.diagnostic_warning_fg)
-            .add_modifier(Modifier::ITALIC)
+    let (name_height, control_y) = if control_has_own_label {
+        // Control renders its own label, no separate name line
+        (0, area.y)
     } else {
-        Style::default().fg(theme.popup_text_fg)
+        // Setting name with modification indicator
+        let name_style = if is_selected {
+            Style::default().fg(theme.menu_highlight_fg)
+        } else if item.modified {
+            Style::default()
+                .fg(theme.diagnostic_warning_fg)
+                .add_modifier(Modifier::ITALIC)
+        } else {
+            Style::default().fg(theme.popup_text_fg)
+        };
+
+        let selection_prefix = if is_selected { "▶" } else { " " };
+        let modified_prefix = if item.modified { "●" } else { " " };
+        let name_line = Line::from(Span::styled(
+            format!("{}{} {}", selection_prefix, modified_prefix, item.name),
+            name_style,
+        ));
+        frame.render_widget(
+            Paragraph::new(name_line),
+            Rect::new(area.x, area.y, area.width, 1),
+        );
+        (1, area.y + 1)
     };
+    let _ = name_height; // suppress unused warning
 
-    let selection_prefix = if is_selected { "▶" } else { " " };
-    let modified_prefix = if item.modified { "●" } else { " " };
-    let name_line = Line::from(Span::styled(
-        format!("{}{} {}", selection_prefix, modified_prefix, item.name),
-        name_style,
-    ));
-    frame.render_widget(
-        Paragraph::new(name_line),
-        Rect::new(area.x, area.y, area.width, 1),
-    );
-
-    // Control on second line (indented to align with name after prefix)
+    // Control area (indented for controls without own label)
     let control_height = item.control.control_height();
-    let control_area = Rect::new(area.x + 4, area.y + 1, area.width.saturating_sub(4), control_height);
+    let (control_x, control_width) = if control_has_own_label {
+        (area.x, area.width)
+    } else {
+        (area.x + 4, area.width.saturating_sub(4))
+    };
+    let control_area = Rect::new(control_x, control_y, control_width, control_height);
     let control_layout = render_control(frame, control_area, &item.control, theme);
 
     layout.add_item(idx, item.path.clone(), area, control_layout);

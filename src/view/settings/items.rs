@@ -74,8 +74,13 @@ impl SettingControl {
 impl SettingItem {
     /// Calculate the total height needed for this item (name line + control + spacing)
     pub fn item_height(&self) -> u16 {
-        // 1 line for name + control height + 1 line spacing
-        1 + self.control.control_height() + 1
+        // Controls that render their own label don't need extra name line
+        let name_height = match &self.control {
+            SettingControl::TextList(_) | SettingControl::Map(_) => 0,
+            _ => 1,
+        };
+        // name line (if needed) + control height + 1 line spacing
+        name_height + self.control.control_height() + 1
     }
 }
 

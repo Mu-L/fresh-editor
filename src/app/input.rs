@@ -2741,6 +2741,14 @@ impl Editor {
     ) -> std::io::Result<bool> {
         use crossterm::event::{MouseButton, MouseEventKind};
 
+        let col = mouse_event.column;
+        let row = mouse_event.row;
+
+        // When settings modal is open, capture all mouse events
+        if self.settings_state.as_ref().map_or(false, |s| s.visible) {
+            return self.handle_settings_mouse(mouse_event);
+        }
+
         // Cancel LSP rename prompt on any mouse interaction
         let mut needs_render = false;
         if let Some(ref prompt) = self.prompt {
@@ -2749,9 +2757,6 @@ impl Editor {
                 needs_render = true;
             }
         }
-
-        let col = mouse_event.column;
-        let row = mouse_event.row;
 
         // Update mouse cursor position for software cursor rendering (used by GPM)
         // When GPM is active, we always need to re-render to update the cursor position
@@ -3872,6 +3877,123 @@ impl Editor {
         }
 
         Ok(())
+    }
+
+    /// Handle mouse events when settings modal is open
+    fn handle_settings_mouse(
+        &mut self,
+        mouse_event: crossterm::event::MouseEvent,
+    ) -> std::io::Result<bool> {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        use crate::view::settings::SettingsHit;
+
+        let col = mouse_event.column;
+        let row = mouse_event.row;
+
+        // Only handle clicks for now
+        let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind else {
+            return Ok(false);
+        };
+
+        // Use cached settings layout for hit testing
+        let hit = self
+            .cached_layout
+            .settings_layout
+            .as_ref()
+            .and_then(|layout| layout.hit_test(col, row));
+
+        let Some(hit) = hit else {
+            return Ok(false);
+        };
+
+        match hit {
+            SettingsHit::Outside => {
+                // Click outside modal - close settings
+                if let Some(ref mut state) = self.settings_state {
+                    state.visible = false;
+                }
+            }
+            SettingsHit::Category(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = true;
+                    state.selected_category = idx;
+                    state.selected_item = 0;
+                    state.scroll_offset = 0;
+                }
+            }
+            SettingsHit::Item(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                }
+            }
+            SettingsHit::ControlToggle(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                }
+                self.settings_activate_current();
+            }
+            SettingsHit::ControlDecrement(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                }
+                self.settings_decrement_current();
+            }
+            SettingsHit::ControlIncrement(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                }
+                self.settings_increment_current();
+            }
+            SettingsHit::ControlDropdown(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                }
+                self.settings_activate_current();
+            }
+            SettingsHit::ControlText(idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                    state.start_editing();
+                }
+            }
+            SettingsHit::ControlTextListRow(idx, _row_idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                    state.start_editing();
+                }
+            }
+            SettingsHit::ControlMapRow(idx, _row_idx) => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.category_focus = false;
+                    state.selected_item = idx;
+                }
+            }
+            SettingsHit::SaveButton => {
+                self.save_settings();
+            }
+            SettingsHit::CancelButton => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.visible = false;
+                }
+            }
+            SettingsHit::ResetButton => {
+                if let Some(ref mut state) = self.settings_state {
+                    state.reset_current_to_default();
+                }
+            }
+            SettingsHit::Background => {
+                // Click on background inside modal - do nothing
+            }
+        }
+
+        Ok(true)
     }
 
     /// Handle mouse wheel scroll event
