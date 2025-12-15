@@ -157,7 +157,7 @@ fn test_config_file_deserialization() {
     );
 
     let config = result.unwrap();
-    assert_eq!(config.theme, "high-contrast");
+    assert_eq!(&*config.theme, "high-contrast");
     assert_eq!(config.editor.tab_size, 4);
     assert!(config.editor.line_numbers);
     assert!(!config.file_explorer.show_hidden);

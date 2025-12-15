@@ -16,7 +16,7 @@ fn test_default_theme_is_dark() {
 #[test]
 fn test_theme_loading_from_config_dark() {
     let mut config = Config::default();
-    config.theme = "dark".to_string();
+    config.theme = "dark".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
 
@@ -33,7 +33,7 @@ fn test_theme_loading_from_config_dark() {
 #[test]
 fn test_theme_loading_from_config_light() {
     let mut config = Config::default();
-    config.theme = "light".to_string();
+    config.theme = "light".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
 
@@ -50,7 +50,7 @@ fn test_theme_loading_from_config_light() {
 #[test]
 fn test_theme_loading_from_config_high_contrast() {
     let mut config = Config::default();
-    config.theme = "high-contrast".to_string();
+    config.theme = "high-contrast".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
 
@@ -69,7 +69,7 @@ fn test_theme_loading_from_config_high_contrast() {
 #[test]
 fn test_invalid_theme_falls_back_to_dark() {
     let mut config = Config::default();
-    config.theme = "nonexistent-theme".to_string();
+    config.theme = "nonexistent-theme".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
 
@@ -81,7 +81,7 @@ fn test_invalid_theme_falls_back_to_dark() {
 #[test]
 fn test_theme_renders_with_correct_tab_colors() {
     let mut config = Config::default();
-    config.theme = "dark".to_string();
+    config.theme = "dark".into();
 
     let mut harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     harness.render().unwrap();
@@ -101,7 +101,7 @@ fn test_theme_renders_with_correct_tab_colors() {
 #[test]
 fn test_theme_renders_with_correct_status_bar_colors() {
     let mut config = Config::default();
-    config.theme = "dark".to_string();
+    config.theme = "dark".into();
 
     let mut harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     harness.render().unwrap();
@@ -124,10 +124,10 @@ fn test_theme_renders_with_correct_status_bar_colors() {
 #[test]
 fn test_light_theme_renders_differently_than_dark() {
     let mut dark_config = Config::default();
-    dark_config.theme = "dark".to_string();
+    dark_config.theme = "dark".into();
 
     let mut light_config = Config::default();
-    light_config.theme = "light".to_string();
+    light_config.theme = "light".into();
 
     let mut dark_harness = EditorTestHarness::with_config(80, 24, dark_config).unwrap();
     let mut light_harness = EditorTestHarness::with_config(80, 24, light_config).unwrap();
@@ -149,7 +149,7 @@ fn test_light_theme_renders_differently_than_dark() {
 #[test]
 fn test_theme_diagnostic_colors() {
     let mut config = Config::default();
-    config.theme = "dark".to_string();
+    config.theme = "dark".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     let theme = harness.editor().theme();
@@ -166,7 +166,7 @@ fn test_theme_diagnostic_colors() {
 #[test]
 fn test_theme_syntax_highlighting_colors() {
     let mut config = Config::default();
-    config.theme = "dark".to_string();
+    config.theme = "dark".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     let theme = harness.editor().theme();
@@ -186,7 +186,7 @@ fn test_all_available_themes_can_be_loaded() {
 
     for theme_name in themes {
         let mut config = Config::default();
-        config.theme = theme_name.to_string();
+        config.theme = theme_name.into();
 
         let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
         let theme = harness.editor().theme();
@@ -201,10 +201,10 @@ fn test_all_available_themes_can_be_loaded() {
 #[test]
 fn test_theme_selection_colors() {
     let mut dark_config = Config::default();
-    dark_config.theme = "dark".to_string();
+    dark_config.theme = "dark".into();
 
     let mut light_config = Config::default();
-    light_config.theme = "light".to_string();
+    light_config.theme = "light".into();
 
     let dark_harness = EditorTestHarness::with_config(80, 24, dark_config).unwrap();
     let light_harness = EditorTestHarness::with_config(80, 24, light_config).unwrap();
@@ -225,7 +225,7 @@ fn test_theme_selection_colors() {
 #[test]
 fn test_theme_popup_colors() {
     let mut config = Config::default();
-    config.theme = "dark".to_string();
+    config.theme = "dark".into();
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     let theme = harness.editor().theme();
@@ -240,7 +240,7 @@ fn test_theme_popup_colors() {
 #[test]
 fn test_case_insensitive_theme_name() {
     let mut config = Config::default();
-    config.theme = "HIGH-CONTRAST".to_string(); // uppercase
+    config.theme = "HIGH-CONTRAST".into(); // uppercase
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     let theme = harness.editor().theme();
@@ -252,7 +252,7 @@ fn test_case_insensitive_theme_name() {
 #[test]
 fn test_theme_with_underscore_variant() {
     let mut config = Config::default();
-    config.theme = "high_contrast".to_string(); // underscore instead of dash
+    config.theme = "high_contrast".into(); // underscore instead of dash
 
     let harness = EditorTestHarness::with_config(80, 24, config).unwrap();
     let theme = harness.editor().theme();

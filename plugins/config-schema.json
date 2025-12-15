@@ -73,7 +73,7 @@
       "default": {}
     },
     "active_keybinding_map": {
-      "description": "Active keybinding map name (e.g., \"default\", \"emacs\", \"vscode\", or a custom name)",
+      "description": "Active keybinding map name",
       "$ref": "#/$defs/KeybindingMapOptions",
       "default": "default"
     },
@@ -333,6 +333,13 @@
               {
                 "label": "Select Theme...",
                 "action": "select_theme",
+                "args": {},
+                "when": null,
+                "checkbox": null
+              },
+              {
+                "label": "Settings...",
+                "action": "open_settings",
                 "args": {},
                 "when": null,
                 "checkbox": null
@@ -756,12 +763,12 @@
     "ThemeOptions": {
       "description": "Available color themes",
       "type": "string",
-      "enum": ["dark", "light", "high-contrast", "nostalgia"]
-    },
-    "KeybindingMapOptions": {
-      "description": "Available keybinding maps",
-      "type": "string",
-      "enum": ["default", "emacs", "vscode"]
+      "enum": [
+        "dark",
+        "light",
+        "high-contrast",
+        "nostalgia"
+      ]
     },
     "EditorConfig": {
       "description": "Editor behavior configuration",
@@ -1011,6 +1018,15 @@
           "default": []
         }
       }
+    },
+    "KeybindingMapOptions": {
+      "description": "Available keybinding maps",
+      "type": "string",
+      "enum": [
+        "default",
+        "emacs",
+        "vscode"
+      ]
     },
     "LanguageConfig": {
       "description": "Language-specific configuration",

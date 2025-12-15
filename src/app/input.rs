@@ -1725,7 +1725,7 @@ impl Editor {
 
                 if is_builtin || is_user_defined {
                     // Update the active keybinding map in config
-                    self.config.active_keybinding_map = map_name.clone();
+                    self.config.active_keybinding_map = map_name.clone().into();
 
                     // Reload the keybinding resolver with the new map
                     self.keybindings =
@@ -5135,7 +5135,7 @@ impl Editor {
             self.theme = crate::view::theme::Theme::from_name(theme_name);
 
             // Update the config in memory
-            self.config.theme = self.theme.name.clone();
+            self.config.theme = self.theme.name.clone().into();
 
             // Persist to config file
             self.save_theme_to_config();
@@ -5235,7 +5235,7 @@ impl Editor {
 
         if is_builtin || is_user_defined {
             // Update the active keybinding map in config
-            self.config.active_keybinding_map = map_name.to_string();
+            self.config.active_keybinding_map = map_name.to_string().into();
 
             // Reload the keybinding resolver with the new map
             self.keybindings = crate::input::keybindings::KeybindingResolver::new(&self.config);

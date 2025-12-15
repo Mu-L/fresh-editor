@@ -1,15 +1,128 @@
 use crate::services::lsp::client::LspServerConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::path::Path;
+
+/// Newtype for theme name that generates proper JSON Schema with enum options
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ThemeName(pub String);
+
+impl ThemeName {
+    /// Built-in theme options shown in the settings dropdown
+    pub const BUILTIN_OPTIONS: &'static [&'static str] =
+        &["dark", "light", "high-contrast", "nostalgia"];
+}
+
+impl Deref for ThemeName {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for ThemeName {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for ThemeName {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl PartialEq<str> for ThemeName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<ThemeName> for str {
+    fn eq(&self, other: &ThemeName) -> bool {
+        self == other.0
+    }
+}
+
+impl JsonSchema for ThemeName {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("ThemeOptions")
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Available color themes",
+            "type": "string",
+            "enum": Self::BUILTIN_OPTIONS
+        })
+    }
+}
+
+/// Newtype for keybinding map name that generates proper JSON Schema with enum options
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct KeybindingMapName(pub String);
+
+impl KeybindingMapName {
+    /// Built-in keybinding map options shown in the settings dropdown
+    pub const BUILTIN_OPTIONS: &'static [&'static str] = &["default", "emacs", "vscode"];
+}
+
+impl Deref for KeybindingMapName {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for KeybindingMapName {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for KeybindingMapName {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl PartialEq<str> for KeybindingMapName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<KeybindingMapName> for str {
+    fn eq(&self, other: &KeybindingMapName) -> bool {
+        self == other.0
+    }
+}
+
+impl JsonSchema for KeybindingMapName {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("KeybindingMapOptions")
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Available keybinding maps",
+            "type": "string",
+            "enum": Self::BUILTIN_OPTIONS
+        })
+    }
+}
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Config {
-    /// Color theme name (e.g., "high-contrast", "monokai", "solarized-dark")
+    /// Color theme name
     #[serde(default = "default_theme_name")]
-    pub theme: String,
+    pub theme: ThemeName,
 
     /// Check for new versions on quit (default: true)
     #[serde(default = "default_true")]
@@ -36,9 +149,9 @@ pub struct Config {
     #[serde(default)]
     pub keybinding_maps: HashMap<String, KeymapConfig>,
 
-    /// Active keybinding map name (e.g., "default", "emacs", "vscode", or a custom name)
+    /// Active keybinding map name
     #[serde(default = "default_keybinding_map_name")]
-    pub active_keybinding_map: String,
+    pub active_keybinding_map: KeybindingMapName,
 
     /// Per-language configuration overrides (tab size, formatters, etc.)
     #[serde(default)]
@@ -53,12 +166,12 @@ pub struct Config {
     pub menu: MenuConfig,
 }
 
-fn default_keybinding_map_name() -> String {
-    "default".to_string()
+fn default_keybinding_map_name() -> KeybindingMapName {
+    KeybindingMapName("default".to_string())
 }
 
-fn default_theme_name() -> String {
-    "high-contrast".to_string()
+fn default_theme_name() -> ThemeName {
+    ThemeName("high-contrast".to_string())
 }
 
 /// Editor behavior configuration

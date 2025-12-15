@@ -14,7 +14,7 @@ use fresh::config::Config;
 /// Create a harness with Emacs keybinding style
 fn emacs_harness(width: u16, height: u16) -> EditorTestHarness {
     let mut config = Config::default();
-    config.active_keybinding_map = "emacs".to_string();
+    config.active_keybinding_map = "emacs".into();
     EditorTestHarness::with_config(width, height, config).unwrap()
 }
 
