@@ -838,6 +838,7 @@ The current `plugins/config_editor.ts` provides similar functionality via the pl
 | Escape doesn't close Settings directly | Low | Open | Help text says "Esc:Close" but Escape only triggers unsaved changes flow, doesn't close directly. |
 | Navigation stuck on Map section headers | Critical | ✅ Fixed | Arrow keys now navigate through Map entries. select_prev/select_next integrated with Map's focus_prev/focus_next methods. |
 | Map entries not individually selectable | High | ✅ Fixed | Map entries now show ▸ indicator for focused entry. Navigation properly enters/exits Maps and traverses all entries including "[+] Add new". |
+| Tab navigation not intuitive | High | Open | Users expect Tab to cycle through ALL focusable elements (settings fields, map entries, footer buttons) like standard form UX. Currently Tab only switches panels, requiring arrows within panels. Should support Tab/Shift+Tab to move between individual controls. |
 
 ### Phase 1: Core Controls Module ✅
 
