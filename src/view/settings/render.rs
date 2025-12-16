@@ -12,7 +12,7 @@ use crate::view::controls::{
 };
 use crate::view::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
@@ -699,10 +699,50 @@ fn render_map_partial(
         } else {
             colors.add_button
         };
-        let add_line = Line::from(vec![
-            Span::styled(add_indicator, Style::default().fg(add_color)),
-            Span::styled("[+] Add new", Style::default().fg(add_color)),
-        ]);
+
+        // Show text input if focused and has text, otherwise show [+] Add new
+        let add_content = if add_is_focused && !state.new_key_text.is_empty() {
+            // Show text input with cursor
+            let text_width = (area.width as usize).saturating_sub(4); // Account for indicator
+            let visible: String = state.new_key_text.chars().take(text_width).collect();
+            let cursor_char = if state.cursor < state.new_key_text.len() {
+                state.new_key_text.chars().nth(state.cursor).unwrap_or(' ')
+            } else {
+                ' '
+            };
+            let before_cursor: String = visible.chars().take(state.cursor).collect();
+            let after_cursor: String = visible.chars().skip(state.cursor + 1).collect();
+
+            vec![
+                Span::styled(add_indicator, Style::default().fg(add_color)),
+                Span::styled("[+] ", Style::default().fg(colors.add_button)),
+                Span::styled(before_cursor, Style::default().fg(add_color)),
+                Span::styled(
+                    cursor_char.to_string(),
+                    Style::default().fg(Color::Black).bg(add_color),
+                ),
+                Span::styled(after_cursor, Style::default().fg(add_color)),
+            ]
+        } else if add_is_focused && state.new_key_text.is_empty() {
+            // Show placeholder with cursor
+            vec![
+                Span::styled(add_indicator, Style::default().fg(add_color)),
+                Span::styled("[+] ", Style::default().fg(colors.add_button)),
+                Span::styled(
+                    " ",
+                    Style::default().fg(Color::Black).bg(add_color),
+                ),
+                Span::styled("type name...", Style::default().fg(colors.key)),
+            ]
+        } else {
+            // Not focused - show regular Add new
+            vec![
+                Span::styled(add_indicator, Style::default().fg(add_color)),
+                Span::styled("[+] Add new", Style::default().fg(add_color)),
+            ]
+        };
+
+        let add_line = Line::from(add_content);
         let row_area = Rect::new(area.x, y, area.width, 1);
         frame.render_widget(Paragraph::new(add_line), row_area);
         Some(row_area)

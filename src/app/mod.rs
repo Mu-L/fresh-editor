@@ -1779,39 +1779,28 @@ impl Editor {
                 }
             }
             Some("map") => {
-                // For Map controls: enter editing mode, then handle navigation
+                // For Map controls: handle based on which entry is focused
                 if let Some(ref mut state) = self.settings_state {
-                    if !state.editing_text {
-                        // First Enter: enter editing mode
-                        state.start_editing();
-                        // If there are entries, focus on the first one
-                        if let Some(item) = state.current_item_mut() {
-                            if let SettingControl::Map(ref mut map_state) = item.control {
-                                if !map_state.entries.is_empty() {
-                                    map_state.focused_entry = Some(0);
-                                }
-                            }
+                    // Get focused entry info
+                    let focused_entry = state.current_item().and_then(|item| {
+                        if let SettingControl::Map(map_state) = &item.control {
+                            Some(map_state.focused_entry)
+                        } else {
+                            None
                         }
-                    } else {
-                        // Already in editing mode: handle entry actions
-                        if let Some(item) = state.current_item_mut() {
-                            if let SettingControl::Map(ref mut map_state) = item.control {
-                                if map_state.focused_entry.is_none() {
-                                    // On add-new row: add the entry (if text entered)
-                                    if !map_state.new_key_text.is_empty() {
-                                        map_state.add_entry_from_input();
-                                        state.on_value_changed();
-                                    }
-                                } else if let Some(idx) = map_state.focused_entry {
-                                    // On entry row: toggle expanded
-                                    if map_state.expanded.contains(&idx) {
-                                        map_state.expanded.retain(|&i| i != idx);
-                                    } else {
-                                        map_state.expanded.push(idx);
-                                    }
-                                }
-                            }
+                    });
+
+                    match focused_entry {
+                        Some(None) => {
+                            // On Add-new row: enter text editing mode
+                            state.start_editing();
                         }
+                        Some(Some(_idx)) => {
+                            // On existing entry: show message (nested editing not yet implemented)
+                            // For now, just set a status message
+                            // (In future: toggle expanded to show nested fields)
+                        }
+                        None => {}
                     }
                 }
             }

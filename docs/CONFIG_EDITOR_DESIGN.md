@@ -830,9 +830,9 @@ The current `plugins/config_editor.ts` provides similar functionality via the pl
 | "●" indicator unexplained | Low | Open | Some categories show ● with no explanation. Users don't know if it means unsaved changes, errors, etc. |
 | Left/Right for +/- undiscoverable | Low | Open | Arrow keys increment/decrement number fields but help text only shows "↑↓:Navigate". |
 | Cancel in Unsaved Changes dialog closes everything | Medium | Open | "Cancel" should return to Settings, but instead closes the entire dialog like Discard. |
-| [+] Add new buttons don't respond | Medium | Open | Pressing Enter on "[+] Add new" for Keybinding Maps/Languages produces no response. Need to activate text input for entering new key name. |
-| Map "editing mode" confuses users | High | Open | Pressing Enter on a Map entry first "enters editing mode" (invisible) then resets focus to first entry. Users expect Enter to do something visible immediately. |
-| Delete on Map entry requires editing mode | Medium | Open | Delete/Backspace on focused Map entry only works if "editing mode" was activated first. Should work immediately. |
+| [+] Add new buttons don't respond | Medium | ✅ Fixed | Navigating to Add-new row shows text input placeholder. Type name and press Enter to add. |
+| Map "editing mode" confuses users | High | ✅ Fixed | Removed confusing two-step editing. Add-new shows text input immediately when focused. Enter on entries is placeholder for future expansion. |
+| Delete on Map entry requires editing mode | Medium | ✅ Fixed | Delete/Backspace on focused Map entry now works immediately without needing editing mode. |
 | Empty Unsaved Changes dialog persists | Medium | Open | "You have unsaved changes" dialog appears with no changes listed, persists across Settings reopens. |
 | Dropdown options have no selection indicator | Low | Open | When dropdown is open, no visible highlight shows which option is selected (only preview updates). |
 | Escape doesn't close Settings directly | Low | Open | Help text says "Esc:Close" but Escape only triggers unsaved changes flow, doesn't close directly. |

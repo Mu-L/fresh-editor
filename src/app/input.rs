@@ -554,6 +554,30 @@ impl Editor {
                 }
             } else {
                 // Not in search mode - normal settings navigation
+
+                // Handle Delete/Backspace for Map entries (no editing mode needed)
+                if matches!(
+                    code,
+                    crossterm::event::KeyCode::Delete | crossterm::event::KeyCode::Backspace
+                ) {
+                    if let Some(ref mut state) = self.settings_state {
+                        // Check if current item is a Map with a focused entry
+                        let should_remove = state.current_item().map_or(false, |item| {
+                            if let crate::view::settings::items::SettingControl::Map(map_state) =
+                                &item.control
+                            {
+                                map_state.focused_entry.is_some()
+                            } else {
+                                false
+                            }
+                        });
+                        if should_remove {
+                            state.text_remove_focused();
+                            return Ok(());
+                        }
+                    }
+                }
+
                 match action {
                     Action::MoveUp => {
                         self.settings_navigate_up();
