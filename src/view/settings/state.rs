@@ -12,6 +12,144 @@ use crate::view::controls::FocusState;
 use crate::view::ui::ScrollablePanel;
 use std::collections::HashMap;
 
+/// Event types for settings changes (used for undo/redo)
+#[derive(Debug, Clone)]
+pub enum SettingsEvent {
+    /// A Map entry was added
+    MapEntryAdd {
+        /// JSON pointer path to the Map (e.g., "/languages")
+        path: String,
+        /// The key that was added
+        key: String,
+        /// The value that was added
+        value: serde_json::Value,
+    },
+    /// A Map entry was removed
+    MapEntryRemove {
+        /// JSON pointer path to the Map
+        path: String,
+        /// The key that was removed
+        key: String,
+        /// The value that was removed (for restoration on undo)
+        value: serde_json::Value,
+    },
+    /// A value was changed
+    ValueChange {
+        /// JSON pointer path to the setting
+        path: String,
+        /// The old value (for restoration on undo)
+        old_value: serde_json::Value,
+        /// The new value
+        new_value: serde_json::Value,
+    },
+}
+
+impl SettingsEvent {
+    /// Returns the inverse event for undo functionality
+    pub fn inverse(&self) -> SettingsEvent {
+        match self {
+            SettingsEvent::MapEntryAdd { path, key, value } => SettingsEvent::MapEntryRemove {
+                path: path.clone(),
+                key: key.clone(),
+                value: value.clone(),
+            },
+            SettingsEvent::MapEntryRemove { path, key, value } => SettingsEvent::MapEntryAdd {
+                path: path.clone(),
+                key: key.clone(),
+                value: value.clone(),
+            },
+            SettingsEvent::ValueChange {
+                path,
+                old_value,
+                new_value,
+            } => SettingsEvent::ValueChange {
+                path: path.clone(),
+                old_value: new_value.clone(),
+                new_value: old_value.clone(),
+            },
+        }
+    }
+}
+
+/// Event log for settings changes (separate from editor's EventLog)
+#[derive(Debug, Default)]
+pub struct SettingsEventLog {
+    /// All logged events
+    entries: Vec<SettingsEvent>,
+    /// Current position in the log (for undo/redo)
+    current_index: usize,
+}
+
+impl SettingsEventLog {
+    /// Create a new empty event log
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            current_index: 0,
+        }
+    }
+
+    /// Append an event to the log
+    pub fn append(&mut self, event: SettingsEvent) {
+        // If we're not at the end, truncate future events (like main EventLog)
+        if self.current_index < self.entries.len() {
+            self.entries.truncate(self.current_index);
+        }
+        self.entries.push(event);
+        self.current_index = self.entries.len();
+    }
+
+    /// Can we undo?
+    pub fn can_undo(&self) -> bool {
+        self.current_index > 0
+    }
+
+    /// Can we redo?
+    pub fn can_redo(&self) -> bool {
+        self.current_index < self.entries.len()
+    }
+
+    /// Undo - returns the inverse event to apply
+    pub fn undo(&mut self) -> Option<SettingsEvent> {
+        if self.can_undo() {
+            self.current_index -= 1;
+            Some(self.entries[self.current_index].inverse())
+        } else {
+            None
+        }
+    }
+
+    /// Redo - returns the event to re-apply
+    pub fn redo(&mut self) -> Option<SettingsEvent> {
+        if self.can_redo() {
+            let event = self.entries[self.current_index].clone();
+            self.current_index += 1;
+            Some(event)
+        } else {
+            None
+        }
+    }
+
+    /// Clear the log (called when settings are saved or discarded)
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.current_index = 0;
+    }
+}
+
+/// Result of handling a key event in settings
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsKeyResult {
+    /// Key was handled, no further action needed
+    Handled,
+    /// Key was not handled by settings
+    NotHandled,
+    /// Request to close settings (with save flag)
+    Close { save: bool },
+    /// Request to show a status message
+    StatusMessage(String),
+}
+
 /// Which panel currently has keyboard focus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FocusPanel {
@@ -69,6 +207,8 @@ pub struct SettingsState {
     pub hover_position: Option<(u16, u16)>,
     /// Current hover hit result (computed from hover_position and cached layout)
     pub hover_hit: Option<SettingsHit>,
+    /// Event log for undo/redo (separate from editor's event log)
+    pub event_log: SettingsEventLog,
 }
 
 impl SettingsState {
@@ -100,6 +240,7 @@ impl SettingsState {
             editing_text: false,
             hover_position: None,
             hover_hit: None,
+            event_log: SettingsEventLog::new(),
         })
     }
 
@@ -340,6 +481,7 @@ impl SettingsState {
     /// Discard all pending changes
     pub fn discard_changes(&mut self) {
         self.pending_changes.clear();
+        self.event_log.clear();
         // Rebuild pages from original config
         self.pages = super::items::build_pages(&self.categories, &self.original_config);
     }
@@ -740,6 +882,20 @@ impl SettingsState {
 
     /// Add new item in TextList/Map (from the new item field)
     pub fn text_add_item(&mut self) {
+        // Capture info for event logging before mutation
+        let event_info: Option<(String, String, serde_json::Value)> = self.current_item().and_then(|item| {
+            if let SettingControl::Map(state) = &item.control {
+                if !state.new_key_text.is_empty() {
+                    // Key will be added with empty object as default value
+                    Some((item.path.clone(), state.new_key_text.clone(), serde_json::json!({})))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+
         if let Some(item) = self.current_item_mut() {
             match &mut item.control {
                 SettingControl::TextList(state) => state.add_item(),
@@ -747,12 +903,30 @@ impl SettingsState {
                 _ => {}
             }
         }
+
+        // Record event for undo/redo
+        if let Some((path, key, value)) = event_info {
+            self.event_log.append(SettingsEvent::MapEntryAdd { path, key, value });
+        }
+
         // Record the change
         self.on_value_changed();
     }
 
     /// Remove the currently focused item in TextList/Map
     pub fn text_remove_focused(&mut self) {
+        // Capture info for event logging before mutation
+        let event_info: Option<(String, String, serde_json::Value)> = self.current_item().and_then(|item| {
+            if let SettingControl::Map(state) = &item.control {
+                if let Some(idx) = state.focused_entry {
+                    if let Some((key, value)) = state.entries.get(idx) {
+                        return Some((item.path.clone(), key.clone(), value.clone()));
+                    }
+                }
+            }
+            None
+        });
+
         if let Some(item) = self.current_item_mut() {
             match &mut item.control {
                 SettingControl::TextList(state) => {
@@ -768,8 +942,236 @@ impl SettingsState {
                 _ => {}
             }
         }
+
+        // Record event for undo/redo
+        if let Some((path, key, value)) = event_info {
+            self.event_log.append(SettingsEvent::MapEntryRemove { path, key, value });
+        }
+
         // Record the change
         self.on_value_changed();
+    }
+
+    /// Apply a settings event (used for undo/redo)
+    /// Returns true if the event was successfully applied
+    pub fn apply_event(&mut self, event: SettingsEvent) -> bool {
+        match event {
+            SettingsEvent::MapEntryAdd { ref path, ref key, ref value } => {
+                // Find the Map control at this path and add the entry
+                for page in &mut self.pages {
+                    for item in &mut page.items {
+                        if item.path == *path {
+                            if let SettingControl::Map(state) = &mut item.control {
+                                state.add_entry(key.clone(), value.clone());
+                                self.on_value_changed();
+                                return true;
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            SettingsEvent::MapEntryRemove { ref path, ref key, .. } => {
+                // Find the Map control at this path and remove the entry by key
+                for page in &mut self.pages {
+                    for item in &mut page.items {
+                        if item.path == *path {
+                            if let SettingControl::Map(state) = &mut item.control {
+                                if let Some(idx) = state.entries.iter().position(|(k, _)| k == key) {
+                                    state.remove_entry(idx);
+                                    self.on_value_changed();
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            SettingsEvent::ValueChange { ref path, ref new_value, .. } => {
+                // For value changes, just update the pending change
+                self.set_pending_change(path, new_value.clone());
+                // TODO: Also update the control's visual state
+                true
+            }
+        }
+    }
+
+    /// Undo the last change
+    pub fn undo(&mut self) -> bool {
+        if let Some(event) = self.event_log.undo() {
+            self.apply_event(event)
+        } else {
+            false
+        }
+    }
+
+    /// Redo the last undone change
+    pub fn redo(&mut self) -> bool {
+        if let Some(event) = self.event_log.redo() {
+            self.apply_event(event)
+        } else {
+            false
+        }
+    }
+
+    /// Check if undo is available
+    pub fn can_undo(&self) -> bool {
+        self.event_log.can_undo()
+    }
+
+    /// Check if redo is available
+    pub fn can_redo(&self) -> bool {
+        self.event_log.can_redo()
+    }
+
+    // =========== Key handling ===========
+
+    /// Handle a key event in settings
+    /// Returns how the key was handled
+    pub fn handle_key(
+        &mut self,
+        code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> SettingsKeyResult {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        // Help overlay - any key closes it
+        if self.showing_help {
+            match code {
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => {
+                    self.hide_help();
+                }
+                _ => {}
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Confirmation dialog
+        if self.showing_confirm_dialog {
+            match code {
+                KeyCode::Left | KeyCode::Up => self.confirm_dialog_prev(),
+                KeyCode::Right | KeyCode::Down | KeyCode::Tab => self.confirm_dialog_next(),
+                KeyCode::Enter => {
+                    let selection = self.confirm_dialog_selection;
+                    self.hide_confirm_dialog();
+                    return match selection {
+                        0 => SettingsKeyResult::Close { save: true },
+                        1 => {
+                            self.discard_changes();
+                            SettingsKeyResult::Close { save: false }
+                        }
+                        _ => SettingsKeyResult::Handled,
+                    };
+                }
+                KeyCode::Esc => self.hide_confirm_dialog(),
+                _ => {}
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Text editing mode (for TextList/Map Add-new)
+        if self.editing_text {
+            match code {
+                KeyCode::Char(c) if modifiers.is_empty() => self.text_insert(c),
+                KeyCode::Backspace => self.text_backspace(),
+                KeyCode::Left => self.text_move_left(),
+                KeyCode::Right => self.text_move_right(),
+                KeyCode::Up => self.text_focus_prev(),
+                KeyCode::Down => self.text_focus_next(),
+                KeyCode::Enter => self.text_add_item(),
+                KeyCode::Esc => self.stop_editing(),
+                KeyCode::Delete => self.text_remove_focused(),
+                _ => return SettingsKeyResult::NotHandled,
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Dropdown open
+        if self.is_dropdown_open() {
+            match code {
+                KeyCode::Up => self.dropdown_prev(),
+                KeyCode::Down => self.dropdown_next(),
+                KeyCode::Enter => self.dropdown_confirm(),
+                KeyCode::Esc => self.dropdown_cancel(),
+                _ => return SettingsKeyResult::NotHandled,
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Number editing
+        if self.is_number_editing() {
+            match code {
+                KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => self.number_insert(c),
+                KeyCode::Backspace => self.number_backspace(),
+                KeyCode::Enter => self.number_confirm(),
+                KeyCode::Esc => self.number_cancel(),
+                _ => return SettingsKeyResult::NotHandled,
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Search mode
+        if self.search_active {
+            match code {
+                KeyCode::Char(c) if modifiers.is_empty() => self.search_push_char(c),
+                KeyCode::Backspace => {
+                    if self.search_query.is_empty() {
+                        self.cancel_search();
+                    } else {
+                        self.search_pop_char();
+                    }
+                }
+                KeyCode::Esc => self.cancel_search(),
+                KeyCode::Enter => self.jump_to_search_result(),
+                KeyCode::Up => self.search_prev(),
+                KeyCode::Down => self.search_next(),
+                _ => return SettingsKeyResult::NotHandled,
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Normal mode - check for undo/redo first
+        // Ctrl+Z for undo
+        if matches!(code, KeyCode::Char('z'))
+            && modifiers.contains(KeyModifiers::CONTROL)
+            && !modifiers.contains(KeyModifiers::SHIFT)
+        {
+            if self.undo() {
+                return SettingsKeyResult::StatusMessage("Undo".to_string());
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Ctrl+Y or Ctrl+Shift+Z for redo
+        if (matches!(code, KeyCode::Char('y')) && modifiers.contains(KeyModifiers::CONTROL))
+            || (matches!(code, KeyCode::Char('z') | KeyCode::Char('Z'))
+                && modifiers.contains(KeyModifiers::CONTROL)
+                && modifiers.contains(KeyModifiers::SHIFT))
+        {
+            if self.redo() {
+                return SettingsKeyResult::StatusMessage("Redo".to_string());
+            }
+            return SettingsKeyResult::Handled;
+        }
+
+        // Delete/Backspace for Map entries
+        if matches!(code, KeyCode::Delete | KeyCode::Backspace) {
+            let should_remove = self.current_item().map_or(false, |item| {
+                if let SettingControl::Map(map_state) = &item.control {
+                    map_state.focused_entry.is_some()
+                } else {
+                    false
+                }
+            });
+            if should_remove {
+                self.text_remove_focused();
+                return SettingsKeyResult::Handled;
+            }
+        }
+
+        // Not handled - let the caller deal with navigation actions etc.
+        SettingsKeyResult::NotHandled
     }
 
     // =========== Dropdown methods ===========

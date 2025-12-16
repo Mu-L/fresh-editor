@@ -269,338 +269,54 @@ impl Editor {
             return Ok(());
         }
 
-        // Handle settings context (including search mode, help overlay, and confirmation dialog)
+        // Handle settings context - delegate to SettingsState::handle_key
         if matches!(context, crate::input::keybindings::KeyContext::Settings) {
-            // Check if help overlay is showing
-            let showing_help = self
-                .settings_state
-                .as_ref()
-                .map_or(false, |s| s.showing_help);
+            use crate::view::settings::state::SettingsKeyResult;
 
-            if showing_help {
-                // Any key closes the help overlay
-                match code {
-                    crossterm::event::KeyCode::Esc
-                    | crossterm::event::KeyCode::Char('?')
-                    | crossterm::event::KeyCode::Enter => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.hide_help();
+            // First, let SettingsState handle the key
+            if let Some(ref mut state) = self.settings_state {
+                match state.handle_key(code, modifiers) {
+                    SettingsKeyResult::Handled => return Ok(()),
+                    SettingsKeyResult::Close { save } => {
+                        if save {
+                            self.save_settings();
                         }
+                        self.close_settings(false);
                         return Ok(());
                     }
-                    _ => return Ok(()), // Ignore other keys while help is showing
+                    SettingsKeyResult::StatusMessage(msg) => {
+                        self.set_status_message(msg);
+                        return Ok(());
+                    }
+                    SettingsKeyResult::NotHandled => {
+                        // Fall through to action handling below
+                    }
                 }
             }
 
-            // Check if confirmation dialog is showing
-            let showing_confirm = self
-                .settings_state
-                .as_ref()
-                .map_or(false, |s| s.showing_confirm_dialog);
-
-            if showing_confirm {
-                // Handle confirmation dialog input
-                match code {
-                    crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.confirm_dialog_prev();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.confirm_dialog_next();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Tab => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.confirm_dialog_next();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Enter => {
-                        // Execute the selected action
-                        let selection = self
-                            .settings_state
-                            .as_ref()
-                            .map(|s| s.confirm_dialog_selection)
-                            .unwrap_or(2);
-                        match selection {
-                            0 => {
-                                // Save and Exit
-                                self.save_settings();
-                                self.close_settings(false);
-                            }
-                            1 => {
-                                // Discard changes
-                                if let Some(ref mut state) = self.settings_state {
-                                    state.discard_changes();
-                                }
-                                self.close_settings(false);
-                            }
-                            _ => {
-                                // Cancel - just hide the dialog
-                                if let Some(ref mut state) = self.settings_state {
-                                    state.hide_confirm_dialog();
-                                }
-                            }
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Esc => {
-                        // Cancel - hide the dialog
-                        if let Some(ref mut state) = self.settings_state {
-                            state.hide_confirm_dialog();
-                        }
-                        return Ok(());
-                    }
-                    _ => return Ok(()),
+            // Handle navigation actions that weren't handled by SettingsState
+            match action {
+                Action::MoveUp => {
+                    self.settings_navigate_up();
+                    return Ok(());
                 }
-            }
-
-            // Check if text editing is active (for TextList controls)
-            let editing_text = self
-                .settings_state
-                .as_ref()
-                .map_or(false, |s| s.editing_text);
-
-            if editing_text {
-                // In text editing mode, handle input for TextList controls
-                match code {
-                    crossterm::event::KeyCode::Char(c) if modifiers.is_empty() => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_insert(c);
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Backspace => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_backspace();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Left => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_move_left();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Right => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_move_right();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Up => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_focus_prev();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Down => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_focus_next();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Enter => {
-                        if let Some(ref mut state) = self.settings_state {
-                            // Add the item and record change
-                            state.text_add_item();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Esc => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.stop_editing();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Delete => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.text_remove_focused();
-                        }
-                        return Ok(());
-                    }
-                    _ => {}
+                Action::MoveDown => {
+                    self.settings_navigate_down();
+                    return Ok(());
                 }
-            }
-
-            // Check if a dropdown is open
-            let dropdown_open = self
-                .settings_state
-                .as_ref()
-                .map_or(false, |s| s.is_dropdown_open());
-
-            if dropdown_open {
-                // Handle dropdown navigation
-                match code {
-                    crossterm::event::KeyCode::Up => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.dropdown_prev();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Down => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.dropdown_next();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Enter => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.dropdown_confirm();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Esc => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.dropdown_cancel();
-                        }
-                        return Ok(());
-                    }
-                    _ => {}
+                // Route other settings actions to handle_action
+                Action::SettingsToggleFocus
+                | Action::SettingsActivate
+                | Action::SettingsSearch
+                | Action::SettingsSave
+                | Action::SettingsReset
+                | Action::SettingsHelp
+                | Action::SettingsIncrement
+                | Action::SettingsDecrement
+                | Action::CloseSettings => {
+                    return self.handle_action(action);
                 }
-            }
-
-            // Check if number editing is active
-            let number_editing = self
-                .settings_state
-                .as_ref()
-                .map_or(false, |s| s.is_number_editing());
-
-            if number_editing {
-                // Handle number input
-                match code {
-                    crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.number_insert(c);
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Backspace => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.number_backspace();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Enter => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.number_confirm();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Esc => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.number_cancel();
-                        }
-                        return Ok(());
-                    }
-                    _ => {}
-                }
-            }
-
-            // Check if search is active
-            let search_active = self
-                .settings_state
-                .as_ref()
-                .map_or(false, |s| s.search_active);
-
-            if search_active {
-                // In search mode, handle input specially
-                match code {
-                    crossterm::event::KeyCode::Char(c) if modifiers.is_empty() => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.search_push_char(c);
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Backspace => {
-                        if let Some(ref mut state) = self.settings_state {
-                            if state.search_query.is_empty() {
-                                state.cancel_search();
-                            } else {
-                                state.search_pop_char();
-                            }
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Esc => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.cancel_search();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Enter => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.jump_to_search_result();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Up => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.search_prev();
-                        }
-                        return Ok(());
-                    }
-                    crossterm::event::KeyCode::Down => {
-                        if let Some(ref mut state) = self.settings_state {
-                            state.search_next();
-                        }
-                        return Ok(());
-                    }
-                    _ => {}
-                }
-            } else {
-                // Not in search mode - normal settings navigation
-
-                // Handle Delete/Backspace for Map entries (no editing mode needed)
-                if matches!(
-                    code,
-                    crossterm::event::KeyCode::Delete | crossterm::event::KeyCode::Backspace
-                ) {
-                    if let Some(ref mut state) = self.settings_state {
-                        // Check if current item is a Map with a focused entry
-                        let should_remove = state.current_item().map_or(false, |item| {
-                            if let crate::view::settings::items::SettingControl::Map(map_state) =
-                                &item.control
-                            {
-                                map_state.focused_entry.is_some()
-                            } else {
-                                false
-                            }
-                        });
-                        if should_remove {
-                            state.text_remove_focused();
-                            return Ok(());
-                        }
-                    }
-                }
-
-                match action {
-                    Action::MoveUp => {
-                        self.settings_navigate_up();
-                        return Ok(());
-                    }
-                    Action::MoveDown => {
-                        self.settings_navigate_down();
-                        return Ok(());
-                    }
-                    // Route other settings actions to handle_action
-                    Action::SettingsToggleFocus
-                    | Action::SettingsActivate
-                    | Action::SettingsSearch
-                    | Action::SettingsSave
-                    | Action::SettingsReset
-                    | Action::SettingsHelp
-                    | Action::SettingsIncrement
-                    | Action::SettingsDecrement
-                    | Action::CloseSettings => {
-                        return self.handle_action(action);
-                    }
-                    _ => {}
-                }
+                _ => {}
             }
         }
 
