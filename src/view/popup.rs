@@ -8,6 +8,8 @@ use ratatui::{
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+use crate::view::ui::borders::get_border_set;
+
 /// Clamp a rectangle to fit within bounds, preventing out-of-bounds rendering panics.
 /// Returns a rectangle that is guaranteed to be fully contained within `bounds`.
 fn clamp_rect_to_bounds(rect: Rect, bounds: Rect) -> Rect {
@@ -317,6 +319,9 @@ pub struct Popup {
 
     /// Scroll offset for content (for scrolling through long lists)
     pub scroll_offset: usize,
+
+    /// Whether to use advanced unicode characters for borders.
+    pub advanced_unicode: bool,
 }
 
 impl Popup {
@@ -333,6 +338,7 @@ impl Popup {
             border_style: Style::default().fg(theme.popup_border_fg),
             background_style: Style::default().bg(theme.popup_bg),
             scroll_offset: 0,
+            advanced_unicode: false,
         }
     }
 
@@ -350,6 +356,7 @@ impl Popup {
             border_style: Style::default().fg(theme.popup_border_fg),
             background_style: Style::default().bg(theme.popup_bg),
             scroll_offset: 0,
+            advanced_unicode: false,
         }
     }
 
@@ -366,6 +373,7 @@ impl Popup {
             border_style: Style::default().fg(theme.popup_border_fg),
             background_style: Style::default().bg(theme.popup_bg),
             scroll_offset: 0,
+            advanced_unicode: false,
         }
     }
 
@@ -592,6 +600,7 @@ impl Popup {
         let block = if self.bordered {
             let mut block = Block::default()
                 .borders(Borders::ALL)
+                .border_set(get_border_set(self.advanced_unicode))
                 .border_style(self.border_style)
                 .style(self.background_style);
 

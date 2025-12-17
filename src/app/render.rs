@@ -1026,6 +1026,7 @@ impl Editor {
             width: 50,
             max_height: 8,
             bordered: true,
+            advanced_unicode: self.config.editor.advanced_unicode,
         };
 
         self.show_popup(popup);

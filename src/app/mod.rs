@@ -6419,6 +6419,7 @@ impl Editor {
             width: 50,
             max_height: 15,
             bordered: true,
+            advanced_unicode: self.config.editor.advanced_unicode,
         };
 
         self.active_state_mut()
@@ -6849,6 +6850,7 @@ impl Editor {
         popup.max_height = 20;
         popup.border_style = Style::default().fg(self.theme.popup_border_fg);
         popup.background_style = Style::default().bg(self.theme.popup_bg);
+        popup.advanced_unicode = self.config.editor.advanced_unicode;
 
         // Show the popup
         if let Some(state) = self.buffers.get_mut(&self.active_buffer()) {
@@ -7178,6 +7180,7 @@ impl Editor {
         popup.max_height = 10;
         popup.border_style = Style::default().fg(self.theme.popup_border_fg);
         popup.background_style = Style::default().bg(self.theme.popup_bg);
+        popup.advanced_unicode = self.config.editor.advanced_unicode;
 
         // Show the popup
         if let Some(state) = self.buffers.get_mut(&self.active_buffer()) {
@@ -7304,6 +7307,7 @@ impl Editor {
         popup.max_height = 15;
         popup.border_style = Style::default().fg(self.theme.popup_border_fg);
         popup.background_style = Style::default().bg(self.theme.popup_bg);
+        popup.advanced_unicode = self.config.editor.advanced_unicode;
 
         // Show the popup
         if let Some(state) = self.buffers.get_mut(&self.active_buffer()) {

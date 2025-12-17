@@ -12,6 +12,7 @@
 //! - `scroll_panel` - Reusable scrollable panel for variable-height items
 //! - `file_browser` - File open dialog popup
 
+pub mod borders;
 pub mod file_browser;
 pub mod file_explorer;
 pub mod menu;

@@ -37,7 +37,8 @@
         "mouse_hover_delay_ms": 500,
         "double_click_time_ms": 500,
         "auto_revert_poll_interval_ms": 2000,
-        "file_tree_poll_interval_ms": 3000
+        "file_tree_poll_interval_ms": 3000,
+        "advanced_unicode": false
       }
     },
     "file_explorer": {
@@ -899,6 +900,11 @@
           "format": "uint64",
           "minimum": 0,
           "default": 3000
+        },
+        "advanced_unicode": {
+          "description": "Whether to use advanced unicode characters for borders.",
+          "type": "boolean",
+          "default": false
         }
       }
     },

@@ -283,6 +283,10 @@ pub struct EditorConfig {
     /// Default: 3000ms (3 seconds)
     #[serde(default = "default_file_tree_poll_interval")]
     pub file_tree_poll_interval_ms: u64,
+
+    /// Whether to use advanced unicode characters for borders.
+    #[serde(default = "default_false")]
+    pub advanced_unicode: bool,
 }
 
 fn default_tab_size() -> usize {
@@ -369,6 +373,7 @@ impl Default for EditorConfig {
             double_click_time_ms: default_double_click_time(),
             auto_revert_poll_interval_ms: default_auto_revert_poll_interval(),
             file_tree_poll_interval_ms: default_file_tree_poll_interval(),
+            advanced_unicode: false,
         }
     }
 }

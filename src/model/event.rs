@@ -258,6 +258,8 @@ pub struct PopupData {
     pub width: u16,
     pub max_height: u16,
     pub bordered: bool,
+    #[serde(default)]
+    pub advanced_unicode: bool,
 }
 
 /// Popup content for events

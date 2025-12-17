@@ -663,6 +663,7 @@ fn convert_popup_data_to_popup(data: &PopupData) -> Popup {
         border_style: Style::default().fg(Color::Gray),
         background_style: Style::default().bg(Color::Rgb(30, 30, 30)),
         scroll_offset: 0,
+        advanced_unicode: data.advanced_unicode,
     };
 
     popup
