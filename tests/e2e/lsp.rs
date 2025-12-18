@@ -39,6 +39,7 @@ fn test_lsp_completion_popup_text_not_mangled() -> std::io::Result<()> {
             width: 50,
             max_height: 15,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -115,6 +116,7 @@ fn test_lsp_completion_replaces_word() -> std::io::Result<()> {
             width: 40,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -211,6 +213,7 @@ fn test_lsp_completion_popup() -> std::io::Result<()> {
             width: 50,
             max_height: 15,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -380,6 +383,7 @@ fn test_lsp_completion_navigation() -> std::io::Result<()> {
             width: 30,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -436,6 +440,7 @@ fn test_lsp_completion_cancel() -> std::io::Result<()> {
             width: 30,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -499,6 +504,7 @@ fn test_lsp_completion_after_dot() -> std::io::Result<()> {
             width: 40,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -554,6 +560,7 @@ fn test_lsp_completion_after_dot_with_partial() -> std::io::Result<()> {
             width: 40,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -619,6 +626,7 @@ fn test_lsp_completion_filtering() -> std::io::Result<()> {
             width: 40,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -707,6 +715,7 @@ fn test_lsp_completion_popup_size() -> std::io::Result<()> {
             width: 40,
             max_height: 15, // Much larger than needed for 2 items
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -872,6 +881,7 @@ fn test_lsp_completion_popup_hides_background() -> std::io::Result<()> {
             width: 40,
             max_height: 10,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 
@@ -3363,6 +3373,7 @@ fn test_hover_popup_at_right_edge_does_not_panic() -> std::io::Result<()> {
             width: 80,
             max_height: 20,
             bordered: true,
+            advanced_unicode: false,
         },
     });
 

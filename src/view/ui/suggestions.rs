@@ -442,7 +442,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = Rect::new(0, 0, 84, 10);
-                SuggestionsRenderer::render(frame, area, &prompt, &theme);
+                SuggestionsRenderer::render(frame, area, &prompt, &theme, false);
             })
             .unwrap();
     }
@@ -483,7 +483,7 @@ mod tests {
                     terminal
                         .draw(|frame| {
                             let area = Rect::new(0, 0, width, 5);
-                            SuggestionsRenderer::render(frame, area, &prompt, &theme);
+                            SuggestionsRenderer::render(frame, area, &prompt, &theme, false);
                         })
                         .unwrap();
                 }));

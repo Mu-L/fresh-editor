@@ -406,6 +406,7 @@ fn test_popup_events() {
         width: 40,
         max_height: 10,
         bordered: true,
+        advanced_unicode: false,
     };
 
     // Show the popup
