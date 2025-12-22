@@ -448,6 +448,7 @@ fn op_fresh_delete_range(state: &mut OpState, buffer_id: u32, start: u32, end: u
 /// @param italic - Use italic text
 /// @returns true if overlay was added
 #[op2(fast)]
+#[allow(clippy::too_many_arguments)]
 fn op_fresh_add_overlay(
     state: &mut OpState,
     buffer_id: u32,
@@ -457,6 +458,9 @@ fn op_fresh_add_overlay(
     r: u8,
     g: u8,
     b: u8,
+    bg_r: i16,
+    bg_g: i16,
+    bg_b: i16,
     underline: bool,
     bold: bool,
     italic: bool,
@@ -470,6 +474,13 @@ fn op_fresh_add_overlay(
                 namespace,
             ))
         };
+
+        let bg_color = if bg_r >= 0 && bg_g >= 0 && bg_b >= 0 {
+            Some((bg_r as u8, bg_g as u8, bg_b as u8))
+        } else {
+            None
+        };
+
         let result = runtime_state
             .command_sender
             .send(PluginCommand::AddOverlay {
@@ -477,6 +488,7 @@ fn op_fresh_add_overlay(
                 namespace: ns,
                 range: (start as usize)..(end as usize),
                 color: (r, g, b),
+                bg_color,
                 underline,
                 bold,
                 italic,
