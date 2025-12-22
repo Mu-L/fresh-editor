@@ -78,13 +78,12 @@ async function computeDiff(original: string, modified: string): Promise<Hunk[]> 
  * Run git diff to get pending changes
  */
 async function getGitDiff(): Promise<Hunk[]> {
-    const result = await editor.spawnProcess("git", ["diff", "HEAD"]);
+    const result = await editor.spawnProcess("git", ["diff", "HEAD", "--unified=3"]);
     if (result.exit_code !== 0) {
         editor.debug(`Git diff failed: ${result.stderr}`);
         return [];
     }
 
-    // Basic parser for git unified diff format
     const lines = result.stdout.split('\n');
     const hunks: Hunk[] = [];
     let currentFile = "";
@@ -92,27 +91,44 @@ async function getGitDiff(): Promise<Hunk[]> {
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (line.startsWith('--- a/')) {
-            currentFile = line.substring(6);
-        } else if (line.startsWith('+++ b/')) {
-            // currentFile already set
-        } else if (line.startsWith('@@')) {
-            const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+
+        if (line.startsWith('diff --git')) {
+            const match = line.match(/diff --git a\/(.+) b\/(.+)/);
             if (match) {
+                currentFile = match[2]; // Use the 'b' file path
+                currentHunk = null; // Reset hunk context for new file
+            }
+        } else if (line.startsWith('--- a/')) {
+            // Already handled by `diff --git`, but can be a fallback for new files
+            if (currentFile === "") {
+                const path = line.substring(6);
+                if (path !== '/dev/null') {
+                    currentFile = path;
+                }
+            }
+        } else if (line.startsWith('+++ b/')) {
+            if (currentFile === "") {
+                currentFile = line.substring(6);
+            }
+        } else if (line.startsWith('@@')) {
+            const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@(.*)/);
+            if (match && currentFile) {
                 const start = parseInt(match[2]);
                 currentHunk = {
                     id: `${currentFile}:${start}`,
                     file: currentFile,
                     range: { start, end: start }, // Simplified
-                    type: 'modify',
+                    type: 'modify', // Simplified for now
                     lines: [],
                     status: 'pending',
-                    contextHeader: line.split('@@')[2]?.trim() || ""
+                    contextHeader: match[3]?.trim() || ""
                 };
                 hunks.push(currentHunk);
             }
         } else if (currentHunk && (line.startsWith('+') || line.startsWith('-') || line.startsWith(' '))) {
-            currentHunk.lines.push(line);
+            if (!line.startsWith('---') && !line.startsWith('+++')) {
+                 currentHunk.lines.push(line);
+            }
         }
     }
 
