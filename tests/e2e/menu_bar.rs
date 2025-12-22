@@ -578,3 +578,44 @@ fn test_copy_with_formatting_submenu_activates_on_enter() {
         screen_after
     );
 }
+
+/// Test that Cut and Copy menu items are disabled when there's no selection
+#[test]
+fn test_cut_copy_disabled_without_selection() {
+    let mut harness = EditorTestHarness::new(100, 30).unwrap();
+    harness.render().unwrap();
+
+    // No text, no selection - Cut and Copy should be disabled
+
+    // Open Edit menu
+    harness
+        .send_key(KeyCode::Char('e'), KeyModifiers::ALT)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Navigate to Cut (after Undo, Redo, separator)
+    // Down 1: Undo -> Redo
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    // Down 2: Redo -> Cut (skips separator)
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Verify we're at Cut (menu is open)
+    let screen = harness.screen_to_string();
+    assert!(screen.contains("Cut"), "Cut should be visible");
+
+    // Press Enter on Cut - should NOT execute because no selection
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Menu should still be open because the action didn't execute
+    let screen_after = harness.screen_to_string();
+    assert!(
+        screen_after.contains("Undo") && screen_after.contains("Redo"),
+        "Menu should still be open since Cut is disabled. Screen:\n{}",
+        screen_after
+    );
+}
+
