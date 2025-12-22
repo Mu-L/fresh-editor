@@ -575,6 +575,42 @@ impl Editor {
         }
     }
 
+    /// Handle RequestHighlights command
+    pub(super) fn handle_request_highlights(
+        &mut self,
+        buffer_id: BufferId,
+        range: std::ops::Range<usize>,
+        request_id: u64,
+    ) {
+        let spans = if let Some(state) = self.buffers.get_mut(&buffer_id) {
+            let spans = state.highlighter.highlight_viewport(
+                &state.buffer,
+                range.start,
+                range.end,
+                &self.theme,
+                self.config.editor.highlight_context_bytes,
+            );
+
+            spans
+                .into_iter()
+                .map(|s| crate::services::plugins::runtime::TsHighlightSpan {
+                    start: s.range.start as u32,
+                    end: s.range.end as u32,
+                    color: (s.color.r, s.color.g, s.color.b),
+                    bold: false,
+                    italic: false,
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        self.send_plugin_response(PluginResponse::HighlightsComputed {
+            request_id,
+            spans,
+        });
+    }
+
     // ==================== Text Editing Commands ====================
 
     /// Handle InsertText command

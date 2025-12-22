@@ -29,6 +29,11 @@ pub enum PluginResponse {
         request_id: u64,
         result: Result<Value, String>,
     },
+    /// Response to RequestHighlights
+    HighlightsComputed {
+        request_id: u64,
+        spans: Vec<crate::services::plugins::runtime::TsHighlightSpan>,
+    },
 }
 
 /// Information about a cursor in the editor
@@ -577,6 +582,13 @@ pub enum PluginCommand {
     /// Set the scroll position of a specific split
     SetSplitScroll { split_id: SplitId, top_byte: usize },
 
+    /// Request syntax highlights for a buffer range
+    RequestHighlights {
+        buffer_id: BufferId,
+        range: Range<usize>,
+        request_id: u64,
+    },
+
     /// Close a split (if not the last one)
     CloseSplit { split_id: SplitId },
 
@@ -624,6 +636,32 @@ pub enum PluginCommand {
         /// Whether the context is active
         active: bool,
     },
+
+    /// Set the hunks for the Review Diff tool
+    SetReviewDiffHunks {
+        hunks: Vec<ReviewHunk>,
+    },
+}
+
+/// Hunk status for Review Diff
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HunkStatus {
+    Pending,
+    Staged,
+    Discarded,
+}
+
+/// A high-level hunk directive for the Review Diff tool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewHunk {
+    pub id: String,
+    pub file: String,
+    pub context_header: String,
+    pub status: HunkStatus,
+    /// 0-indexed line range in the base (HEAD) version
+    pub base_range: Option<(usize, usize)>,
+    /// 0-indexed line range in the modified (Working) version
+    pub modified_range: Option<(usize, usize)>,
 }
 
 /// Plugin API context - provides safe access to editor functionality
@@ -939,6 +977,15 @@ impl PluginApi {
         self.send_command(PluginCommand::SetSplitScroll {
             split_id: SplitId(split_id),
             top_byte,
+        })
+    }
+
+    /// Request syntax highlights for a buffer range
+    pub fn get_highlights(&self, buffer_id: BufferId, range: Range<usize>, request_id: u64) -> Result<(), String> {
+        self.send_command(PluginCommand::RequestHighlights {
+            buffer_id,
+            range,
+            request_id,
         })
     }
 

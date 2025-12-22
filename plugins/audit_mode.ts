@@ -167,21 +167,46 @@ interface HighlightTask {
     fg: [number, number, number];
     bg?: [number, number, number];
     bold?: boolean;
+    italic?: boolean;
 }
 
-function renderReviewStream(): { entries: TextPropertyEntry[], highlights: HighlightTask[] } {
+/**
+ * Maps source highlights from another buffer to the review stream
+ */
+function mapHighlights(
+    sourceSpans: { start: number, end: number, color: [number, number, number], bold: boolean, italic: boolean }[],
+    sourceStartOffset: number,
+    reviewBaseOffset: number,
+    linePrefixLen: number
+): HighlightTask[] {
+    return sourceSpans.map(span => ({
+        range: [
+            reviewBaseOffset + linePrefixLen + (span.start - sourceStartOffset),
+            reviewBaseOffset + linePrefixLen + (span.end - sourceStartOffset)
+        ],
+        fg: span.color,
+        bold: span.bold,
+        italic: span.italic
+    }));
+}
+
+/**
+ * Render the Review Stream buffer content and return highlight tasks
+ */
+async function renderReviewStream(): Promise<{ entries: TextPropertyEntry[], highlights: HighlightTask[] }> {
   const entries: TextPropertyEntry[] = [];
   const highlights: HighlightTask[] = [];
   let currentFile = "";
   let currentByte = 0;
 
-  // Exact Byte Constants
-  const BOX_PIPE_BYTES = 3; // "│"
-  const BOX_DR_BYTES = 3;   // "┌"
+  // Cache for file buffers
+  const headBuffers: Record<string, number> = {};
+  const workingBuffers: Record<string, number> = {};
 
-  state.hunks.forEach((hunk, hunkIndex) => {
+  for (let hunkIndex = 0; hunkIndex < state.hunks.length; hunkIndex++) {
+    const hunk = state.hunks[hunkIndex];
     if (hunk.file !== currentFile) {
-      // Top border with filename
+      // Header & Border
       const titlePrefix = "┌─ ";
       const titleLine = `${titlePrefix}${hunk.file} ${"─".repeat(Math.max(0, 60 - hunk.file.length))}\n`;
       const titleLen = getByteLength(titleLine);
@@ -191,6 +216,26 @@ function renderReviewStream(): { entries: TextPropertyEntry[], highlights: Highl
       highlights.push({ range: [currentByte + prefixLen, currentByte + prefixLen + getByteLength(hunk.file)], fg: STYLE_FILE_NAME, bold: true });
       currentByte += titleLen;
       currentFile = hunk.file;
+
+      // Prepare background buffers for highlighting
+      if (!headBuffers[hunk.file]) {
+          const gitShow = await editor.spawnProcess("git", ["show", `HEAD:${hunk.file}`]);
+          if (gitShow.exit_code === 0) {
+              headBuffers[hunk.file] = await editor.createVirtualBuffer({
+                  name: `HEAD:${hunk.file}`, mode: "special", read_only: true,
+                  entries: [{ text: gitShow.stdout, properties: {} }], showLineNumbers: false
+              });
+          }
+      }
+      if (!workingBuffers[hunk.file]) {
+          const path = editor.pathJoin([editor.getCwd(), hunk.file]);
+          let bid = editor.findBufferByPath(path);
+          if (bid === 0) {
+              // Not open, open in background
+              bid = await editor.openFile(hunk.file, 0, 0); 
+          }
+          workingBuffers[hunk.file] = bid;
+      }
     }
 
     hunk.byteOffset = currentByte;
@@ -289,7 +334,7 @@ function renderReviewStream(): { entries: TextPropertyEntry[], highlights: Highl
         highlights.push({ range: [currentByte, currentByte + bottomLen], fg: STYLE_BORDER });
         currentByte += bottomLen;
     }
-  });
+  }
 
   if (entries.length === 0) entries.push({ text: "No changes to review.\n", properties: {} });
   return { entries, highlights };
@@ -298,9 +343,9 @@ function renderReviewStream(): { entries: TextPropertyEntry[], highlights: Highl
 /**
  * Updates the buffer UI (text and highlights) based on current state.hunks
  */
-function updateReviewUI() {
+async function updateReviewUI() {
   if (state.reviewBufferId !== null) {
-    const { entries, highlights } = renderReviewStream();
+    const { entries, highlights } = await renderReviewStream();
     editor.setVirtualBufferContent(state.reviewBufferId, entries);
     
     editor.clearNamespace(state.reviewBufferId, "review-diff");
@@ -313,7 +358,7 @@ function updateReviewUI() {
             h.range[1], 
             h.fg[0], h.fg[1], h.fg[2], 
             bg[0], bg[1], bg[2], 
-            false, h.bold || false, false
+            false, h.bold || false, h.italic || false
         );
     });
   }
@@ -330,7 +375,7 @@ async function refreshReviewData() {
         const newHunks = await getGitDiff();
         newHunks.forEach(h => h.status = state.hunkStatus[h.id] || 'pending');
         state.hunks = newHunks;
-        updateReviewUI();
+        await updateReviewUI();
         editor.setStatus(`Review diff updated. Found ${state.hunks.length} hunks.`);
     } catch (e) {
         editor.debug(`ReviewDiff Error: ${e}`);
@@ -341,71 +386,63 @@ async function refreshReviewData() {
 
 // --- Actions ---
 
-globalThis.review_stage_hunk = () => {
+globalThis.review_stage_hunk = async () => {
     const props = editor.getTextPropertiesAtCursor(editor.getActiveBufferId());
     if (props.length > 0 && props[0].hunkId) {
         const id = props[0].hunkId as string;
         state.hunkStatus[id] = 'staged';
         const h = state.hunks.find(x => x.id === id);
         if (h) h.status = 'staged';
-        updateReviewUI();
+        await updateReviewUI();
     }
 };
 
-globalThis.review_discard_hunk = () => {
+globalThis.review_discard_hunk = async () => {
     const props = editor.getTextPropertiesAtCursor(editor.getActiveBufferId());
     if (props.length > 0 && props[0].hunkId) {
         const id = props[0].hunkId as string;
         state.hunkStatus[id] = 'discarded';
         const h = state.hunks.find(x => x.id === id);
         if (h) h.status = 'discarded';
-        updateReviewUI();
+        await updateReviewUI();
     }
 };
 
-globalThis.review_undo_action = () => {
+globalThis.review_undo_action = async () => {
     const props = editor.getTextPropertiesAtCursor(editor.getActiveBufferId());
     if (props.length > 0 && props[0].hunkId) {
         const id = props[0].hunkId as string;
         state.hunkStatus[id] = 'pending';
         const h = state.hunks.find(x => x.id === id);
         if (h) h.status = 'pending';
-        updateReviewUI();
+        await updateReviewUI();
     }
 };
 
 globalThis.review_next_hunk = () => {
     const bid = editor.getActiveBufferId();
     const props = editor.getTextPropertiesAtCursor(bid);
-    let currentIndex = -1;
-    if (props.length > 0 && props[0].index !== undefined) currentIndex = props[0].index as number;
-    const nextIndex = currentIndex + 1;
-    if (nextIndex < state.hunks.length) {
-        const hunk = state.hunks[nextIndex];
-        editor.setBufferCursor(bid, hunk.byteOffset);
-    }
+    let cur = -1;
+    if (props.length > 0 && props[0].index !== undefined) cur = props[0].index as number;
+    if (cur + 1 < state.hunks.length) editor.setBufferCursor(bid, state.hunks[cur + 1].byteOffset);
 };
 
 globalThis.review_prev_hunk = () => {
     const bid = editor.getActiveBufferId();
     const props = editor.getTextPropertiesAtCursor(bid);
-    let currentIndex = state.hunks.length;
-    if (props.length > 0 && props[0].index !== undefined) currentIndex = props[0].index as number;
-    const prevIndex = currentIndex - 1;
-    if (prevIndex >= 0) {
-        const hunk = state.hunks[prevIndex];
-        editor.setBufferCursor(bid, hunk.byteOffset);
-    }
+    let cur = state.hunks.length;
+    if (props.length > 0 && props[0].index !== undefined) cur = props[0].index as number;
+    if (cur - 1 >= 0) editor.setBufferCursor(bid, state.hunks[cur - 1].byteOffset);
 };
 
 globalThis.review_refresh = () => { refreshReviewData(); };
 
-let activeDiffView: { lSplit: number, rSplit: number } | null = null;
+let activeDiffViewState: { lSplit: number, rSplit: number } | null = null;
 
 globalThis.on_viewport_changed = (data: any) => {
-    if (!activeDiffView) return;
-    if (data.split_id === activeDiffView.lSplit) (editor as any).setSplitScroll(activeDiffView.rSplit, data.top_byte);
-    else if (data.split_id === activeDiffView.rSplit) (editor as any).setSplitScroll(activeDiffView.lSplit, data.top_byte);
+    if (!activeDiffViewState) return;
+    if (data.split_id === activeDiffViewState.lSplit) (editor as any).setSplitScroll(activeDiffViewState.rSplit, data.top_byte);
+    else if (data.split_id === activeDiffViewState.rSplit) (editor as any).setSplitScroll(activeDiffViewState.lSplit, data.top_byte);
 };
 
 globalThis.review_drill_down = async () => {
@@ -423,7 +460,7 @@ globalThis.review_drill_down = async () => {
             name: `HEAD:${h.file}`, mode: "special", read_only: true, entries: [{ text: gitShow.stdout, properties: {} }],
             ratio: 0.5, direction: "vertical", show_line_numbers: true
         });
-        activeDiffView = { lSplit: lRes.split_id!, rSplit: rSid };
+        activeDiffViewState = { lSplit: lRes.split_id!, rSplit: rSid };
         editor.on("viewport_changed", "on_viewport_changed");
     }
 };
@@ -438,10 +475,10 @@ globalThis.start_review_diff = async () => {
 
     const bufferId = await VirtualBufferFactory.create({
         name: "*Review Diff*", mode: "review-mode", read_only: true,
-        entries: renderReviewStream().entries, showLineNumbers: false
+        entries: (await renderReviewStream()).entries, showLineNumbers: false
     });
     state.reviewBufferId = bufferId;
-    updateReviewUI(); // Apply initial highlights
+    await updateReviewUI(); // Apply initial highlights
     
     editor.setStatus(`Review Diff Mode Active. Found ${state.hunks.length} hunks. Press 'r' to refresh.`);
     editor.on("buffer_activated", "on_review_buffer_activated");
