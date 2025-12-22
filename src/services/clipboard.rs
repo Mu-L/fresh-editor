@@ -42,6 +42,43 @@ impl Clipboard {
         self.internal_only = enabled;
     }
 
+    /// Copy HTML-formatted text to the system clipboard
+    ///
+    /// Uses arboard to copy HTML with a plain text fallback.
+    /// This allows pasting styled/colored text into applications that support rich text.
+    /// Returns true if successful, false otherwise.
+    pub fn copy_html(&mut self, html: &str, plain_text: &str) -> bool {
+        self.internal = plain_text.to_string();
+
+        if let Ok(mut guard) = SYSTEM_CLIPBOARD.lock() {
+            // Create clipboard if it doesn't exist yet
+            if guard.is_none() {
+                match arboard::Clipboard::new() {
+                    Ok(cb) => *guard = Some(cb),
+                    Err(e) => {
+                        tracing::debug!("arboard clipboard init failed for HTML: {}", e);
+                        return false;
+                    }
+                }
+            }
+
+            // Try to set HTML on the clipboard
+            if let Some(clipboard) = guard.as_mut() {
+                match clipboard.set_html(html, Some(plain_text)) {
+                    Ok(()) => {
+                        tracing::debug!("HTML copied to clipboard ({} bytes)", html.len());
+                        return true;
+                    }
+                    Err(e) => {
+                        tracing::debug!("arboard HTML copy failed: {}", e);
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Copy an image to the system clipboard
     ///
     /// Uses arboard to copy RGBA image data to the system clipboard.

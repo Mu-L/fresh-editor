@@ -3620,9 +3620,12 @@ impl Editor {
         }
     }
 
-    /// Copy the current selection to clipboard as a styled image with syntax highlighting
+    /// Copy the current selection to clipboard as styled HTML with syntax highlighting
+    ///
+    /// This copies the selected text as HTML with inline CSS styles, allowing it to be
+    /// pasted into rich text editors (Google Docs, Word, etc.) with colors preserved.
     pub fn copy_selection_as_image(&mut self) {
-        use crate::services::styled_image::{render_styled_text, StyledImageConfig};
+        use crate::services::styled_image::render_styled_html;
 
         // Collect ranges and their byte offsets
         let ranges: Vec<_> = {
@@ -3709,20 +3712,16 @@ impl Editor {
             Vec::new()
         };
 
-        // Render the styled text to an image
-        let config = StyledImageConfig::default();
-        let result = render_styled_text(&text, &adjusted_spans, &theme, &config);
+        // Render the styled text to HTML
+        let html = render_styled_html(&text, &adjusted_spans, &theme);
 
-        // Copy the image to clipboard
-        if self
-            .clipboard
-            .copy_image(result.width, result.height, result.rgba_bytes)
-        {
-            self.status_message = Some("Copied as image".to_string());
+        // Copy the HTML to clipboard (with plain text fallback)
+        if self.clipboard.copy_html(&html, &text) {
+            self.status_message = Some("Copied with formatting".to_string());
         } else {
-            // Fall back to text copy
+            // Fall back to plain text copy
             self.clipboard.copy(text);
-            self.status_message = Some("Image copy failed, copied as text".to_string());
+            self.status_message = Some("Copied as plain text".to_string());
         }
     }
 

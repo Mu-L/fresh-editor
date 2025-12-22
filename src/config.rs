@@ -1259,7 +1259,7 @@ impl Config {
                         checkbox: None,
                     },
                     MenuItem::Action {
-                        label: "Copy as Image".to_string(),
+                        label: "Copy with Formatting".to_string(),
                         action: "copy_as_image".to_string(),
                         args: HashMap::new(),
                         when: Some(context_keys::HAS_SELECTION.to_string()),
