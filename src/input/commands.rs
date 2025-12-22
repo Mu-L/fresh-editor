@@ -232,8 +232,8 @@ pub fn get_all_commands() -> Vec<Command> {
             source: CommandSource::Builtin,
         },
         Command {
-            name: "Copy as Image".to_string(),
-            description: "Copy selection as styled image with syntax highlighting".to_string(),
+            name: "Copy with Formatting".to_string(),
+            description: "Copy selection with syntax highlighting colors (as rich text)".to_string(),
             action: Action::CopyAsImage,
             contexts: vec![KeyContext::Normal],
             custom_contexts: vec![],
