@@ -94,7 +94,7 @@ impl TextInputState {
             return;
         }
         self.value.insert(self.cursor, c);
-        self.cursor += 1;
+        self.cursor += c.len_utf8();
     }
 
     /// Delete the character before the cursor (backspace)
@@ -102,8 +102,14 @@ impl TextInputState {
         if !self.is_enabled() || self.cursor == 0 {
             return;
         }
-        self.cursor -= 1;
-        self.value.remove(self.cursor);
+        // Find the previous character boundary
+        let prev_boundary = self.value[..self.cursor]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        self.value.remove(prev_boundary);
+        self.cursor = prev_boundary;
     }
 
     /// Delete the character at the cursor (delete)
@@ -117,14 +123,24 @@ impl TextInputState {
     /// Move cursor left
     pub fn move_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            // Find the previous character boundary
+            self.cursor = self.value[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
         }
     }
 
     /// Move cursor right
     pub fn move_right(&mut self) {
         if self.cursor < self.value.len() {
-            self.cursor += 1;
+            // Find the next character boundary
+            self.cursor = self.value[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.value.len());
         }
     }
 
@@ -321,5 +337,69 @@ mod tests {
         state.clear();
         assert_eq!(state.value, "");
         assert_eq!(state.cursor, 0);
+    }
+
+    #[test]
+    fn test_text_input_multibyte_insert_and_backspace() {
+        // Regression test for issue #466: panic when backspacing multi-byte chars
+        let mut state = TextInputState::new("Test");
+        // © is 2 bytes in UTF-8
+        state.insert('©');
+        assert_eq!(state.value, "©");
+        assert_eq!(state.cursor, 2); // byte position, not char position
+
+        // Backspace should delete the whole character, not cause a panic
+        state.backspace();
+        assert_eq!(state.value, "");
+        assert_eq!(state.cursor, 0);
+    }
+
+    #[test]
+    fn test_text_input_multibyte_cursor_movement() {
+        let mut state = TextInputState::new("Test").with_value("日本語");
+        // Each Japanese character is 3 bytes
+        assert_eq!(state.cursor, 9);
+
+        state.move_left();
+        assert_eq!(state.cursor, 6); // moved back by one character (3 bytes)
+
+        state.move_left();
+        assert_eq!(state.cursor, 3);
+
+        state.move_right();
+        assert_eq!(state.cursor, 6);
+
+        state.move_home();
+        assert_eq!(state.cursor, 0);
+
+        state.move_right();
+        assert_eq!(state.cursor, 3); // moved forward by one character (3 bytes)
+    }
+
+    #[test]
+    fn test_text_input_multibyte_delete() {
+        let mut state = TextInputState::new("Test").with_value("a日b");
+        // 'a' is 1 byte, '日' is 3 bytes, 'b' is 1 byte = 5 bytes total
+        assert_eq!(state.cursor, 5);
+
+        state.move_home();
+        state.move_right(); // cursor now at byte 1 (after 'a', before '日')
+        assert_eq!(state.cursor, 1);
+
+        state.delete(); // delete '日'
+        assert_eq!(state.value, "ab");
+        assert_eq!(state.cursor, 1);
+    }
+
+    #[test]
+    fn test_text_input_insert_between_multibyte() {
+        let mut state = TextInputState::new("Test").with_value("日語");
+        state.move_home();
+        state.move_right(); // cursor after first character
+        assert_eq!(state.cursor, 3);
+
+        state.insert('本');
+        assert_eq!(state.value, "日本語");
+        assert_eq!(state.cursor, 6);
     }
 }
