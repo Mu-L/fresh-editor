@@ -1974,8 +1974,8 @@ fn test_entry_dialog_add_new_textlist_item() {
     harness.assert_screen_contains("Edit Value");
 
     // Navigate to Extensions section which has "[+] Add new"
-    // Navigate down until we see the Extensions section
-    for _ in 0..5 {
+    // Fields in order: Key, Auto Indent, Comment Prefix, Extensions (3 downs)
+    for _ in 0..3 {
         harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     }
     harness.render().unwrap();

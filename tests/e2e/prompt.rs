@@ -232,10 +232,12 @@ fn test_spawn_with_nonexistent_file() {
     // Buffer should be empty
     assert_eq!(harness.get_buffer_content().unwrap(), "");
 
-    // Type content and save
-    harness.type_text("fn main() {}").unwrap();
-
+    // Type content with trailing newline and save
     use crossterm::event::{KeyCode, KeyModifiers};
+    harness.type_text("fn main() {}").unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
         .unwrap();
