@@ -25,30 +25,66 @@ use super::Editor;
 
 impl Editor {
     /// Copy the current selection to clipboard
+    ///
+    /// If no selection exists, copies the entire current line (like VSCode/Rider/Zed).
     pub fn copy_selection(&mut self) {
-        // Collect ranges first
-        let ranges: Vec<_> = {
+        // Check if any cursor has a selection
+        let has_selection = {
             let state = self.active_state();
             state
                 .cursors
                 .iter()
-                .filter_map(|(_, cursor)| cursor.selection_range())
-                .collect()
+                .any(|(_, cursor)| cursor.selection_range().is_some())
         };
 
-        let mut text = String::new();
-        let state = self.active_state_mut();
-        for range in ranges {
-            if !text.is_empty() {
-                text.push('\n');
-            }
-            let range_text = state.get_text_range(range.start, range.end);
-            text.push_str(&range_text);
-        }
+        if has_selection {
+            // Original behavior: copy selected text
+            let ranges: Vec<_> = {
+                let state = self.active_state();
+                state
+                    .cursors
+                    .iter()
+                    .filter_map(|(_, cursor)| cursor.selection_range())
+                    .collect()
+            };
 
-        if !text.is_empty() {
-            self.clipboard.copy(text);
-            self.status_message = Some("Copied".to_string());
+            let mut text = String::new();
+            let state = self.active_state_mut();
+            for range in ranges {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                let range_text = state.get_text_range(range.start, range.end);
+                text.push_str(&range_text);
+            }
+
+            if !text.is_empty() {
+                self.clipboard.copy(text);
+                self.status_message = Some("Copied".to_string());
+            }
+        } else {
+            // No selection: copy entire line(s) for each cursor
+            let estimated_line_length = 80;
+            let mut text = String::new();
+            let state = self.active_state_mut();
+
+            // Collect cursor positions first
+            let positions: Vec<_> = state.cursors.iter().map(|(_, c)| c.position).collect();
+
+            for pos in positions {
+                let mut iter = state.buffer.line_iterator(pos, estimated_line_length);
+                if let Some((_start, content)) = iter.next() {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&content);
+                }
+            }
+
+            if !text.is_empty() {
+                self.clipboard.copy(text);
+                self.status_message = Some("Copied line".to_string());
+            }
         }
     }
 
@@ -219,43 +255,100 @@ impl Editor {
     }
 
     /// Cut the current selection to clipboard
+    ///
+    /// If no selection exists, cuts the entire current line (like VSCode/Rider/Zed).
     pub fn cut_selection(&mut self) {
-        self.copy_selection();
-
-        // Get deletions from state
-        let deletions: Vec<_> = {
+        // Check if any cursor has a selection
+        let has_selection = {
             let state = self.active_state();
             state
                 .cursors
                 .iter()
-                .filter_map(|(_, c)| c.selection_range())
-                .collect()
+                .any(|(_, cursor)| cursor.selection_range().is_some())
         };
 
-        // Get deleted text and cursor id
-        let state = self.active_state_mut();
-        let primary_id = state.cursors.primary_id();
-        let events: Vec<_> = deletions
-            .iter()
-            .rev()
-            .map(|range| {
-                let deleted_text = state.get_text_range(range.start, range.end);
-                Event::Delete {
-                    range: range.clone(),
-                    deleted_text,
-                    cursor_id: primary_id,
-                }
-            })
-            .collect();
+        // Copy first (this handles both selection and whole-line cases)
+        self.copy_selection();
 
-        // Apply events
-        for event in events {
-            self.active_event_log_mut().append(event.clone());
-            self.apply_event_to_active_buffer(&event);
-        }
+        if has_selection {
+            // Original behavior: delete selected text
+            let deletions: Vec<_> = {
+                let state = self.active_state();
+                state
+                    .cursors
+                    .iter()
+                    .filter_map(|(_, c)| c.selection_range())
+                    .collect()
+            };
 
-        if !deletions.is_empty() {
-            self.status_message = Some("Cut".to_string());
+            let state = self.active_state_mut();
+            let primary_id = state.cursors.primary_id();
+            let events: Vec<_> = deletions
+                .iter()
+                .rev()
+                .map(|range| {
+                    let deleted_text = state.get_text_range(range.start, range.end);
+                    Event::Delete {
+                        range: range.clone(),
+                        deleted_text,
+                        cursor_id: primary_id,
+                    }
+                })
+                .collect();
+
+            for event in events {
+                self.active_event_log_mut().append(event.clone());
+                self.apply_event_to_active_buffer(&event);
+            }
+
+            if !deletions.is_empty() {
+                self.status_message = Some("Cut".to_string());
+            }
+        } else {
+            // No selection: delete entire line(s) for each cursor
+            let estimated_line_length = 80;
+
+            // Collect line ranges for each cursor
+            let deletions: Vec<_> = {
+                let state = self.active_state_mut();
+                let positions: Vec<_> = state.cursors.iter().map(|(_, c)| c.position).collect();
+
+                positions
+                    .into_iter()
+                    .filter_map(|pos| {
+                        let mut iter = state.buffer.line_iterator(pos, estimated_line_length);
+                        let line_start = iter.current_position();
+                        iter.next().map(|(_start, content)| {
+                            let line_end = line_start + content.len();
+                            line_start..line_end
+                        })
+                    })
+                    .collect()
+            };
+
+            let state = self.active_state_mut();
+            let primary_id = state.cursors.primary_id();
+            let events: Vec<_> = deletions
+                .iter()
+                .rev()
+                .map(|range| {
+                    let deleted_text = state.get_text_range(range.start, range.end);
+                    Event::Delete {
+                        range: range.clone(),
+                        deleted_text,
+                        cursor_id: primary_id,
+                    }
+                })
+                .collect();
+
+            for event in events {
+                self.active_event_log_mut().append(event.clone());
+                self.apply_event_to_active_buffer(&event);
+            }
+
+            if !deletions.is_empty() {
+                self.status_message = Some("Cut line".to_string());
+            }
         }
     }
 
