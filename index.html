@@ -749,7 +749,25 @@
         /* Responsive */
         @media (max-width: 768px) {
             .nav-links {
+                gap: 16px;
+            }
+
+            .nav-links > a:not(.btn-github) {
                 display: none;
+            }
+
+            .btn-github {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+
+            .footer-links {
+                flex-wrap: wrap;
+                gap: 16px 24px;
+            }
+
+            .footer-links a {
+                font-size: 0.85rem;
             }
 
             .feature-section {
