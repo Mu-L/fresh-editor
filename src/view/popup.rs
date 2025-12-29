@@ -6,7 +6,9 @@ use ratatui::{
     Frame,
 };
 
-use super::markdown::{parse_markdown, wrap_styled_lines, wrap_text_lines, StyledLine};
+use super::markdown::{
+    parse_markdown_with_options, wrap_styled_lines, wrap_text_lines, StyledLine,
+};
 use super::ui::scrollbar::{render_scrollbar, ScrollbarColors, ScrollbarState};
 
 /// Clamp a rectangle to fit within bounds, preventing out-of-bounds rendering panics.
@@ -157,9 +159,12 @@ impl Popup {
         }
     }
 
-    /// Create a new popup with markdown content using theme colors
+    /// Create a new popup with markdown content using theme colors.
+    /// Preserves newlines to maintain formatting of LSP hover content.
     pub fn markdown(markdown_text: &str, theme: &crate::view::theme::Theme) -> Self {
-        let styled_lines = parse_markdown(markdown_text, theme);
+        // Use preserve_newlines=true for popup content (LSP hover, etc.)
+        // This keeps line breaks meaningful instead of converting to spaces
+        let styled_lines = parse_markdown_with_options(markdown_text, theme, true);
         Self {
             title: None,
             transient: false,

@@ -246,8 +246,21 @@ impl Default for StyledLine {
     }
 }
 
-/// Parse markdown text into styled lines for terminal rendering
+/// Parse markdown text into styled lines for terminal rendering.
+/// If `preserve_newlines` is true, soft breaks (single newlines) are treated as hard breaks.
+/// This is useful for LSP hover content where line breaks are semantically meaningful.
 pub fn parse_markdown(text: &str, theme: &crate::view::theme::Theme) -> Vec<StyledLine> {
+    parse_markdown_with_options(text, theme, false)
+}
+
+/// Parse markdown text with the option to preserve newlines.
+/// When `preserve_newlines` is true, single newlines are treated as line breaks
+/// instead of being converted to spaces (standard markdown soft break behavior).
+pub fn parse_markdown_with_options(
+    text: &str,
+    theme: &crate::view::theme::Theme,
+    preserve_newlines: bool,
+) -> Vec<StyledLine> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
 
@@ -370,9 +383,14 @@ pub fn parse_markdown(text: &str, theme: &crate::view::theme::Theme) -> Vec<Styl
                 }
             }
             Event::SoftBreak => {
-                // Soft break - add space
-                if let Some(line) = lines.last_mut() {
-                    line.push(" ".to_string(), Style::default());
+                if preserve_newlines {
+                    // Treat soft break as hard break (new line)
+                    lines.push(StyledLine::new());
+                } else {
+                    // Standard markdown: soft break becomes space
+                    if let Some(line) = lines.last_mut() {
+                        line.push(" ".to_string(), Style::default());
+                    }
                 }
             }
             Event::HardBreak => {

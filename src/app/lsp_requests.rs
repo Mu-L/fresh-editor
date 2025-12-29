@@ -536,7 +536,7 @@ impl Editor {
         self.pending_hover_request = None;
         self.lsp_status.clear();
 
-        if contents.is_empty() {
+        if contents.trim().is_empty() {
             self.set_status_message("No hover information available".to_string());
             self.hover_symbol_range = None;
             return;
