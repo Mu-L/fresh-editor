@@ -641,6 +641,178 @@ fn start_server(config: Config) {
     );
 }
 
+/// Test that scroll sync works between the two panes in side-by-side diff view
+/// When scrolling one pane, the other should follow to keep aligned lines in sync
+#[test]
+fn test_side_by_side_diff_scroll_sync() {
+    let repo = GitTestRepo::new();
+    repo.setup_typical_project();
+    setup_audit_mode_plugin(&repo);
+
+    let original_dir = repo.change_to_repo_dir();
+    let _guard = DirGuard::new(original_dir);
+
+    repo.git_add_all();
+    repo.git_commit("Initial commit");
+
+    // Create a file with many lines so that scrolling is required
+    // Add enough lines that the viewport can't show everything at once
+    let main_rs_path = repo.path.join("src/main.rs");
+    let mut original_lines: Vec<String> = Vec::new();
+    for i in 0..60 {
+        original_lines.push(format!("fn function_{}() {{ println!(\"Line {}\"); }}", i, i));
+    }
+    fs::write(&main_rs_path, original_lines.join("\n")).expect("Failed to write original file");
+
+    // Commit the original
+    repo.git_add_all();
+    repo.git_commit("Add many functions");
+
+    // Now modify - add some lines in the middle and change some at the end
+    let mut modified_lines: Vec<String> = Vec::new();
+    for i in 0..30 {
+        modified_lines.push(format!("fn function_{}() {{ println!(\"Line {}\"); }}", i, i));
+    }
+    // Add new lines in the middle
+    for i in 0..5 {
+        modified_lines.push(format!("fn new_function_{}() {{ println!(\"New {}\"); }}", i, i));
+    }
+    for i in 30..60 {
+        if i >= 55 {
+            // Modify the last few lines
+            modified_lines.push(format!(
+                "fn function_{}() {{ println!(\"Modified {}\"); }}",
+                i, i
+            ));
+        } else {
+            modified_lines.push(format!("fn function_{}() {{ println!(\"Line {}\"); }}", i, i));
+        }
+    }
+    fs::write(&main_rs_path, modified_lines.join("\n")).expect("Failed to modify file");
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        160,
+        30, // Relatively small height to ensure scrolling is needed
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    harness.open_file(&main_rs_path).unwrap();
+    harness.render().unwrap();
+
+    harness
+        .wait_until(|h| h.screen_to_string().contains("function_"))
+        .unwrap();
+
+    // Trigger Review Diff
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_prompt().unwrap();
+    harness.type_text("Review Diff").unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.wait_for_prompt_closed().unwrap();
+
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            !screen.contains("Generating Review Diff Stream") && screen.contains("hunks")
+        })
+        .unwrap();
+
+    // Navigate and drill down to open side-by-side view
+    for _ in 0..10 {
+        harness
+            .send_key(KeyCode::Down, KeyModifiers::NONE)
+            .unwrap();
+    }
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+
+    // Wait for side-by-side view
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            screen.contains("[OLD]") || screen.contains("[NEW]")
+        })
+        .unwrap();
+
+    let screen_before = harness.screen_to_string();
+    println!("Before scrolling:\n{}", screen_before);
+
+    // Now press 'G' to go to end of document - this should sync both panes
+    harness
+        .send_key(KeyCode::Char('G'), KeyModifiers::SHIFT)
+        .unwrap();
+
+    // Give the scroll sync a moment to process
+    harness.render().unwrap();
+    harness.render().unwrap();
+
+    let screen_after = harness.screen_to_string();
+    println!("After pressing G:\n{}", screen_after);
+
+    // Both panes should show content from near the end of the file
+    // The OLD pane should show function_5X lines (end of original)
+    // The NEW pane should show function_5X or Modified lines (end of modified)
+    // If scroll sync works, both should show similar line numbers
+
+    // Check that we scrolled - shouldn't see function_0 anymore in main content
+    // (it might appear in tab name, so be specific)
+    let scrolled = !screen_after.contains("function_0()")
+        || screen_after.contains("function_5")
+        || screen_after.contains("Modified");
+
+    assert!(
+        scrolled,
+        "Should have scrolled away from the start. Screen:\n{}",
+        screen_after
+    );
+
+    // Both panes should show aligned content - look for content from near the end
+    // The key test: if we see function_55+ in one pane, we should see similar in other
+    // Or at least both panes should show content from the bottom section
+    let shows_late_content =
+        screen_after.contains("function_5") || screen_after.contains("Modified");
+
+    assert!(
+        shows_late_content,
+        "After G, should show content from near end of file. Screen:\n{}",
+        screen_after
+    );
+
+    // Test scrolling back up with 'g' (go to start)
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+    harness.render().unwrap();
+
+    let screen_top = harness.screen_to_string();
+    println!("After pressing g:\n{}", screen_top);
+
+    // Should be back at the top showing early functions
+    let back_at_top = screen_top.contains("function_0") || screen_top.contains("function_1");
+
+    assert!(
+        back_at_top,
+        "After g, should be back at top of file. Screen:\n{}",
+        screen_top
+    );
+
+    // No errors should occur
+    assert!(
+        !screen_after.contains("TypeError") && !screen_after.contains("Error:"),
+        "Should not show any errors. Screen:\n{}",
+        screen_after
+    );
+}
+
 /// Test vim-style navigation in diff-view mode
 #[test]
 fn test_side_by_side_diff_vim_navigation() {

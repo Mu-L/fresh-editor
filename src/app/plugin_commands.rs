@@ -563,6 +563,8 @@ impl Editor {
                 view_state.viewport.top_byte = clamped_byte;
                 // Also reset view line offset to 0 as we are setting absolute byte position
                 view_state.viewport.top_view_line_offset = 0;
+                // Skip ensure_visible so the scroll position isn't undone during render
+                view_state.viewport.set_skip_ensure_visible();
 
                 tracing::debug!(
                     "SetSplitScroll: split {:?} scrolled to byte {}",

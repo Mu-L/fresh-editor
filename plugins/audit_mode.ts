@@ -641,10 +641,39 @@ globalThis.review_refresh = () => { refreshReviewData(); };
 
 let activeDiffViewState: { lSplit: number, rSplit: number } | null = null;
 
+/**
+ * Find line number for a given byte offset using binary search
+ */
+function findLineForByte(lineByteOffsets: number[], topByte: number): number {
+    let low = 0;
+    let high = lineByteOffsets.length - 1;
+    while (low < high) {
+        const mid = Math.floor((low + high + 1) / 2);
+        if (lineByteOffsets[mid] <= topByte) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return low;
+}
+
 globalThis.on_viewport_changed = (data: any) => {
-    if (!activeDiffViewState) return;
-    if (data.split_id === activeDiffViewState.lSplit) (editor as any).setSplitScroll(activeDiffViewState.rSplit, data.top_byte);
-    else if (data.split_id === activeDiffViewState.rSplit) (editor as any).setSplitScroll(activeDiffViewState.lSplit, data.top_byte);
+    if (!activeDiffViewState || !activeSideBySideState) return;
+
+    const { oldSplitId, newSplitId, oldLineByteOffsets, newLineByteOffsets } = activeSideBySideState;
+
+    if (data.split_id === oldSplitId && newLineByteOffsets.length > 0) {
+        // OLD pane scrolled - find which line it's on and sync NEW pane to same line
+        const lineNum = findLineForByte(oldLineByteOffsets, data.top_byte);
+        const targetByte = newLineByteOffsets[Math.min(lineNum, newLineByteOffsets.length - 1)];
+        (editor as any).setSplitScroll(newSplitId, targetByte);
+    } else if (data.split_id === newSplitId && oldLineByteOffsets.length > 0) {
+        // NEW pane scrolled - find which line it's on and sync OLD pane to same line
+        const lineNum = findLineForByte(newLineByteOffsets, data.top_byte);
+        const targetByte = oldLineByteOffsets[Math.min(lineNum, oldLineByteOffsets.length - 1)];
+        (editor as any).setSplitScroll(oldSplitId, targetByte);
+    }
 };
 
 /**
@@ -807,17 +836,19 @@ function computeFullFileAlignedDiff(oldContent: string, newContent: string, hunk
 
 /**
  * Generate virtual buffer content with diff highlighting for one side.
- * Returns entries and highlight tasks.
+ * Returns entries, highlight tasks, and line byte offsets for scroll sync.
  */
 function generateDiffPaneContent(
     alignedLines: AlignedLine[],
     side: 'old' | 'new'
-): { entries: TextPropertyEntry[], highlights: HighlightTask[] } {
+): { entries: TextPropertyEntry[], highlights: HighlightTask[], lineByteOffsets: number[] } {
     const entries: TextPropertyEntry[] = [];
     const highlights: HighlightTask[] = [];
+    const lineByteOffsets: number[] = [];
     let currentByte = 0;
 
     for (const line of alignedLines) {
+        lineByteOffsets.push(currentByte);
         const content = side === 'old' ? line.oldLine : line.newLine;
         const lineNum = side === 'old' ? line.oldLineNum : line.newLineNum;
         const isFiller = content === null;
@@ -948,7 +979,7 @@ function generateDiffPaneContent(
         currentByte += lineLen;
     }
 
-    return { entries, highlights };
+    return { entries, highlights, lineByteOffsets };
 }
 
 // State for active side-by-side diff view
@@ -958,6 +989,8 @@ interface SideBySideDiffState {
     oldBufferId: number;
     newBufferId: number;
     alignedLines: AlignedLine[];
+    oldLineByteOffsets: number[];
+    newLineByteOffsets: number[];
 }
 
 let activeSideBySideState: SideBySideDiffState | null = null;
@@ -1080,7 +1113,9 @@ globalThis.review_drill_down = async () => {
             newSplitId,
             oldBufferId,
             newBufferId,
-            alignedLines
+            alignedLines,
+            oldLineByteOffsets: oldPane.lineByteOffsets,
+            newLineByteOffsets: newPane.lineByteOffsets
         };
         activeDiffViewState = { lSplit: oldSplitId, rSplit: newSplitId };
         editor.on("viewport_changed", "on_viewport_changed");
@@ -1097,10 +1132,14 @@ editor.defineMode("diff-view", "special", [
     ["q", "close_buffer"],
     ["j", "move_down"],
     ["k", "move_up"],
-    ["g", "goto_start"],
-    ["G", "goto_end"],
-    ["Ctrl+d", "page_down"],
-    ["Ctrl+u", "page_up"],
+    ["g", "move_document_start"],
+    ["G", "move_document_end"],
+    ["Ctrl+d", "move_page_down"],
+    ["Ctrl+u", "move_page_up"],
+    ["Down", "move_down"],
+    ["Up", "move_up"],
+    ["PageDown", "move_page_down"],
+    ["PageUp", "move_page_up"],
 ], true);
 
 // --- Review Comment Actions ---
