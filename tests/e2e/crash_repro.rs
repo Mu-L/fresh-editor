@@ -315,3 +315,119 @@ fn test_issue_562_rapid_folder_deletion() {
     // Final render to ensure stability
     harness.render().unwrap();
 }
+
+/// Test issue #564 with Query Replace (Ctrl+Alt+R) - this is the exact scenario
+/// that causes the hang in the actual bug report.
+///
+/// The actual vgsales-new.csv file has:
+/// - 16,599 lines
+/// - 1,522 occurrences of "Wii"
+/// - File size ~1.3MB
+///
+/// Using Query Replace (Ctrl+Alt+R) and pressing 'a' to replace all causes
+/// excessive CPU usage (200%+) and memory growth (10GB+) leading to hang.
+#[test]
+#[ignore] // This test reproduces the actual hang - ignore for CI but run manually
+fn test_issue_564_query_replace_all_hang_large_file() {
+    let mut harness = EditorTestHarness::with_temp_project(80, 24).unwrap();
+    let project_root = harness.project_dir().unwrap();
+
+    // Create a file similar to the actual vgsales-new.csv
+    // With ~16000 lines and ~1500 occurrences of the pattern
+    let mut content = String::new();
+    for i in 0..16000 {
+        // Each line has approximately same structure as the CSV
+        // Some lines have "Wii" (about 10% to get ~1600 occurrences)
+        if i % 10 < 1 {
+            content.push_str(&format!(
+                "{},Wii Game {},Wii,2010,Action,Nintendo,{:.2},{:.2}\n",
+                i,
+                i,
+                (i as f64) * 0.01,
+                (i as f64) * 0.005
+            ));
+        } else {
+            content.push_str(&format!(
+                "{},Other Game {},PS4,2010,Action,Sony,{:.2},{:.2}\n",
+                i,
+                i,
+                (i as f64) * 0.01,
+                (i as f64) * 0.005
+            ));
+        }
+    }
+
+    let file_path = project_root.join("large-test.csv");
+    fs::write(&file_path, &content).unwrap();
+
+    // Open the file
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // Wait for file to load
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Game"))
+        .unwrap();
+
+    // Use Query Replace (Ctrl+Alt+R) - this is the exact command that causes the hang
+    harness
+        .send_key(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        )
+        .unwrap();
+    harness.render().unwrap();
+
+    // Should show "Query replace:" prompt
+    harness.assert_screen_contains("Query replace:");
+
+    // Type search term "Wii"
+    harness.type_text("Wii").unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Should show replacement prompt
+    harness.assert_screen_contains("Query replace 'Wii' with:");
+
+    // Type replacement "HELLO"
+    harness.type_text("HELLO").unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Should show interactive replace prompt
+    harness.assert_screen_contains("Replace?");
+
+    // Press 'a' to replace all - THIS IS WHERE THE HANG OCCURS
+    harness.type_text("a").unwrap();
+
+    // Wait for completion with timeout
+    // If this times out, the bug is reproduced
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(10);
+
+    loop {
+        harness.sleep(std::time::Duration::from_millis(100));
+        harness.render().unwrap();
+
+        let screen = harness.screen_to_string();
+
+        if screen.contains("Replaced") {
+            let elapsed = start.elapsed();
+            println!("Replace all completed in {:?}", elapsed);
+            break;
+        }
+
+        if start.elapsed() > timeout {
+            panic!(
+                "ISSUE #564 REPRODUCED: Query replace all operation timed out after {:?}.\n\
+                 This confirms the bug - the operation hangs with large files.\n\
+                 In manual testing, this causes 200%+ CPU usage and 10GB+ memory growth.",
+                timeout
+            );
+        }
+    }
+}
