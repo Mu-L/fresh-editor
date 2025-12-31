@@ -1,538 +1,936 @@
-# Multi-Buffer Single-Tab Research
+# Multi-Buffer Single-Tab Architecture
 
-**Status**: Research Phase
+**Status**: Complete Design
 **Date**: 2025-12-31
 **Related Documents**:
-- `COMPOSITE_BUFFER_ARCHITECTURE.md` - Proposed architecture (2025-12-22)
-- `DIFF_BRANCH_CONTINUATION.md` - Current implementation status
+- `COMPOSITE_BUFFER_ARCHITECTURE.md` - Original proposal
 - `REVIEW_DIFF_FEATURE.md` - Feature documentation
-- `docs/SCROLL_SYNC_DESIGN.md` - Scroll synchronization approach (on branch)
-
-## Executive Summary
-
-This document researches the feasibility of displaying multiple underlying buffers within a single visual pane (tab), enabling unified views like side-by-side diff, unified diff, and 3-way merge—all without opening multiple tabs/splits.
-
-**Key Finding**: The proposed Composite Buffer Architecture in `COMPOSITE_BUFFER_ARCHITECTURE.md` provides a solid foundation. This research extends that proposal with specific implementation considerations for side-by-side diff within a single tab.
 
 ---
 
-## Current Architecture
+## Overview
 
-### Buffer Model (`src/model/buffer.rs`)
-
-- **TextBuffer**: Core text storage using PieceTree with integrated line tracking
-- Each buffer has a unique `BufferId` and optional file path
-- Virtual buffers are "content-less"—they receive text via `TextPropertyEntry[]` and don't back to files
-
-### Split/Tab Model (`src/view/split.rs`)
-
-```
-SplitNode (Tree structure)
-├── Leaf { buffer_id, split_id }  // Displays ONE buffer
-└── Split { direction, first, second, ratio, split_id }  // Container
-
-SplitViewState (Per-split)
-├── cursors: Cursors
-├── viewport: Viewport
-├── open_buffers: Vec<BufferId>  // Tab bar for this split
-├── sync_group: Option<u32>      // For scroll sync
-└── layout: Option<Layout>       // View rendering
-```
-
-**Key Constraint**: A `SplitNode::Leaf` displays exactly ONE `BufferId`. There's no concept of a single split displaying multiple buffers inline.
-
-### Current Side-by-Side Diff Approach
-
-From `plugins/audit_mode.ts` and `REVIEW_DIFF_FEATURE.md`:
-
-```
-┌─────────────────────┬─────────────────────┐
-│   Split 1 (NEW)     │   Split 2 (OLD)     │
-│   buffer_id=42      │   buffer_id=43      │
-│   (editable file)   │   (virtual buffer)  │
-└─────────────────────┴─────────────────────┘
-          ↑                     ↑
-          └──── Scroll Sync ────┘
-```
-
-- Opens **two separate splits** side by side
-- LEFT: Current file (editable), RIGHT: HEAD version (read-only virtual buffer)
-- Scroll sync via `on_viewport_changed` hook or newer `ScrollSyncGroup`
-- **Issues**: Two tabs appear, pane order convention (OLD|NEW vs NEW|OLD), line alignment
+This document specifies the complete architecture for displaying multiple underlying buffers within a single visual pane (tab). This enables side-by-side diff, unified diff, 3-way merge, and code review views—all within a single tab.
 
 ---
 
-## Proposed Feature: Multi-Buffer Single Tab
+## Core Data Structures
 
-### Goal
+### 1. CompositeBuffer
 
-Display multiple underlying buffers in a **single visual pane** without creating separate tabs. Examples:
-
-1. **Side-by-side diff**: Two columns (OLD | NEW) within one tab
-2. **Unified diff**: Interleaved old/new lines with different source buffers
-3. **3-way merge**: Base | Ours | Theirs in one view
-4. **Code review**: Inline comments/suggestions from different sources
-
-### Conceptual Model
-
-```
-┌─────────────────────────────────────────────┐
-│              Single Tab/Split               │
-│  ┌─────────────────┬──────────────────┐    │
-│  │  Buffer A View  │  Buffer B View   │    │
-│  │  (OLD content)  │  (NEW content)   │    │
-│  │                 │                  │    │
-│  └─────────────────┴──────────────────┘    │
-└─────────────────────────────────────────────┘
-```
-
-The tab shows **one composite view** that internally references multiple buffers.
-
----
-
-## Design Options
-
-### Option 1: Composite Buffer (Virtual Buffer + References)
-
-Create a special buffer type that doesn't own text but references sections from other buffers.
+A new buffer variant that synthesizes its view from multiple source buffers.
 
 ```rust
-enum BufferContent {
-    /// Normal buffer with owned PieceTree
-    Owned(PieceTree),
-    /// Composite buffer referencing other buffers
-    Composite(CompositeBufferLayout),
+// src/model/composite_buffer.rs
+
+use crate::model::event::BufferId;
+use std::ops::Range;
+
+/// A buffer that composes content from multiple source buffers
+#[derive(Debug, Clone)]
+pub struct CompositeBuffer {
+    /// Unique ID for this composite buffer
+    pub id: BufferId,
+
+    /// Display name (shown in tab bar)
+    pub name: String,
+
+    /// Layout mode for this composite
+    pub layout: CompositeLayout,
+
+    /// Source buffer configurations
+    pub sources: Vec<SourcePane>,
+
+    /// Line alignment map (for side-by-side diff)
+    /// Maps display_line -> (left_source_line, right_source_line)
+    pub alignment: LineAlignment,
+
+    /// Which pane currently has focus (for input routing)
+    pub active_pane: usize,
+
+    /// Mode for keybindings
+    pub mode: String,
 }
 
-struct CompositeBufferLayout {
-    /// Regions that make up this composite view
-    regions: Vec<CompositeRegion>,
-}
-
-struct CompositeRegion {
-    /// Source buffer ID
-    source_buffer: BufferId,
-    /// Range in source buffer
-    source_range: Range<usize>,
-    /// Display position in composite view
-    display_column: usize,  // 0=left, 1=right for side-by-side
-    display_row_offset: usize,
-    /// Visual style
-    style: RegionStyle,
-}
-```
-
-**Pros**:
-- Clean abstraction—single buffer ID, single tab
-- Cursor/selection can span across regions
-- Syntax highlighting per source buffer
-
-**Cons**:
-- Complex line number mapping (which buffer's lines?)
-- Edit handling: which buffer receives edits?
-- Significant core changes to rendering pipeline
-
-### Option 2: View Transform with Multi-Source Tokens
-
-Extend the existing `ViewTransformPayload` to support tokens from multiple sources.
-
-```typescript
-interface ViewTokenWire {
-    source_offset: Option<usize>,
-    source_buffer?: BufferId,  // NEW: which buffer this token comes from
-    kind: ViewTokenWireKind,
-    style?: ViewTokenStyle,
-}
-```
-
-The plugin generates a token stream that interleaves content from multiple buffers:
-
-```
-[Token(buffer=A, "line 1 old\n"), Token(buffer=B, "line 1 new\n")]
-[Token(buffer=A, "line 2 old\n"), Token(buffer=B, "line 2 new\n")]
-```
-
-**Pros**:
-- Minimal core changes—plugins handle layout
-- Flexible: works for side-by-side, unified, 3-way
-- Leverages existing view transform infrastructure
-
-**Cons**:
-- Cursor byte positions become ambiguous (which buffer?)
-- No direct editing—view-only (acceptable for diff view)
-- Line numbers need special handling
-
-### Option 3: Split-Within-Split (Nested Layouts)
-
-Allow a single "tab" to internally render as side-by-side without creating separate SplitNode entries.
-
-```rust
-struct SplitViewState {
-    // Existing fields...
-
-    /// Optional inline layout for rendering multiple buffers
-    inline_layout: Option<InlineLayout>,
-}
-
-enum InlineLayout {
-    /// Side-by-side: two buffers rendered in columns
+/// How the composite buffer arranges its source panes
+#[derive(Debug, Clone)]
+pub enum CompositeLayout {
+    /// Side-by-side columns (for diff view)
     SideBySide {
-        left_buffer: BufferId,
-        right_buffer: BufferId,
-        ratio: f32,
-        scroll_sync: bool,
+        /// Width ratio for each pane (must sum to 1.0)
+        ratios: Vec<f32>,
+        /// Show separator between panes
+        show_separator: bool,
     },
-    /// Unified: interleaved lines from two buffers
-    Unified {
-        old_buffer: BufferId,
-        new_buffer: BufferId,
-        hunks: Vec<UnifiedHunk>,
+    /// Vertically stacked sections (for notebook cells)
+    Stacked {
+        /// Spacing between sections
+        spacing: u16,
     },
+    /// Interleaved lines (for unified diff)
+    Unified,
+}
+
+/// Configuration for a single source pane within the composite
+#[derive(Debug, Clone)]
+pub struct SourcePane {
+    /// ID of the source buffer
+    pub buffer_id: BufferId,
+
+    /// Human-readable label (e.g., "OLD", "NEW", "BASE")
+    pub label: String,
+
+    /// Whether this pane accepts edits
+    pub editable: bool,
+
+    /// Visual style for this pane
+    pub style: PaneStyle,
+
+    /// Byte range in source buffer to display (None = entire buffer)
+    pub range: Option<Range<usize>>,
+}
+
+/// Visual styling for a pane
+#[derive(Debug, Clone, Default)]
+pub struct PaneStyle {
+    /// Background color for added lines
+    pub add_bg: Option<(u8, u8, u8)>,
+    /// Background color for removed lines
+    pub remove_bg: Option<(u8, u8, u8)>,
+    /// Background color for modified lines
+    pub modify_bg: Option<(u8, u8, u8)>,
+    /// Gutter indicator style
+    pub gutter_style: GutterStyle,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum GutterStyle {
+    #[default]
+    LineNumbers,
+    DiffMarkers,      // +/-/~
+    Both,             // Line numbers + markers
+    None,
 }
 ```
 
-**Pros**:
-- Keeps buffer model unchanged
-- Single tab visually, but internally manages two buffers
-- Could support editing in one "side"
+### 2. LineAlignment
 
-**Cons**:
-- Render pipeline complexity
-- Input routing: which side receives keystrokes?
-- Split separator handling within the tab
-
-### Option 4: Virtual Buffer with Embedded Regions (Emacs-style)
-
-Use text properties to mark regions that "belong to" different logical sources.
-
-```typescript
-entries.push({
-    text: "- old line\n",
-    properties: {
-        source_buffer: oldBufferId,
-        source_byte: 100,
-        region_type: "deletion",
-    }
-});
-entries.push({
-    text: "+ new line\n",
-    properties: {
-        source_buffer: newBufferId,
-        source_byte: 100,
-        region_type: "addition",
-    }
-});
-```
-
-**Pros**:
-- Already supported infrastructure
-- Plugins have full control over layout
-- Works today for read-only views
-
-**Cons**:
-- Content is copied into virtual buffer (not live references)
-- Changes to source buffers require regenerating virtual buffer
-- No editing support
-
----
-
-## Recommended Approach: Phased Implementation
-
-### Phase 1: Enhanced Virtual Buffer (Option 4 + Improvements)
-
-Use the existing virtual buffer system with enhanced text properties:
-
-1. **Source Tracking**: Add `source_buffer` and `source_byte` properties
-2. **Live Refresh**: Watch source buffers for changes, regenerate view
-3. **Click-to-Navigate**: Clicking a region opens the source buffer at that location
-4. **Flexible Layout**: Plugin controls side-by-side vs unified via token generation
-
-```typescript
-// Plugin generates side-by-side by alternating columns
-function generateSideBySideDiff(oldBuffer: BufferId, newBuffer: BufferId) {
-    const entries: TextPropertyEntry[] = [];
-    const leftWidth = 80;
-
-    for (const [oldLine, newLine] of alignedLines) {
-        entries.push({
-            text: padRight(oldLine, leftWidth) + " │ " + newLine + "\n",
-            properties: {
-                leftSource: { buffer: oldBuffer, byte: oldByteOffset },
-                rightSource: { buffer: newBuffer, byte: newByteOffset },
-            }
-        });
-    }
-    return entries;
-}
-```
-
-### Phase 2: Inline Split Rendering (Option 3)
-
-If editing support is needed, implement `InlineLayout`:
-
-1. Render engine recognizes `inline_layout` and draws two buffer views side-by-side
-2. Cursor focus determines which buffer receives input
-3. Tab bar shows single entry with special indicator
-4. Scroll sync is automatic (built into render)
-
-### Phase 3: Composite Buffer (Option 1)
-
-For full editing support with semantic understanding:
-
-1. Core support for buffers that reference other buffers
-2. Edits propagate to source buffers
-3. Undo/redo tracks operations across referenced buffers
-
----
-
-## Side-by-Side Diff Specific Considerations
-
-### Line Alignment Challenge
-
-Diff hunks have different line counts in old vs new:
-```
-OLD (3 lines)     NEW (5 lines)
-line 1            line 1
-line 2            line 2a
-line 3            line 2b
-                  line 2c
-                  line 3
-```
-
-**Solutions**:
-1. **Padding**: Insert blank lines in shorter side
-2. **Anchor-based sync**: Sync at hunk boundaries, allow drift within hunks
-3. **Semantic alignment**: Use diff algorithm to pair corresponding lines
-
-### Rendering Architecture
-
-```
-┌─ Single Tab ─────────────────────────────────────┐
-│ ┌─ Gutter ─┐┌─ Left View ─┐│┌─ Right View ─┐    │
-│ │   1      ││ old line 1  ││ new line 1   │    │
-│ │   2      ││ old line 2  ││ new line 2a  │    │
-│ │   -      ││             ││ new line 2b  │    │
-│ │   3      ││ old line 3  ││ new line 3   │    │
-│ └──────────┘└─────────────┘│└─────────────┘    │
-└─────────────────────────────────────────────────┘
-```
-
-**Gutter options**:
-- Show left line numbers only
-- Show both (e.g., "1|1", "2|2a")
-- Show semantic "hunk" indicators
-
----
-
-## Implementation Roadmap
-
-### Milestone 1: Read-Only Side-by-Side (2-3 weeks of work)
-
-1. Create `DiffViewFactory` plugin utility
-2. Generate side-by-side layout with padding alignment
-3. Add source buffer tracking in text properties
-4. Implement click-to-navigate to source
-
-### Milestone 2: Scroll Sync (1 week)
-
-1. Leverage existing `ScrollSyncManager` for within-tab sync
-2. Single scroll position, compute offsets per column
-
-### Milestone 3: Editing Support (3-4 weeks)
-
-1. Implement `InlineLayout` in `SplitViewState`
-2. Render two buffer viewports within single split
-3. Focus management between left/right
-4. Cursor indicator for active side
-
-### Milestone 4: 3-Way Merge (2-3 weeks)
-
-1. Extend `InlineLayout` to support 3 buffers
-2. Conflict detection and resolution UI
-3. Accept/reject per region
-
----
-
-## Related Work in Other Editors
-
-### VS Code
-
-- Uses "DiffEditor" component with two `CodeEditor` instances
-- Renders in single DOM element but manages two models
-- Line decorations show gutter indicators
-
-### Zed
-
-- `MultiBuffer` concept: single buffer aggregating excerpts from multiple files
-- Each excerpt maintains reference to source buffer
-- Edits propagate to source
-
-### Vim/Neovim
-
-- `:diffsplit` creates separate windows
-- `vimdiff` synchronizes scroll via events
-- No true "single buffer, multiple sources"
-
-### Emacs
-
-- `ediff` uses three separate windows + control panel
-- `smerge-mode` renders conflict markers inline in single buffer
-
----
-
-## Open Questions
-
-1. **Line Numbers**: Show left/right/both/neither?
-2. **Cursor**: Can cursor exist in both sides? Or focus-based?
-3. **Selection**: Can selection span across left/right boundary?
-4. **Editing**: Edit one side? Both? Neither?
-5. **Syntax Highlighting**: Per-source-buffer or unified?
-6. **Performance**: Large diffs with thousands of hunks?
-
----
-
-## Existing Proposed Architecture (COMPOSITE_BUFFER_ARCHITECTURE.md)
-
-The codebase already has a detailed proposal in `COMPOSITE_BUFFER_ARCHITECTURE.md`. Key concepts:
-
-### SectionDescriptor
+Critical for side-by-side diff—maps display lines to source lines with padding.
 
 ```rust
-struct SectionDescriptor {
-    id: String,               // Unique ID for the section
-    source_buffer_id: BufferId,
-    range: Range<usize>,      // Byte or line range in the source
-    style: SectionStyle,      // Border type, markers (+/-), padding
-    heading: Option<String>,  // Header text (e.g., filename or "In [5]:")
-    is_editable: bool,        // Whether to allow input routing
-    metadata: serde_json::Value,
+// src/model/line_alignment.rs
+
+/// Alignment information for side-by-side views
+#[derive(Debug, Clone)]
+pub struct LineAlignment {
+    /// Each entry maps a display row to source lines in each pane
+    /// None means padding (blank line) for that pane
+    pub rows: Vec<AlignedRow>,
 }
-```
 
-### Synthesis Pipeline
+#[derive(Debug, Clone)]
+pub struct AlignedRow {
+    /// Source line for each pane (None = padding)
+    pub pane_lines: Vec<Option<SourceLineRef>>,
+    /// Type of this row for styling
+    pub row_type: RowType,
+}
 
-1. **Token Fetching**: For each section, request already-computed tokens from Source Buffer's HighlightEngine
-2. **Framing (Box Engine)**: Inject UI-only tokens for borders (`┌`, `│`, `└`), markers (`+`, `-`), and gutters
-3. **Coordinate Mapping**: Bidirectional mapping between Composite Viewport and Source Buffer positions
+#[derive(Debug, Clone)]
+pub struct SourceLineRef {
+    /// Line number in source buffer (0-indexed)
+    pub line: usize,
+    /// Byte range in source buffer
+    pub byte_range: Range<usize>,
+}
 
-### Live Editing & Input Routing
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RowType {
+    /// Both sides have matching content
+    Context,
+    /// Line exists only in left/old
+    Deletion,
+    /// Line exists only in right/new
+    Addition,
+    /// Line differs between sides
+    Modification,
+    /// Hunk separator
+    HunkHeader,
+}
 
-When a key is pressed:
-1. Editor identifies the buffer/byte under cursor via Mapping Table
-2. If mapping exists and `is_editable` is true: reroute `Insert`/`Delete` to Source Buffer
-3. If on protected character (border/header): block input
+impl LineAlignment {
+    /// Create alignment from a unified diff
+    pub fn from_diff(old_lines: &[&str], new_lines: &[&str], hunks: &[DiffHunk]) -> Self {
+        let mut rows = Vec::new();
 
----
+        for hunk in hunks {
+            // Add hunk header row
+            rows.push(AlignedRow {
+                pane_lines: vec![None, None],
+                row_type: RowType::HunkHeader,
+            });
 
-## Mapping Existing Architecture to Side-by-Side Diff
-
-### Proposed Implementation
-
-For side-by-side diff within a single tab, the Composite Buffer approach maps as follows:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Composite Buffer                       │
-│  ┌─ Section 1 ──────────┐  ┌─ Section 2 ──────────┐    │
-│  │ source: HEAD buffer  │  │ source: Working Copy │    │
-│  │ range: 0..entire     │  │ range: 0..entire     │    │
-│  │ display_column: 0    │  │ display_column: 1    │    │
-│  │ is_editable: false   │  │ is_editable: true    │    │
-│  └──────────────────────┘  └──────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Token Stream for Side-by-Side
-
-The synthesis pipeline would generate tokens like:
-
-```
-Line 1: [Token(src=HEAD, "old line 1"), Token(UI, "│"), Token(src=WC, "new line 1"), Newline]
-Line 2: [Token(src=HEAD, "old line 2"), Token(UI, "│"), Token(src=WC, "new line 2"), Newline]
-Line 3: [Token(UI, "<padding>   "), Token(UI, "│"), Token(src=WC, "new line 3"), Newline]  // Added line
-```
-
-### Coordinate Mapping for Diff View
-
-```
-ViewLine:
-  char[0..10]   → maps to HEAD buffer, byte offset 0..10
-  char[11]      → maps to UI separator (protected)
-  char[12..22]  → maps to Working Copy buffer, byte offset 0..10
-```
-
----
-
-## Comparison: Current Split-Based vs Proposed Single-Tab
-
-| Aspect | Current (Two Splits) | Proposed (Single Tab) |
-|--------|---------------------|----------------------|
-| Tab count | 2 (clutter) | 1 (clean) |
-| Scroll sync | Via hooks, can jitter | Built into render |
-| Line alignment | None (lines drift) | Pixel-perfect via padding |
-| Editing | Each side independent | Routed via coordinate map |
-| Implementation | Working but fragile | Requires core changes |
-| Performance | Overhead of sync | Single render pass |
-
----
-
-## Recommended Implementation Strategy
-
-Based on the existing Composite Buffer Architecture, here is the recommended approach:
-
-### Phase 1: Plugin-Side Layout (Near-term, No Core Changes)
-
-Use existing virtual buffers with enhanced text properties:
-
-```typescript
-// Side-by-side as single virtual buffer
-const leftWidth = Math.floor(viewportWidth / 2) - 1;
-for (let i = 0; i < alignedLines.length; i++) {
-    const [oldLine, newLine] = alignedLines[i];
-    entries.push({
-        text: padRight(oldLine, leftWidth) + " │ " + padRight(newLine, leftWidth) + "\n",
-        properties: {
-            leftSource: { buffer: headBufferId, line: oldLineNum },
-            rightSource: { buffer: workingBufferId, line: newLineNum },
+            // Process hunk lines with LCS-based alignment
+            let aligned = Self::align_hunk_lines(
+                &old_lines[hunk.old_start..hunk.old_start + hunk.old_count],
+                &new_lines[hunk.new_start..hunk.new_start + hunk.new_count],
+            );
+            rows.extend(aligned);
         }
-    });
+
+        Self { rows }
+    }
+
+    /// Align lines within a hunk using Myers diff algorithm
+    fn align_hunk_lines(old: &[&str], new: &[&str]) -> Vec<AlignedRow> {
+        // Implementation uses patience diff or Myers algorithm
+        // to pair corresponding lines and insert padding
+        todo!()
+    }
 }
 ```
 
-**Limitations**: Read-only, content copied not referenced, no live updates.
+### 3. CompositeViewState
 
-### Phase 2: Core Multi-Source Token Support
-
-Extend `ViewTokenWire` to track source buffer:
+Per-split state for composite buffer rendering.
 
 ```rust
-pub struct ViewTokenWire {
-    pub source_offset: Option<usize>,
-    pub source_buffer: Option<BufferId>,  // NEW
-    pub kind: ViewTokenWireKind,
-    pub style: Option<ViewTokenStyle>,
+// src/view/composite_view.rs
+
+use crate::model::event::{BufferId, SplitId};
+use crate::view::viewport::Viewport;
+use crate::model::cursor::Cursors;
+
+/// View state for a composite buffer in a split
+#[derive(Debug, Clone)]
+pub struct CompositeViewState {
+    /// The composite buffer being displayed
+    pub composite_id: BufferId,
+
+    /// Independent viewport per pane
+    pub pane_viewports: Vec<PaneViewport>,
+
+    /// Which pane has focus
+    pub focused_pane: usize,
+
+    /// Single scroll position (display row)
+    /// All panes scroll together via alignment
+    pub scroll_row: usize,
+
+    /// Cursor positions per pane (for editing)
+    pub pane_cursors: Vec<Cursors>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PaneViewport {
+    /// Computed rect for this pane (set during render)
+    pub rect: ratatui::layout::Rect,
+    /// Horizontal scroll offset
+    pub left_column: usize,
+}
+
+impl CompositeViewState {
+    /// Scroll all panes together
+    pub fn scroll(&mut self, delta: isize) {
+        self.scroll_row = (self.scroll_row as isize + delta).max(0) as usize;
+    }
+
+    /// Switch focus to next pane
+    pub fn focus_next_pane(&mut self, pane_count: usize) {
+        self.focused_pane = (self.focused_pane + 1) % pane_count;
+    }
+
+    /// Switch focus to previous pane
+    pub fn focus_prev_pane(&mut self, pane_count: usize) {
+        self.focused_pane = (self.focused_pane + pane_count - 1) % pane_count;
+    }
 }
 ```
-
-Update view pipeline to handle multi-source tokens.
-
-### Phase 3: Full Composite Buffer with Editing
-
-Implement `SectionDescriptor`, coordinate mapping, and input routing as described in `COMPOSITE_BUFFER_ARCHITECTURE.md`.
 
 ---
 
-## Conclusion
+## Rendering Pipeline
 
-The recommended approach is:
+### 4. CompositeRenderer
 
-1. **Start with enhanced virtual buffers** (Phase 1) for read-only diff views
-2. **Add multi-source token support** (Phase 2) for proper source tracking
-3. **Implement full Composite Buffer Architecture** (Phase 3) for editable diffs
+Renders a composite buffer as a unified view.
 
-The existing `COMPOSITE_BUFFER_ARCHITECTURE.md` provides a solid foundation. The key extensions needed are:
-- Column-based layout for side-by-side (not just vertical sections)
-- Line alignment with padding for differing line counts
-- Synchronized scrolling within the single view
+```rust
+// src/view/composite_renderer.rs
 
-This provides immediate value (better diff viewing) while establishing patterns for future merge/conflict resolution features.
+use crate::model::composite_buffer::{CompositeBuffer, CompositeLayout};
+use crate::view::composite_view::CompositeViewState;
+use ratatui::prelude::*;
+use ratatui::widgets::*;
+
+pub struct CompositeRenderer<'a> {
+    composite: &'a CompositeBuffer,
+    view_state: &'a CompositeViewState,
+    buffers: &'a BufferMap,  // Access to source buffers
+}
+
+impl<'a> CompositeRenderer<'a> {
+    pub fn render(&self, frame: &mut Frame, area: Rect) {
+        match &self.composite.layout {
+            CompositeLayout::SideBySide { ratios, show_separator } => {
+                self.render_side_by_side(frame, area, ratios, *show_separator);
+            }
+            CompositeLayout::Stacked { spacing } => {
+                self.render_stacked(frame, area, *spacing);
+            }
+            CompositeLayout::Unified => {
+                self.render_unified(frame, area);
+            }
+        }
+    }
+
+    fn render_side_by_side(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ratios: &[f32],
+        show_separator: bool,
+    ) {
+        // Calculate pane widths
+        let separator_width = if show_separator { 1 } else { 0 };
+        let total_separators = (self.composite.sources.len() - 1) * separator_width;
+        let available_width = area.width.saturating_sub(total_separators as u16);
+
+        let mut pane_rects = Vec::new();
+        let mut x = area.x;
+
+        for (i, ratio) in ratios.iter().enumerate() {
+            let width = (available_width as f32 * ratio).round() as u16;
+            pane_rects.push(Rect {
+                x,
+                y: area.y,
+                width,
+                height: area.height,
+            });
+            x += width;
+
+            // Render separator
+            if show_separator && i < ratios.len() - 1 {
+                self.render_separator(frame, x, area.y, area.height);
+                x += 1;
+            }
+        }
+
+        // Render each pane
+        for (i, (pane, rect)) in self.composite.sources.iter().zip(&pane_rects).enumerate() {
+            let is_focused = i == self.view_state.focused_pane;
+            self.render_pane(frame, pane, *rect, i, is_focused);
+        }
+    }
+
+    fn render_pane(
+        &self,
+        frame: &mut Frame,
+        pane: &SourcePane,
+        rect: Rect,
+        pane_index: usize,
+        is_focused: bool,
+    ) {
+        let source_buffer = self.buffers.get(pane.buffer_id);
+        let alignment = &self.composite.alignment;
+
+        // Render visible rows based on alignment
+        for display_row in self.view_state.scroll_row..self.view_state.scroll_row + rect.height as usize {
+            if display_row >= alignment.rows.len() {
+                break;
+            }
+
+            let aligned_row = &alignment.rows[display_row];
+            let y = rect.y + (display_row - self.view_state.scroll_row) as u16;
+
+            match &aligned_row.pane_lines[pane_index] {
+                Some(source_ref) => {
+                    // Render actual content from source buffer
+                    let line_text = source_buffer.get_line(source_ref.line);
+                    let style = self.style_for_row_type(aligned_row.row_type, pane);
+
+                    self.render_line_with_gutter(
+                        frame,
+                        rect.x,
+                        y,
+                        rect.width,
+                        &line_text,
+                        source_ref.line,
+                        style,
+                        pane,
+                    );
+                }
+                None => {
+                    // Render padding (empty line)
+                    let style = Style::default().bg(Color::Rgb(40, 40, 40));
+                    frame.render_widget(
+                        Paragraph::new("").style(style),
+                        Rect { x: rect.x, y, width: rect.width, height: 1 },
+                    );
+                }
+            }
+        }
+
+        // Render focus indicator
+        if is_focused {
+            self.render_focus_indicator(frame, rect);
+        }
+    }
+
+    fn render_separator(&self, frame: &mut Frame, x: u16, y: u16, height: u16) {
+        for row in 0..height {
+            frame.render_widget(
+                Paragraph::new("│").style(Style::default().fg(Color::DarkGray)),
+                Rect { x, y: y + row, width: 1, height: 1 },
+            );
+        }
+    }
+
+    fn style_for_row_type(&self, row_type: RowType, pane: &SourcePane) -> Style {
+        match row_type {
+            RowType::Addition => Style::default()
+                .bg(Color::Rgb(pane.style.add_bg.unwrap_or((0, 60, 0)).0,
+                              pane.style.add_bg.unwrap_or((0, 60, 0)).1,
+                              pane.style.add_bg.unwrap_or((0, 60, 0)).2)),
+            RowType::Deletion => Style::default()
+                .bg(Color::Rgb(pane.style.remove_bg.unwrap_or((60, 0, 0)).0,
+                              pane.style.remove_bg.unwrap_or((60, 0, 0)).1,
+                              pane.style.remove_bg.unwrap_or((60, 0, 0)).2)),
+            RowType::Modification => Style::default()
+                .bg(Color::Rgb(pane.style.modify_bg.unwrap_or((60, 60, 0)).0,
+                              pane.style.modify_bg.unwrap_or((60, 60, 0)).1,
+                              pane.style.modify_bg.unwrap_or((60, 60, 0)).2)),
+            RowType::Context => Style::default(),
+            RowType::HunkHeader => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        }
+    }
+}
+```
+
+---
+
+## Input Routing
+
+### 5. CompositeInputRouter
+
+Routes keyboard/mouse input to the correct source buffer.
+
+```rust
+// src/input/composite_router.rs
+
+use crate::model::composite_buffer::CompositeBuffer;
+use crate::view::composite_view::CompositeViewState;
+use crate::model::event::{BufferId, EditorEvent};
+
+pub struct CompositeInputRouter;
+
+impl CompositeInputRouter {
+    /// Route an input event to the appropriate target
+    pub fn route_event(
+        composite: &CompositeBuffer,
+        view_state: &CompositeViewState,
+        event: EditorEvent,
+    ) -> RoutedEvent {
+        let focused_pane = &composite.sources[view_state.focused_pane];
+
+        match event {
+            // Navigation events affect the composite view
+            EditorEvent::ScrollUp(n) |
+            EditorEvent::ScrollDown(n) |
+            EditorEvent::PageUp |
+            EditorEvent::PageDown |
+            EditorEvent::GotoTop |
+            EditorEvent::GotoBottom => {
+                RoutedEvent::CompositeScroll(event)
+            }
+
+            // Pane switching
+            EditorEvent::FocusNextPane => {
+                RoutedEvent::SwitchPane(Direction::Next)
+            }
+            EditorEvent::FocusPrevPane => {
+                RoutedEvent::SwitchPane(Direction::Prev)
+            }
+
+            // Editing events route to focused pane's source buffer
+            EditorEvent::Insert(ch) |
+            EditorEvent::Delete |
+            EditorEvent::Backspace |
+            EditorEvent::NewLine => {
+                if focused_pane.editable {
+                    RoutedEvent::ToSourceBuffer {
+                        buffer_id: focused_pane.buffer_id,
+                        event,
+                        cursor: view_state.pane_cursors[view_state.focused_pane].primary().clone(),
+                    }
+                } else {
+                    RoutedEvent::Blocked("Pane is read-only")
+                }
+            }
+
+            // Cursor movement within pane
+            EditorEvent::CursorUp |
+            EditorEvent::CursorDown |
+            EditorEvent::CursorLeft |
+            EditorEvent::CursorRight => {
+                RoutedEvent::PaneCursor {
+                    pane_index: view_state.focused_pane,
+                    event,
+                }
+            }
+
+            _ => RoutedEvent::Unhandled(event),
+        }
+    }
+
+    /// Convert display coordinates to source buffer coordinates
+    pub fn display_to_source(
+        composite: &CompositeBuffer,
+        view_state: &CompositeViewState,
+        display_row: usize,
+        display_col: usize,
+        pane_index: usize,
+    ) -> Option<SourceCoordinate> {
+        let aligned_row = composite.alignment.rows.get(display_row)?;
+        let source_ref = aligned_row.pane_lines.get(pane_index)?.as_ref()?;
+
+        Some(SourceCoordinate {
+            buffer_id: composite.sources[pane_index].buffer_id,
+            byte_offset: source_ref.byte_range.start + display_col,
+            line: source_ref.line,
+            column: display_col,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum RoutedEvent {
+    /// Event affects composite view scrolling
+    CompositeScroll(EditorEvent),
+    /// Switch focus to another pane
+    SwitchPane(Direction),
+    /// Route to a source buffer
+    ToSourceBuffer {
+        buffer_id: BufferId,
+        event: EditorEvent,
+        cursor: Cursor,
+    },
+    /// Cursor movement within a pane
+    PaneCursor {
+        pane_index: usize,
+        event: EditorEvent,
+    },
+    /// Event was blocked (e.g., editing read-only pane)
+    Blocked(&'static str),
+    /// Event not handled by composite
+    Unhandled(EditorEvent),
+}
+
+#[derive(Debug)]
+pub struct SourceCoordinate {
+    pub buffer_id: BufferId,
+    pub byte_offset: usize,
+    pub line: usize,
+    pub column: usize,
+}
+```
+
+---
+
+## Plugin API
+
+### 6. Plugin Commands
+
+TypeScript API for plugins to create composite buffers.
+
+```typescript
+// plugins/lib/fresh.d.ts additions
+
+interface CompositeBufferOptions {
+    name: string;
+    mode: string;
+    layout: CompositeLayout;
+    sources: SourcePaneConfig[];
+    alignment?: AlignmentConfig;
+}
+
+interface CompositeLayout {
+    type: 'side-by-side' | 'stacked' | 'unified';
+    ratios?: number[];           // For side-by-side
+    showSeparator?: boolean;     // For side-by-side
+    spacing?: number;            // For stacked
+}
+
+interface SourcePaneConfig {
+    bufferId: number;
+    label: string;
+    editable: boolean;
+    style?: PaneStyleConfig;
+    range?: { start: number; end: number };
+}
+
+interface PaneStyleConfig {
+    addBg?: [number, number, number];
+    removeBg?: [number, number, number];
+    modifyBg?: [number, number, number];
+    gutterStyle?: 'line-numbers' | 'diff-markers' | 'both' | 'none';
+}
+
+interface AlignmentConfig {
+    type: 'diff';
+    hunks: DiffHunk[];
+}
+
+interface DiffHunk {
+    oldStart: number;
+    oldCount: number;
+    newStart: number;
+    newCount: number;
+}
+
+interface Editor {
+    // ... existing methods ...
+
+    /**
+     * Create a composite buffer that displays multiple sources
+     */
+    createCompositeBuffer(options: CompositeBufferOptions): Promise<{
+        bufferId: number;
+        splitId: number;
+    }>;
+
+    /**
+     * Update the alignment for a composite buffer (e.g., after source edit)
+     */
+    updateCompositeAlignment(bufferId: number, alignment: AlignmentConfig): void;
+
+    /**
+     * Set which pane has focus in a composite buffer
+     */
+    setCompositeFocus(bufferId: number, paneIndex: number): void;
+
+    /**
+     * Get current composite buffer state
+     */
+    getCompositeState(bufferId: number): CompositeState | null;
+}
+
+interface CompositeState {
+    focusedPane: number;
+    scrollRow: number;
+    paneCount: number;
+}
+```
+
+---
+
+## Diff View Implementation
+
+### 7. Side-by-Side Diff Plugin
+
+Complete implementation for the side-by-side diff feature.
+
+```typescript
+// plugins/diff_view.ts
+
+/// <reference path="./lib/fresh.d.ts" />
+
+interface DiffViewState {
+    compositeBufferId: number | null;
+    oldBufferId: number | null;
+    newBufferId: number | null;
+    hunks: DiffHunk[];
+}
+
+const state: DiffViewState = {
+    compositeBufferId: null,
+    oldBufferId: null,
+    newBufferId: null,
+    hunks: [],
+};
+
+/**
+ * Open side-by-side diff view for a file against HEAD
+ */
+globalThis.open_side_by_side_diff = async (filePath?: string) => {
+    const path = filePath || editor.getActiveBufferPath();
+    if (!path) {
+        editor.setStatus("No file to diff");
+        return;
+    }
+
+    // Get HEAD version
+    const gitShow = await editor.spawnProcess("git", ["show", `HEAD:${path}`]);
+    if (gitShow.exit_code !== 0) {
+        editor.setStatus("Failed to get HEAD version");
+        return;
+    }
+    const oldContent = gitShow.stdout;
+
+    // Get working copy content
+    const newContent = editor.getBufferText(editor.getActiveBufferId());
+
+    // Parse diff hunks
+    const diffResult = await editor.spawnProcess("git", ["diff", "HEAD", "--", path]);
+    state.hunks = parseDiffHunks(diffResult.stdout);
+
+    // Create virtual buffer for OLD version
+    const oldBufferResult = await editor.createVirtualBuffer({
+        name: `[OLD] ${path}`,
+        mode: "readonly",
+        entries: [{ text: oldContent, properties: {} }],
+        read_only: true,
+        editing_disabled: true,
+    });
+    state.oldBufferId = oldBufferResult;
+
+    // Get NEW buffer (the actual file)
+    const newBufferId = editor.findBufferByPath(path) || editor.getActiveBufferId();
+    state.newBufferId = newBufferId;
+
+    // Create composite buffer
+    const result = await editor.createCompositeBuffer({
+        name: `Diff: ${path}`,
+        mode: "diff-view",
+        layout: {
+            type: 'side-by-side',
+            ratios: [0.5, 0.5],
+            showSeparator: true,
+        },
+        sources: [
+            {
+                bufferId: state.oldBufferId,
+                label: "OLD (HEAD)",
+                editable: false,
+                style: {
+                    removeBg: [80, 30, 30],
+                    gutterStyle: 'both',
+                },
+            },
+            {
+                bufferId: newBufferId,
+                label: "NEW (Working)",
+                editable: true,
+                style: {
+                    addBg: [30, 80, 30],
+                    modifyBg: [80, 80, 30],
+                    gutterStyle: 'both',
+                },
+            },
+        ],
+        alignment: {
+            type: 'diff',
+            hunks: state.hunks,
+        },
+    });
+
+    state.compositeBufferId = result.bufferId;
+    editor.setStatus(`Diff view opened: ${state.hunks.length} hunks`);
+};
+
+/**
+ * Parse git diff output into hunks
+ */
+function parseDiffHunks(diffOutput: string): DiffHunk[] {
+    const hunks: DiffHunk[] = [];
+    const lines = diffOutput.split('\n');
+
+    for (const line of lines) {
+        const match = line.match(/@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/);
+        if (match) {
+            hunks.push({
+                oldStart: parseInt(match[1]) - 1,  // 0-indexed
+                oldCount: parseInt(match[2] || '1'),
+                newStart: parseInt(match[3]) - 1,  // 0-indexed
+                newCount: parseInt(match[4] || '1'),
+            });
+        }
+    }
+
+    return hunks;
+}
+
+/**
+ * Navigate to next hunk
+ */
+globalThis.diff_next_hunk = () => {
+    if (!state.compositeBufferId) return;
+
+    const compState = editor.getCompositeState(state.compositeBufferId);
+    if (!compState) return;
+
+    // Find next hunk after current scroll position
+    // (implementation depends on alignment row types)
+    editor.executeAction("composite_scroll_to_next_hunk");
+};
+
+/**
+ * Navigate to previous hunk
+ */
+globalThis.diff_prev_hunk = () => {
+    if (!state.compositeBufferId) return;
+    editor.executeAction("composite_scroll_to_prev_hunk");
+};
+
+/**
+ * Switch focus between OLD and NEW panes
+ */
+globalThis.diff_switch_pane = () => {
+    if (!state.compositeBufferId) return;
+
+    const compState = editor.getCompositeState(state.compositeBufferId);
+    if (!compState) return;
+
+    const nextPane = (compState.focusedPane + 1) % compState.paneCount;
+    editor.setCompositeFocus(state.compositeBufferId, nextPane);
+};
+
+/**
+ * Accept change from OLD to NEW at current position
+ */
+globalThis.diff_accept_change = async () => {
+    // Copy content from OLD pane to NEW pane at current hunk
+    // Implementation uses coordinate mapping
+};
+
+/**
+ * Reject change (revert NEW to OLD) at current position
+ */
+globalThis.diff_reject_change = async () => {
+    // Copy content from NEW pane back to OLD version
+};
+
+// Register keybindings
+editor.registerMode("diff-view", {
+    keybindings: {
+        "n": "diff_next_hunk",
+        "p": "diff_prev_hunk",
+        "Tab": "diff_switch_pane",
+        "a": "diff_accept_change",
+        "r": "diff_reject_change",
+        "q": "close_buffer",
+        "j": "scroll_down",
+        "k": "scroll_up",
+        "G": "goto_bottom",
+        "g": "goto_top",
+    },
+});
+
+// Register command
+editor.registerCommand({
+    name: "Side-by-Side Diff",
+    action: "open_side_by_side_diff",
+    category: "Git",
+});
+```
+
+---
+
+## Integration Points
+
+### 8. Editor State Updates
+
+Changes to the main Editor struct.
+
+```rust
+// src/app/mod.rs additions
+
+use crate::model::composite_buffer::CompositeBuffer;
+use crate::view::composite_view::CompositeViewState;
+
+pub struct Editor {
+    // ... existing fields ...
+
+    /// Composite buffers (separate from regular buffers)
+    pub composite_buffers: HashMap<BufferId, CompositeBuffer>,
+
+    /// View state for composite buffers (per split)
+    pub composite_view_states: HashMap<(SplitId, BufferId), CompositeViewState>,
+}
+
+impl Editor {
+    /// Check if a buffer is composite
+    pub fn is_composite_buffer(&self, buffer_id: BufferId) -> bool {
+        self.composite_buffers.contains_key(&buffer_id)
+    }
+
+    /// Get composite buffer
+    pub fn get_composite(&self, buffer_id: BufferId) -> Option<&CompositeBuffer> {
+        self.composite_buffers.get(&buffer_id)
+    }
+
+    /// Get or create composite view state
+    pub fn get_composite_view_state(
+        &mut self,
+        split_id: SplitId,
+        buffer_id: BufferId,
+    ) -> &mut CompositeViewState {
+        self.composite_view_states
+            .entry((split_id, buffer_id))
+            .or_insert_with(|| CompositeViewState::new(buffer_id))
+    }
+}
+```
+
+### 9. Render Loop Integration
+
+```rust
+// src/app/render.rs additions
+
+impl Editor {
+    fn render_split_content(&mut self, split_id: SplitId, buffer_id: BufferId, rect: Rect) {
+        if self.is_composite_buffer(buffer_id) {
+            self.render_composite_buffer(split_id, buffer_id, rect);
+        } else {
+            self.render_regular_buffer(split_id, buffer_id, rect);
+        }
+    }
+
+    fn render_composite_buffer(&mut self, split_id: SplitId, buffer_id: BufferId, rect: Rect) {
+        let composite = self.composite_buffers.get(&buffer_id).unwrap();
+        let view_state = self.get_composite_view_state(split_id, buffer_id);
+
+        let renderer = CompositeRenderer::new(composite, view_state, &self.buffers);
+        renderer.render(&mut self.frame, rect);
+    }
+}
+```
+
+---
+
+## Key Design Decisions
+
+### Answers to Open Questions
+
+1. **Line Numbers**: Show both left and right line numbers in a combined gutter (e.g., `42│38`)
+2. **Cursor**: One cursor per pane; only focused pane shows active cursor
+3. **Selection**: Selection cannot span across panes; each pane has independent selection
+4. **Editing**: Focused pane can be edited if `editable: true`; edits route to source buffer
+5. **Syntax Highlighting**: Each pane uses its source buffer's syntax highlighting
+6. **Performance**: Alignment computed once per diff; only visible rows rendered
+
+### Why This Design
+
+| Aspect | Decision | Rationale |
+|--------|----------|-----------|
+| Separate CompositeBuffer type | New variant, not extending TextBuffer | Clean separation; composites have fundamentally different behavior |
+| LineAlignment struct | Pre-computed alignment | O(1) lookup during render; avoids per-frame diff computation |
+| Input routing | Focus-based with coordinate mapping | Natural editing UX; clear which pane receives input |
+| Single scroll position | Unified scroll with alignment | Both sides always show corresponding content |
+| Source buffer references | BufferId only, not embedded content | Live updates when source changes; no duplication |
+
+---
+
+## Summary
+
+This architecture provides:
+
+1. **Single Tab Display**: CompositeBuffer appears as one tab in the tab bar
+2. **Multi-Source Rendering**: Side-by-side, stacked, or unified layouts
+3. **Line Alignment**: Pixel-perfect diff view with padding for mismatched line counts
+4. **Editing Support**: Changes route to source buffers with proper coordinate mapping
+5. **Scroll Synchronization**: Built into the renderer, no external sync needed
+6. **Plugin API**: Full control for plugins to create diff/merge views
+7. **Extensibility**: Same architecture supports 3-way merge, notebook cells, etc.
