@@ -3,6 +3,7 @@ mod buffer_management;
 mod calibration_actions;
 pub mod calibration_wizard;
 mod clipboard;
+mod composite_buffer_actions;
 mod file_explorer;
 pub mod file_open;
 mod file_open_input;
@@ -537,6 +538,15 @@ pub struct Editor {
     /// Stores (popup_id, Vec<(action_id, action_label)>)
     active_action_popup: Option<(String, Vec<(String, String)>)>,
 
+    /// Composite buffers (separate from regular buffers)
+    /// These display multiple source buffers in a single tab
+    composite_buffers: HashMap<BufferId, crate::model::composite_buffer::CompositeBuffer>,
+
+    /// View state for composite buffers (per split)
+    /// Maps (split_id, buffer_id) to composite view state
+    composite_view_states:
+        HashMap<(SplitId, BufferId), crate::view::composite_view::CompositeViewState>,
+
     /// Stdin streaming state (if reading from stdin)
     stdin_streaming: Option<StdinStreamingState>,
 }
@@ -976,6 +986,8 @@ impl Editor {
             stdin_streaming: None,
             review_hunks: Vec::new(),
             active_action_popup: None,
+            composite_buffers: HashMap::new(),
+            composite_view_states: HashMap::new(),
         })
     }
 
@@ -1560,6 +1572,11 @@ impl Editor {
 
     /// Get the display name for a buffer (filename or virtual buffer name)
     pub fn get_buffer_display_name(&self, buffer_id: BufferId) -> String {
+        // Check composite buffers first
+        if let Some(composite) = self.composite_buffers.get(&buffer_id) {
+            return composite.name.clone();
+        }
+
         self.buffer_metadata
             .get(&buffer_id)
             .map(|m| m.display_name.clone())
