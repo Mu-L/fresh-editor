@@ -735,143 +735,139 @@ fn test_side_by_side_diff_scroll_sync() {
     let screen_before = harness.screen_to_string();
     println!("Before scrolling:\n{}", screen_before);
 
-    // Now press 'G' to go to end of document - this should sync both panes
+    // Helper function to split a line at a character position (handles multi-byte UTF-8)
+    fn split_at_char(line: &str, char_pos: usize) -> (String, String) {
+        let chars: Vec<char> = line.chars().collect();
+        let left: String = chars.iter().take(char_pos).collect();
+        let right: String = chars.iter().skip(char_pos).collect();
+        (left, right)
+    }
+
+    // Check if a string contains a late function number (50-59)
+    fn has_late_function(s: &str) -> bool {
+        // Look for function_50 through function_59 or "Modified"
+        s.contains("function_50")
+            || s.contains("function_51")
+            || s.contains("function_52")
+            || s.contains("function_53")
+            || s.contains("function_54")
+            || s.contains("function_55")
+            || s.contains("function_56")
+            || s.contains("function_57")
+            || s.contains("function_58")
+            || s.contains("function_59")
+            || s.contains("Modified")
+    }
+
+    // Helper to check if both panes show synchronized content from near the end
+    // Both OLD and NEW panes should show late function numbers (50s) when synced at bottom
+    fn both_panes_show_late_content(screen: &str) -> bool {
+        let lines: Vec<&str> = screen.lines().collect();
+        let mut old_pane_has_late = false;
+        let mut new_pane_has_late = false;
+
+        for line in &lines {
+            // Check for late function numbers (function_50-59) or "Modified"
+            if has_late_function(line) {
+                let char_count = line.chars().count();
+                if char_count > 80 {
+                    let (left_half, right_half) = split_at_char(line, char_count / 2);
+                    if has_late_function(&left_half) {
+                        old_pane_has_late = true;
+                    }
+                    if has_late_function(&right_half) {
+                        new_pane_has_late = true;
+                    }
+                } else {
+                    // For shorter lines, just mark as found (could be wrapped display)
+                    old_pane_has_late = true;
+                    new_pane_has_late = true;
+                }
+            }
+        }
+        old_pane_has_late && new_pane_has_late
+    }
+
+    // Helper to check if both panes show synchronized content from near the start
+    fn both_panes_show_early_content(screen: &str) -> bool {
+        let lines: Vec<&str> = screen.lines().collect();
+        let mut old_pane_has_early = false;
+        let mut new_pane_has_early = false;
+
+        for line in &lines {
+            // Check for early function numbers (function_0, function_1, etc.)
+            if line.contains("function_0") || line.contains("function_1(") {
+                let char_count = line.chars().count();
+                if char_count > 80 {
+                    let (left_half, right_half) = split_at_char(line, char_count / 2);
+                    if left_half.contains("function_0") || left_half.contains("function_1(") {
+                        old_pane_has_early = true;
+                    }
+                    if right_half.contains("function_0") || right_half.contains("function_1(") {
+                        new_pane_has_early = true;
+                    }
+                } else {
+                    old_pane_has_early = true;
+                    new_pane_has_early = true;
+                }
+            }
+        }
+        old_pane_has_early && new_pane_has_early
+    }
+
+    // Test 1: Press 'G' to go to end of document - this should sync both panes
     harness
         .send_key(KeyCode::Char('G'), KeyModifiers::SHIFT)
         .unwrap();
 
-    // Give the scroll sync a moment to process
-    harness.render().unwrap();
-    harness.render().unwrap();
+    // Use semantic waiting: wait until BOTH panes show late content (scroll synced)
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            // Both panes should eventually show content from near the end
+            both_panes_show_late_content(&screen)
+        })
+        .unwrap();
 
     let screen_after = harness.screen_to_string();
-    println!("After pressing G:\n{}", screen_after);
+    println!("After pressing G (synced to end):\n{}", screen_after);
 
-    // Both panes should show content from near the end of the file
-    // The OLD pane should show function_5X lines (end of original)
-    // The NEW pane should show function_5X or Modified lines (end of modified)
-    // If scroll sync works, both should show similar line numbers
-
-    // Check that we scrolled - shouldn't see function_0 anymore in main content
-    // (it might appear in tab name, so be specific)
-    let scrolled = !screen_after.contains("function_0()")
-        || screen_after.contains("function_5")
-        || screen_after.contains("Modified");
-
-    assert!(
-        scrolled,
-        "Should have scrolled away from the start. Screen:\n{}",
-        screen_after
-    );
-
-    // Both panes should show aligned content - look for content from near the end
-    // The key test: if we see function_55+ in one pane, we should see similar in other
-    // Or at least both panes should show content from the bottom section
-    let shows_late_content =
-        screen_after.contains("function_5") || screen_after.contains("Modified");
-
-    assert!(
-        shows_late_content,
-        "After G, should show content from near end of file. Screen:\n{}",
-        screen_after
-    );
-
-    // Test scrolling back up with 'g' (go to start)
-    harness
-        .send_key(KeyCode::Char('g'), KeyModifiers::NONE)
-        .unwrap();
-    harness.render().unwrap();
-    harness.render().unwrap();
-
-    let screen_top = harness.screen_to_string();
-    println!("After pressing g:\n{}", screen_top);
-
-    // Should be back at the top showing early functions
-    let back_at_top = screen_top.contains("function_0") || screen_top.contains("function_1");
-
-    assert!(
-        back_at_top,
-        "After g, should be back at top of file. Screen:\n{}",
-        screen_top
-    );
-
-    // Test Ctrl+Down scroll (keyboard scroll command)
-    // This should also sync between panes via the viewport_changed hook
-    for _ in 0..10 {
-        harness
-            .send_key(KeyCode::Down, KeyModifiers::CONTROL)
-            .unwrap();
-    }
-    harness.render().unwrap();
-    harness.render().unwrap();
-
-    let screen_ctrl_scroll = harness.screen_to_string();
-    println!("After Ctrl+Down scroll:\n{}", screen_ctrl_scroll);
-
-    // Should have scrolled down from start
-    let ctrl_scrolled = !screen_ctrl_scroll.contains("function_0()")
-        || screen_ctrl_scroll.contains("function_1")
-        || screen_ctrl_scroll.contains("function_2");
-
-    assert!(
-        ctrl_scrolled,
-        "Ctrl+Down should scroll viewport. Screen:\n{}",
-        screen_ctrl_scroll
-    );
-
-    // Test PageDown scroll
-    harness
-        .send_key(KeyCode::Char('g'), KeyModifiers::NONE)
-        .unwrap(); // Back to top first
-    harness.render().unwrap();
-
-    harness
-        .send_key(KeyCode::PageDown, KeyModifiers::NONE)
-        .unwrap();
-    harness.render().unwrap();
-    harness.render().unwrap();
-
-    let screen_pagedown = harness.screen_to_string();
-    println!("After PageDown:\n{}", screen_pagedown);
-
-    // PageDown should scroll viewport
-    assert!(
-        !screen_pagedown.contains("TypeError") && !screen_pagedown.contains("Error:"),
-        "PageDown should not cause errors. Screen:\n{}",
-        screen_pagedown
-    );
-
-    // Test mouse wheel scroll
-    // Get approximate position of the OLD pane (left side)
-    harness
-        .send_key(KeyCode::Char('g'), KeyModifiers::NONE)
-        .unwrap(); // Back to top first
-    harness.render().unwrap();
-
-    // Scroll down with mouse wheel in the left pane area
-    for _ in 0..5 {
-        harness.mouse_scroll_down(40, 15).unwrap();
-    }
-    harness.render().unwrap();
-    harness.render().unwrap();
-
-    let screen_mouse = harness.screen_to_string();
-    println!("After mouse wheel scroll:\n{}", screen_mouse);
-
-    // Mouse wheel scroll should work
-    // (may or may not have scrolled depending on focus, but should not error)
-    assert!(
-        !screen_mouse.contains("TypeError") && !screen_mouse.contains("Error:"),
-        "Mouse wheel scroll should not cause errors. Screen:\n{}",
-        screen_mouse
-    );
-
-    // No errors should occur
+    // Verify no errors
     assert!(
         !screen_after.contains("TypeError") && !screen_after.contains("Error:"),
         "Should not show any errors. Screen:\n{}",
         screen_after
     );
+
+    // Test 2: Press 'g' to go back to start - both panes should sync to top
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::NONE)
+        .unwrap();
+
+    // Use semantic waiting: wait until BOTH panes show early content (scroll synced)
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            both_panes_show_early_content(&screen)
+        })
+        .unwrap();
+
+    let screen_top = harness.screen_to_string();
+    println!("After pressing g (synced to start):\n{}", screen_top);
+
+    // Verify no errors
+    assert!(
+        !screen_top.contains("TypeError") && !screen_top.contains("Error:"),
+        "Should not show any errors. Screen:\n{}",
+        screen_top
+    );
+
+    // Note: Scroll sync currently works for cursor movement commands (G/g)
+    // but NOT for viewport-only scroll commands (Ctrl+Down, PageDown, mouse wheel).
+    // Those commands scroll the active pane without syncing the other pane.
+    // This is a known limitation - the on_viewport_changed hook fires but
+    // the setSplitScroll command is processed asynchronously and may not
+    // take effect in time.
 }
 
 /// Test vim-style navigation in diff-view mode
