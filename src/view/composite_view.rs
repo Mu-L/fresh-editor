@@ -149,6 +149,10 @@ impl CompositeViewState {
             if let Some(last) = self.pane_widths.last_mut() {
                 *last += available_width - total;
             }
+        } else if total > available_width {
+            if let Some(last) = self.pane_widths.last_mut() {
+                *last = last.saturating_sub(total - available_width);
+            }
         }
     }
 
