@@ -6,6 +6,15 @@ impl Editor {
         let _span = tracing::trace_span!("render").entered();
         let size = frame.area();
 
+        // Clear skip_ensure_visible on the active split at the start of each render.
+        // This ensures the cursor becomes visible even if async plugin commands (like
+        // setSplitScroll) set the flag between handle_key_event and render.
+        // Scroll-only actions (Ctrl+Up/Down) will set the flag again if needed during input handling.
+        let active_split = self.split_manager.active_split();
+        if let Some(view_state) = self.split_view_states.get_mut(&active_split) {
+            view_state.viewport.clear_skip_ensure_visible();
+        }
+
         // NOTE: Viewport sync with cursor is handled by split_rendering.rs which knows the
         // correct content area dimensions. Don't sync here with incorrect EditorState viewport size.
 
@@ -312,18 +321,6 @@ impl Editor {
 
         let is_maximized = self.split_manager.is_maximized();
 
-        // Record initial viewport states to detect changes
-        let initial_viewports: HashMap<SplitId, (usize, u16, u16)> = self
-            .split_view_states
-            .iter()
-            .map(|(id, vs)| {
-                (
-                    *id,
-                    (vs.viewport.top_byte, vs.viewport.width, vs.viewport.height),
-                )
-            })
-            .collect();
-
         let (split_areas, tab_areas, close_split_areas, maximize_split_areas, view_line_mappings) =
             SplitRenderer::render_content(
                 frame,
@@ -350,6 +347,8 @@ impl Editor {
             );
 
         // Detect viewport changes and fire hooks
+        // Compare against previous frame's viewport state (stored in self.previous_viewports)
+        // This correctly detects changes from scroll events that happen before render()
         if self.plugin_manager.is_active() {
             for (split_id, view_state) in &self.split_view_states {
                 let current = (
@@ -357,23 +356,55 @@ impl Editor {
                     view_state.viewport.width,
                     view_state.viewport.height,
                 );
-                if let Some(initial) = initial_viewports.get(split_id) {
-                    if *initial != current {
-                        if let Some(buffer_id) = self.split_manager.get_buffer_id(*split_id) {
-                            self.plugin_manager.run_hook(
-                                "viewport_changed",
-                                crate::services::plugins::hooks::HookArgs::ViewportChanged {
-                                    split_id: *split_id,
-                                    buffer_id,
-                                    top_byte: view_state.viewport.top_byte,
-                                    width: view_state.viewport.width,
-                                    height: view_state.viewport.height,
-                                },
-                            );
-                        }
+                // Compare against previous frame's state
+                // Skip new splits (None case) - only fire hooks for established splits
+                // This matches the original behavior where hooks only fire for splits
+                // that existed at the start of render
+                let (changed, previous) = match self.previous_viewports.get(split_id) {
+                    Some(previous) => (*previous != current, Some(*previous)),
+                    None => (false, None), // Skip new splits until they're established
+                };
+                tracing::trace!(
+                    "viewport_changed check: split={:?} current={:?} previous={:?} changed={}",
+                    split_id,
+                    current,
+                    previous,
+                    changed
+                );
+                if changed {
+                    if let Some(buffer_id) = self.split_manager.get_buffer_id(*split_id) {
+                        tracing::debug!(
+                            "Firing viewport_changed hook: split={:?} buffer={:?} top_byte={}",
+                            split_id,
+                            buffer_id,
+                            view_state.viewport.top_byte
+                        );
+                        self.plugin_manager.run_hook(
+                            "viewport_changed",
+                            crate::services::plugins::hooks::HookArgs::ViewportChanged {
+                                split_id: *split_id,
+                                buffer_id,
+                                top_byte: view_state.viewport.top_byte,
+                                width: view_state.viewport.width,
+                                height: view_state.viewport.height,
+                            },
+                        );
                     }
                 }
             }
+        }
+
+        // Update previous_viewports for next frame's comparison
+        self.previous_viewports.clear();
+        for (split_id, view_state) in &self.split_view_states {
+            self.previous_viewports.insert(
+                *split_id,
+                (
+                    view_state.viewport.top_byte,
+                    view_state.viewport.width,
+                    view_state.viewport.height,
+                ),
+            );
         }
 
         // Render terminal content on top of split content for terminal buffers

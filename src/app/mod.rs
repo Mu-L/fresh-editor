@@ -208,6 +208,11 @@ pub struct Editor {
     /// cursor positions and scroll positions
     split_view_states: HashMap<SplitId, SplitViewState>,
 
+    /// Previous viewport states for viewport_changed hook detection
+    /// Stores (top_byte, width, height) from the end of the last render frame
+    /// Used to detect viewport changes that occur between renders (e.g., scroll events)
+    previous_viewports: HashMap<SplitId, (usize, u16, u16)>,
+
     /// File explorer view (optional, only when open)
     file_explorer: Option<FileTreeView>,
 
@@ -816,6 +821,7 @@ impl Editor {
             async_bridge: Some(async_bridge),
             split_manager,
             split_view_states,
+            previous_viewports: HashMap::new(),
             file_explorer: None,
             fs_manager,
             file_explorer_visible: false,
