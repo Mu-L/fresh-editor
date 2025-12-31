@@ -1,6 +1,6 @@
 //! E2E tests for audit_mode (Review Diff) plugin
 
-use crate::common::git_test_helper::{DirGuard, GitTestRepo};
+use crate::common::git_test_helper::GitTestRepo;
 use crate::common::harness::EditorTestHarness;
 use crossterm::event::{KeyCode, KeyModifiers};
 use fresh::config::Config;
@@ -51,10 +51,6 @@ fn test_review_diff_opens_without_error() {
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
-
-    // Change to repo directory so git commands work correctly
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
 
     // Create an initial commit
     repo.git_add_all();
@@ -152,9 +148,6 @@ fn test_review_diff_shows_hunks() {
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
 
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
-
     // Create an initial commit
     repo.git_add_all();
     repo.git_commit("Initial commit");
@@ -232,9 +225,6 @@ fn test_review_diff_side_by_side_view() {
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
-
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
 
     // Create an initial commit
     repo.git_add_all();
@@ -338,9 +328,6 @@ fn test_side_by_side_diff_shows_alignment() {
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
-
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
 
     // Create an initial commit
     repo.git_add_all();
@@ -452,9 +439,6 @@ fn test_side_by_side_diff_shows_statistics() {
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
 
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
-
     repo.git_add_all();
     repo.git_commit("Initial commit");
 
@@ -547,9 +531,6 @@ fn test_side_by_side_diff_shows_gutter_markers() {
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
-
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
 
     repo.git_add_all();
     repo.git_commit("Initial commit");
@@ -649,9 +630,6 @@ fn test_side_by_side_diff_scroll_sync() {
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
-
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
 
     repo.git_add_all();
     repo.git_commit("Initial commit");
@@ -831,9 +809,6 @@ fn test_side_by_side_diff_vim_navigation() {
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     setup_audit_mode_plugin(&repo);
-
-    let original_dir = repo.change_to_repo_dir();
-    let _guard = DirGuard::new(original_dir);
 
     repo.git_add_all();
     repo.git_commit("Initial commit");
