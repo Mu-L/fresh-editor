@@ -39,6 +39,11 @@ pub enum PluginResponse {
         request_id: u64,
         text: Result<String, String>,
     },
+    /// Response to CreateScrollSyncGroup with the group ID
+    ScrollSyncGroupCreated {
+        request_id: u64,
+        group_id: u32,
+    },
 }
 
 /// Information about a cursor in the editor
@@ -714,6 +719,33 @@ pub enum PluginCommand {
     DisableLspForLanguage {
         /// The language to disable LSP for (e.g., "python", "rust")
         language: String,
+    },
+
+    /// Create a scroll sync group for anchor-based synchronized scrolling
+    /// Used for side-by-side diff views where two panes need to scroll together
+    /// Returns the group ID via async response
+    CreateScrollSyncGroup {
+        /// The left (primary) split - scroll position is tracked in this split's line space
+        left_split: SplitId,
+        /// The right (secondary) split - position is derived from anchors
+        right_split: SplitId,
+        /// Request ID for async response
+        request_id: u64,
+    },
+
+    /// Set sync anchors for a scroll sync group
+    /// Anchors map corresponding line numbers between left and right buffers
+    SetScrollSyncAnchors {
+        /// The group ID returned by CreateScrollSyncGroup
+        group_id: u32,
+        /// List of (left_line, right_line) pairs marking corresponding positions
+        anchors: Vec<(usize, usize)>,
+    },
+
+    /// Remove a scroll sync group
+    RemoveScrollSyncGroup {
+        /// The group ID returned by CreateScrollSyncGroup
+        group_id: u32,
     },
 }
 

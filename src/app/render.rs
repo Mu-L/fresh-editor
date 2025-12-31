@@ -15,6 +15,10 @@ impl Editor {
             view_state.viewport.clear_skip_ensure_visible();
         }
 
+        // Synchronize scroll sync groups (anchor-based scroll for side-by-side diffs)
+        // This sets viewport positions based on the authoritative scroll_line in each group
+        self.sync_scroll_groups();
+
         // NOTE: Viewport sync with cursor is handled by split_rendering.rs which knows the
         // correct content area dimensions. Don't sync here with incorrect EditorState viewport size.
 
@@ -3418,5 +3422,48 @@ impl Editor {
         };
 
         view_state.tab_scroll_offset = new_scroll_offset;
+    }
+
+    /// Synchronize viewports for all scroll sync groups
+    ///
+    /// This is called at the start of render() to apply the authoritative scroll_line
+    /// from each scroll sync group to the actual viewport positions.
+    fn sync_scroll_groups(&mut self) {
+        // Collect the sync info first to avoid borrow issues
+        let sync_info: Vec<_> = self
+            .scroll_sync_manager
+            .groups()
+            .iter()
+            .map(|group| {
+                (
+                    group.left_split,
+                    group.right_split,
+                    group.left_scroll_line(),
+                    group.right_scroll_line(),
+                )
+            })
+            .collect();
+
+        for (left_split, right_split, left_line, right_line) in sync_info {
+            // Sync left split viewport
+            if let Some(buffer_id) = self.split_manager.buffer_for_split(left_split) {
+                if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    let buffer = &mut state.buffer;
+                    if let Some(view_state) = self.split_view_states.get_mut(&left_split) {
+                        view_state.viewport.scroll_to(buffer, left_line);
+                    }
+                }
+            }
+
+            // Sync right split viewport
+            if let Some(buffer_id) = self.split_manager.buffer_for_split(right_split) {
+                if let Some(state) = self.buffers.get_mut(&buffer_id) {
+                    let buffer = &mut state.buffer;
+                    if let Some(view_state) = self.split_view_states.get_mut(&right_split) {
+                        view_state.viewport.scroll_to(buffer, right_line);
+                    }
+                }
+            }
+        }
     }
 }

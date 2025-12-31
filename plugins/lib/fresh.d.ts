@@ -797,6 +797,22 @@ interface EditorAPI {
    * @param language - The language to disable LSP for (e.g., "python", "rust")
    */
   disableLspForLanguage(language: string): boolean;
+  /**
+   * Create a scroll sync group for anchor-based synchronized scrolling
+   *
+   * Used for side-by-side diff views where two panes need to scroll together.
+   * Returns a promise that resolves to the group ID.
+   */
+  createScrollSyncGroup(left_split: number, right_split: number): Promise<number>;
+  /**
+   * Set sync anchors for a scroll sync group
+   *
+   * Anchors map corresponding line numbers between left and right buffers.
+   * Each anchor is a tuple of (left_line, right_line).
+   */
+  setScrollSyncAnchors(group_id: number, anchors: Vec<(usize, usize): boolean;
+  /** Remove a scroll sync group */
+  removeScrollSyncGroup(group_id: number): boolean;
 
   /**
    * Spawn an external process and return a cancellable handle

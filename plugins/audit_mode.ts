@@ -660,7 +660,13 @@ function findLineForByte(lineByteOffsets: number[], topByte: number): number {
 }
 
 globalThis.on_viewport_changed = (data: any) => {
+    // This handler is now a no-op - scroll sync is handled by the core
+    // using the anchor-based ScrollSyncGroup system.
+    // Keeping the handler for backward compatibility if core sync fails.
     if (!activeDiffViewState || !activeSideBySideState) return;
+
+    // Skip if core scroll sync is active (we have a scrollSyncGroupId)
+    if (activeSideBySideState.scrollSyncGroupId !== null) return;
 
     const { oldSplitId, newSplitId, oldLineByteOffsets, newLineByteOffsets } = activeSideBySideState;
 
@@ -995,6 +1001,7 @@ interface SideBySideDiffState {
     alignedLines: AlignedLine[];
     oldLineByteOffsets: number[];
     newLineByteOffsets: number[];
+    scrollSyncGroupId: number | null;  // Core scroll sync group ID
 }
 
 let activeSideBySideState: SideBySideDiffState | null = null;
@@ -1042,6 +1049,10 @@ globalThis.review_drill_down = async () => {
         // Close any existing side-by-side views
         if (activeSideBySideState) {
             try {
+                // Remove scroll sync group first
+                if (activeSideBySideState.scrollSyncGroupId !== null) {
+                    (editor as any).removeScrollSyncGroup(activeSideBySideState.scrollSyncGroupId);
+                }
                 editor.closeBuffer(activeSideBySideState.oldBufferId);
                 editor.closeBuffer(activeSideBySideState.newBufferId);
             } catch {}
@@ -1113,6 +1124,42 @@ globalThis.review_drill_down = async () => {
         // Focus OLD pane (left) - convention is to start on old side
         (editor as any).focusSplit(oldSplitId);
 
+        // Set up core-handled scroll sync using the new anchor-based API
+        // This replaces the old viewport_changed hook approach
+        let scrollSyncGroupId: number | null = null;
+        try {
+            scrollSyncGroupId = await (editor as any).createScrollSyncGroup(oldSplitId, newSplitId);
+
+            // Compute sync anchors from aligned lines
+            // Each aligned line is a sync point - we map line indices to anchors
+            // For the new core sync, we use line numbers (not byte offsets)
+            const anchors: [number, number][] = [];
+            for (let i = 0; i < alignedLines.length; i++) {
+                // Add anchors at meaningful boundaries: start of file, and at change boundaries
+                const line = alignedLines[i];
+                const prevLine = i > 0 ? alignedLines[i - 1] : null;
+
+                // Add anchor at start of file
+                if (i === 0) {
+                    anchors.push([0, 0]);
+                }
+
+                // Add anchor at change boundaries (when change type changes)
+                if (prevLine && prevLine.changeType !== line.changeType) {
+                    anchors.push([i, i]);
+                }
+            }
+
+            // Add anchor at end
+            if (alignedLines.length > 0) {
+                anchors.push([alignedLines.length, alignedLines.length]);
+            }
+
+            (editor as any).setScrollSyncAnchors(scrollSyncGroupId, anchors);
+        } catch (e) {
+            editor.debug(`Failed to create scroll sync group: ${e}`);
+        }
+
         // Store state for synchronized scrolling
         activeSideBySideState = {
             oldSplitId,
@@ -1121,10 +1168,10 @@ globalThis.review_drill_down = async () => {
             newBufferId,
             alignedLines,
             oldLineByteOffsets: oldPane.lineByteOffsets,
-            newLineByteOffsets: newPane.lineByteOffsets
+            newLineByteOffsets: newPane.lineByteOffsets,
+            scrollSyncGroupId
         };
         activeDiffViewState = { lSplit: oldSplitId, rSplit: newSplitId };
-        editor.on("viewport_changed", "on_viewport_changed");
 
         const addedLines = alignedLines.filter(l => l.changeType === 'added').length;
         const removedLines = alignedLines.filter(l => l.changeType === 'removed').length;
@@ -1482,6 +1529,24 @@ editor.registerCommand("Review: Clear Status", "Clear hunk review status", "revi
 editor.registerCommand("Review: Overall Feedback", "Set overall review feedback", "review_set_overall_feedback", "review-mode");
 editor.registerCommand("Review: Export to Markdown", "Export review to .review/session.md", "review_export_session", "review-mode");
 editor.registerCommand("Review: Export to JSON", "Export review to .review/session.json", "review_export_json", "review-mode");
+
+// Handler for when buffers are closed - cleans up scroll sync groups
+globalThis.on_buffer_closed = (data: any) => {
+    // If one of the diff view buffers is closed, clean up the scroll sync group
+    if (activeSideBySideState) {
+        if (data.buffer_id === activeSideBySideState.oldBufferId ||
+            data.buffer_id === activeSideBySideState.newBufferId) {
+            // Remove scroll sync group
+            if (activeSideBySideState.scrollSyncGroupId !== null) {
+                try {
+                    (editor as any).removeScrollSyncGroup(activeSideBySideState.scrollSyncGroupId);
+                } catch {}
+            }
+            activeSideBySideState = null;
+            activeDiffViewState = null;
+        }
+    }
+};
 
 editor.on("buffer_closed", "on_buffer_closed");
 

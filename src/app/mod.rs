@@ -91,6 +91,7 @@ use crate::state::EditorState;
 use crate::types::LspServerConfig;
 use crate::view::file_tree::{FileTree, FileTreeView};
 use crate::view::prompt::{Prompt, PromptType};
+use crate::view::scroll_sync::ScrollSyncManager;
 use crate::view::split::{SplitManager, SplitViewState};
 use crate::view::ui::{
     FileExplorerRenderer, SplitRenderer, StatusBarRenderer, SuggestionsRenderer,
@@ -212,6 +213,10 @@ pub struct Editor {
     /// Stores (top_byte, width, height) from the end of the last render frame
     /// Used to detect viewport changes that occur between renders (e.g., scroll events)
     previous_viewports: HashMap<SplitId, (usize, u16, u16)>,
+
+    /// Scroll sync manager for anchor-based synchronized scrolling
+    /// Used for side-by-side diff views where two panes need to scroll together
+    scroll_sync_manager: ScrollSyncManager,
 
     /// File explorer view (optional, only when open)
     file_explorer: Option<FileTreeView>,
@@ -822,6 +827,7 @@ impl Editor {
             split_manager,
             split_view_states,
             previous_viewports: HashMap::new(),
+            scroll_sync_manager: ScrollSyncManager::new(),
             file_explorer: None,
             fs_manager,
             file_explorer_visible: false,
@@ -1766,7 +1772,27 @@ impl Editor {
 
         let active_split = self.split_manager.active_split();
 
-        // Find other splits in the same sync group if any
+        // Check if this split is in a scroll sync group (anchor-based sync for diffs)
+        // If so, update the group's scroll_line and let render sync the viewports
+        if self.scroll_sync_manager.is_split_synced(active_split) {
+            self.scroll_sync_manager
+                .apply_scroll_delta(active_split, line_offset);
+
+            // Mark both splits to skip ensure_visible
+            if let Some(group) = self.scroll_sync_manager.find_group_for_split(active_split) {
+                let left = group.left_split;
+                let right = group.right_split;
+                if let Some(vs) = self.split_view_states.get_mut(&left) {
+                    vs.viewport.set_skip_ensure_visible();
+                }
+                if let Some(vs) = self.split_view_states.get_mut(&right) {
+                    vs.viewport.set_skip_ensure_visible();
+                }
+            }
+            return;
+        }
+
+        // Fall back to simple sync_group (same delta to all splits)
         let sync_group = self
             .split_view_states
             .get(&active_split)
@@ -1827,7 +1853,34 @@ impl Editor {
     fn handle_set_viewport_event(&mut self, top_line: usize) {
         let active_split = self.split_manager.active_split();
 
-        // Find other splits in the same sync group if any
+        // Check if this split is in a scroll sync group (anchor-based sync for diffs)
+        // If so, set the group's scroll_line and let render sync the viewports
+        if self.scroll_sync_manager.is_split_synced(active_split) {
+            if let Some(group) = self.scroll_sync_manager.find_group_for_split_mut(active_split) {
+                // Convert line to left buffer space if coming from right split
+                let scroll_line = if group.is_left_split(active_split) {
+                    top_line
+                } else {
+                    group.right_to_left_line(top_line)
+                };
+                group.set_scroll_line(scroll_line);
+            }
+
+            // Mark both splits to skip ensure_visible
+            if let Some(group) = self.scroll_sync_manager.find_group_for_split(active_split) {
+                let left = group.left_split;
+                let right = group.right_split;
+                if let Some(vs) = self.split_view_states.get_mut(&left) {
+                    vs.viewport.set_skip_ensure_visible();
+                }
+                if let Some(vs) = self.split_view_states.get_mut(&right) {
+                    vs.viewport.set_skip_ensure_visible();
+                }
+            }
+            return;
+        }
+
+        // Fall back to simple sync_group (same line to all splits)
         let sync_group = self
             .split_view_states
             .get(&active_split)
@@ -3840,6 +3893,52 @@ impl Editor {
 
                 // 4. Clear any LSP-related warnings for this language
                 self.warning_domains.lsp.clear();
+            }
+
+            // ==================== Scroll Sync Commands ====================
+            PluginCommand::CreateScrollSyncGroup {
+                left_split,
+                right_split,
+                request_id,
+            } => {
+                let group_id = self.scroll_sync_manager.create_group(left_split, right_split);
+                tracing::debug!(
+                    "Created scroll sync group {} for splits {:?} and {:?}",
+                    group_id,
+                    left_split,
+                    right_split
+                );
+                // Send the group ID back to the plugin
+                self.send_plugin_response(
+                    crate::services::plugins::api::PluginResponse::ScrollSyncGroupCreated {
+                        request_id,
+                        group_id,
+                    },
+                );
+            }
+            PluginCommand::SetScrollSyncAnchors { group_id, anchors } => {
+                use crate::view::scroll_sync::SyncAnchor;
+                let anchor_count = anchors.len();
+                let sync_anchors: Vec<SyncAnchor> = anchors
+                    .into_iter()
+                    .map(|(left_line, right_line)| SyncAnchor {
+                        left_line,
+                        right_line,
+                    })
+                    .collect();
+                self.scroll_sync_manager.set_anchors(group_id, sync_anchors);
+                tracing::debug!(
+                    "Set {} anchors for scroll sync group {}",
+                    anchor_count,
+                    group_id
+                );
+            }
+            PluginCommand::RemoveScrollSyncGroup { group_id } => {
+                if self.scroll_sync_manager.remove_group(group_id) {
+                    tracing::debug!("Removed scroll sync group {}", group_id);
+                } else {
+                    tracing::warn!("Scroll sync group {} not found", group_id);
+                }
             }
         }
         Ok(())

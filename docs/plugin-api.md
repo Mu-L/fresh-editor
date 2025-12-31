@@ -1290,6 +1290,54 @@ disableLspForLanguage(language: string): boolean
 |------|------|-------------|
 | `language` | `string` | The language to disable LSP for (e.g., "python", "rust") |
 
+#### `createScrollSyncGroup`
+
+Create a scroll sync group for anchor-based synchronized scrolling
+Used for side-by-side diff views where two panes need to scroll together.
+Returns a promise that resolves to the group ID.
+
+```typescript
+createScrollSyncGroup(left_split: number, right_split: number): Promise<number>
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `left_split` | `number` | - |
+| `right_split` | `number` | - |
+
+#### `setScrollSyncAnchors`
+
+Set sync anchors for a scroll sync group
+Anchors map corresponding line numbers between left and right buffers.
+Each anchor is a tuple of (left_line, right_line).
+
+```typescript
+setScrollSyncAnchors(group_id: number, anchors: Vec<(usize, usize): boolean
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `group_id` | `number` | - |
+| `anchors` | `Vec<(usize, usize` | - |
+
+#### `removeScrollSyncGroup`
+
+Remove a scroll sync group
+
+```typescript
+removeScrollSyncGroup(group_id: number): boolean
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `group_id` | `number` | - |
+
 ### Overlay Operations
 
 #### `addOverlay`
