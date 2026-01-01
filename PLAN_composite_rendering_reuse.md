@@ -1,257 +1,436 @@
-# Clean Architecture for Composite Buffer Rendering
+# Composite Buffer Architecture
 
-## Pipeline Overview
+## Overview
+
+CompositeBuffer is a **thin coordination layer** that wraps multiple normal buffers into a unified view. Each pane is a full `EditorState` with its own viewport, cursors, and rendering. The composite layer only handles:
+
+1. **Visual arrangement** - laying out panes side-by-side
+2. **Scroll synchronization** - keeping panes aligned via chunk-based alignment
+3. **Input routing** - directing cursor/edit actions to the focused pane
+4. **Diff highlighting** - applying background overlays based on alignment
+
+## Architecture
 
 ```
-Normal Buffer:
-  EditorState.buffer
-    ↓ line_iterator(top_byte) - iterate from byte offset
-  Lines (byte stream)
-    ↓ build_base_tokens()
-  Vec<ViewTokenWire>
-    ↓ ViewLineIterator
-  Vec<ViewLine>
+┌─────────────────────────────────────────────────────────────┐
+│                      CompositeBuffer                         │
+│                                                              │
+│  ┌──────────────────┐        ┌──────────────────┐           │
+│  │     Pane 0       │        │     Pane 1       │           │
+│  │  ┌────────────┐  │        │  ┌────────────┐  │           │
+│  │  │EditorState │  │        │  │EditorState │  │           │
+│  │  │  - buffer  │  │        │  │  - buffer  │  │           │
+│  │  │  - cursors │  │        │  │  - cursors │  │           │
+│  │  │  - highlight│ │        │  │  - highlight│ │           │
+│  │  │  - overlays │  │        │  │  - overlays │  │           │
+│  │  ├────────────┤  │        │  ├────────────┤  │           │
+│  │  │  Viewport  │  │        │  │  Viewport  │  │           │
+│  │  │ (derived)  │  │        │  │ (derived)  │  │           │
+│  │  └────────────┘  │        │  └────────────┘  │           │
+│  └──────────────────┘        └──────────────────┘           │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                   ChunkAlignment                        │ │
+│  │  chunks: [Context, Hunk, Context, Hunk, Context, ...]  │ │
+│  │  (markers at chunk boundaries for edit-robustness)     │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  scroll_display_row: usize   (unified scroll position)      │
+│  focused_pane: usize         (which pane receives input)    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Key Principle: Full Reuse
+
+Each pane renders using the **existing normal buffer rendering pipeline**:
+
+```
+Pane's EditorState
+    ↓ build_view_data()
+ViewLines
     ↓ render_view_lines()
-  Screen
-
-Composite Buffer (PROPOSED):
-  Source EditorStates (per pane)
-    ↓ buffer.get_line(line_num) - access by line number
-  Line content (per source line)
-    ↓ build_view_line_from_line()
-  ViewLine (per source line)
-    ↓ render_styled_view_line()
-  Screen (per pane, per row)
+Screen
 ```
 
-## Key Insight
+All features work automatically:
+- Syntax highlighting
+- Selection & multiple cursors
+- Line wrapping
+- ANSI escape handling
+- Virtual text (code lens, diagnostics)
+- Semantic highlighting
+- Scrollbar
+- Mouse support
 
-The existing pipeline uses **byte offsets** everywhere:
-- `top_byte` in Viewport
-- `source_offset` in ViewTokenWire
-- `char_source_bytes` in ViewLine
-- Highlight spans use byte ranges
+The composite layer just:
+1. Computes each pane's `Viewport.top_byte` from the unified scroll position
+2. Calls the existing rendering for each pane's area
+3. Adds diff background overlays
 
-But for composite buffers, we work with **line numbers** and **alignment**:
-- `scroll_row` (display row)
-- `alignment.rows[display_row].get_pane_line(pane_idx)` → source line number
-- Per-pane cursors by (row, column)
+## Chunk-Based Alignment with Markers
 
-## Solution: Bridge Line Numbers to ViewLines
+### Why Markers at Chunk Boundaries?
 
-### Step 1: Build ViewLine from Source Line
-
+Traditional alignment stores line numbers, which break on edit:
 ```rust
-/// Build a ViewLine from a buffer line (by line number)
-fn build_view_line_from_line(
-    buffer: &Buffer,
-    line_num: usize,
-    tab_size: usize,
-) -> Option<ViewLine> {
-    let line_content = buffer.get_line(line_num)?;
-    let line_start = buffer.line_start_offset(line_num)?;
-
-    // Build token for this line
-    let text = String::from_utf8_lossy(&line_content);
-    let text = text.trim_end_matches('\n').trim_end_matches('\r');
-
-    let tokens = vec![ViewTokenWire {
-        source_offset: Some(line_start),  // Absolute byte offset
-        kind: ViewTokenWireKind::Text(text.to_string()),
-        style: None,
-    }];
-
-    ViewLineIterator::new(&tokens, false, true, tab_size).next()
+// FRAGILE: line numbers become wrong after insert/delete
+struct AlignedRow {
+    old_line: usize,  // Breaks if lines inserted above
+    new_line: usize,
 }
 ```
 
-### Step 2: Get Highlight Spans for Source Line
-
+Instead, we use **markers at chunk boundaries**:
 ```rust
-/// Get syntax highlight spans for a source line (adjusted to line-relative offsets)
-fn get_line_highlights(
-    state: &EditorState,
-    line_num: usize,
-) -> Vec<HighlightSpan> {
-    let line_start = state.buffer.line_start_offset(line_num).unwrap_or(0);
-    let line_end = state.buffer.line_start_offset(line_num + 1)
-        .unwrap_or_else(|| state.buffer.len());
-
-    // Get spans from highlighter
-    state.highlighter.get_highlight_spans_in_range(line_start, line_end)
-        .into_iter()
-        .map(|mut span| {
-            // Keep absolute offsets - compute_char_style uses them
-            span
-        })
-        .collect()
+// ROBUST: markers auto-adjust on edit
+struct AlignmentChunk {
+    start_markers: Vec<Option<MarkerId>>,  // One per pane
+    kind: ChunkKind,
 }
 ```
 
-### Step 3: Render ViewLine with Styling
-
-This is where we can **directly reuse compute_char_style()**:
+### Data Structures
 
 ```rust
-/// Render a ViewLine for a composite buffer pane
-fn render_composite_view_line(
-    view_line: &ViewLine,
-    theme: &Theme,
-    highlight_spans: &[HighlightSpan],
-    left_column: usize,
-    cursor_column: Option<usize>,  // None if not cursor row
-    background_override: Option<Color>,  // Diff coloring
-    line_number: Option<usize>,
-    gutter_width: usize,
-    is_active: bool,
-) -> Line<'static> {
-    let mut spans = Vec::new();
+struct ChunkAlignment {
+    chunks: Vec<AlignmentChunk>,
+}
 
-    // Render gutter (line number)
-    if let Some(num) = line_number {
-        let num_str = format!("{:>width$} ", num, width = gutter_width - 1);
-        spans.push(Span::styled(num_str, Style::default().fg(theme.line_number_fg)));
-    } else {
-        spans.push(Span::styled(" ".repeat(gutter_width), Style::default()));
-    }
+struct AlignmentChunk {
+    /// Marker at the START of this chunk in each pane
+    /// None if this pane has no content at this chunk (e.g., pure insertion)
+    start_markers: Vec<Option<MarkerId>>,
 
-    // Render content with styling
-    let text_chars: Vec<char> = view_line.text.chars().collect();
+    /// What kind of chunk this is
+    kind: ChunkKind,
 
-    for (char_idx, ch) in text_chars.iter().enumerate().skip(left_column) {
-        let byte_pos = view_line.char_source_bytes.get(char_idx).copied().flatten();
+    /// Whether this chunk needs recomputation after an edit
+    dirty: bool,
+}
 
-        // Compute style using EXISTING compute_char_style logic
-        let mut style = compute_base_style(byte_pos, highlight_spans, theme);
+enum ChunkKind {
+    /// Unchanged lines - same content in all panes
+    Context {
+        line_count: usize,
+    },
 
-        // Apply background override (diff coloring)
-        if let Some(bg) = background_override {
-            style = style.bg(bg);
-        }
-
-        // Apply cursor styling
-        if cursor_column == Some(char_idx) {
-            style = Style::default().fg(theme.editor_bg).bg(theme.editor_fg);
-        }
-
-        spans.push(Span::styled(ch.to_string(), style));
-    }
-
-    Line::from(spans)
+    /// Changed region - diff operations within
+    Hunk {
+        /// Sequence of (old_lines, new_lines) pairs:
+        /// (1, 0) = deletion (1 old line, 0 new lines)
+        /// (0, 1) = insertion (0 old lines, 1 new line)
+        /// (1, 1) = modification (1 old line maps to 1 new line)
+        /// (2, 3) = 2 old lines replaced by 3 new lines
+        ops: Vec<(usize, usize)>,
+    },
 }
 ```
 
-### Step 4: Integrate into render_composite_buffer()
+### Example
+
+Given this diff:
+```
+  Line 1    |   Line 1      (context)
+  Line 2    |   Line 2      (context)
+- Line 3    |               (deletion)
+- Line 4    |               (deletion)
+            |+  New 3       (insertion)
+  Line 5    |   Line 5      (context)
+```
+
+The alignment becomes:
+```rust
+chunks: [
+    AlignmentChunk {
+        start_markers: [M0_old, M0_new],  // Markers at "Line 1"
+        kind: Context { line_count: 2 },
+    },
+    AlignmentChunk {
+        start_markers: [M1_old, M1_new],  // Markers at "Line 3" / "New 3"
+        kind: Hunk {
+            ops: [(1, 0), (1, 0), (0, 1)]  // del, del, ins
+        },
+    },
+    AlignmentChunk {
+        start_markers: [M2_old, M2_new],  // Markers at "Line 5"
+        kind: Context { line_count: 1 },
+    },
+]
+```
+
+**Total: 6 markers** (2 per chunk) instead of one per line.
+
+### Converting to Display Rows
 
 ```rust
-fn render_composite_buffer(
-    frame: &mut Frame,
-    area: Rect,
-    composite: &CompositeBuffer,
-    buffers: &HashMap<BufferId, EditorState>,
-    theme: &Theme,
-    is_active: bool,
-    view_state: &CompositeViewState,
-) {
-    // ... layout calculation ...
+impl ChunkAlignment {
+    fn to_display_rows(&self, pane_buffers: &[&Buffer]) -> Vec<AlignedRow> {
+        let mut rows = Vec::new();
 
-    for view_row in 0..visible_rows {
-        let display_row = view_state.scroll_row + view_row;
-        let aligned_row = &composite.alignment.rows[display_row];
-        let is_cursor_row = display_row == view_state.cursor_row;
+        for chunk in &self.chunks {
+            // Resolve markers to current line numbers
+            let start_lines: Vec<Option<usize>> = chunk.start_markers
+                .iter()
+                .enumerate()
+                .map(|(pane_idx, marker_opt)| {
+                    marker_opt.and_then(|m| pane_buffers[pane_idx].marker_to_line(m))
+                })
+                .collect();
 
-        // Get diff background
-        let row_bg = match aligned_row.row_type {
-            RowType::Addition => Some(theme.diff_add_bg),
-            RowType::Deletion => Some(theme.diff_remove_bg),
-            RowType::Modification => Some(theme.diff_modify_bg),
-            _ => None,
-        };
+            match &chunk.kind {
+                ChunkKind::Context { line_count } => {
+                    for offset in 0..*line_count {
+                        rows.push(AlignedRow {
+                            pane_lines: start_lines.iter()
+                                .map(|opt| opt.map(|l| l + offset))
+                                .collect(),
+                            row_type: RowType::Context,
+                        });
+                    }
+                }
 
-        for (pane_idx, (source, &width)) in composite.sources.iter().zip(&pane_widths).enumerate() {
-            let pane_area = Rect::new(x_offset, content_y + view_row as u16, width, 1);
-            let left_column = view_state.get_pane_viewport(pane_idx)
-                .map(|v| v.left_column).unwrap_or(0);
+                ChunkKind::Hunk { ops } => {
+                    let mut offsets = vec![0usize; start_lines.len()];
 
-            let is_focused_pane = pane_idx == view_state.focused_pane;
-            let cursor_col = if is_cursor_row && is_focused_pane {
-                Some(view_state.cursor_column)
-            } else {
-                None
-            };
+                    for &(old_n, new_n) in ops {
+                        let max_n = old_n.max(new_n);
+                        for i in 0..max_n {
+                            let old_line = if i < old_n {
+                                start_lines[0].map(|l| l + offsets[0] + i)
+                            } else { None };
+                            let new_line = if i < new_n {
+                                start_lines[1].map(|l| l + offsets[1] + i)
+                            } else { None };
 
-            if let Some(source_line_ref) = aligned_row.get_pane_line(pane_idx) {
-                if let Some(source_state) = buffers.get(&source.buffer_id) {
-                    // Build ViewLine from source line
-                    let view_line = build_view_line_from_line(
-                        &source_state.buffer,
-                        source_line_ref.line,
-                        source_state.tab_size,
-                    );
-
-                    if let Some(vl) = view_line {
-                        // Get syntax highlighting
-                        let highlights = get_line_highlights(source_state, source_line_ref.line);
-
-                        // Render with full styling
-                        let rendered = render_composite_view_line(
-                            &vl,
-                            theme,
-                            &highlights,
-                            left_column,
-                            cursor_col,
-                            row_bg,
-                            Some(source_line_ref.line + 1),
-                            GUTTER_WIDTH,
-                            is_active,
-                        );
-
-                        let para = Paragraph::new(rendered);
-                        frame.render_widget(para, pane_area);
+                            rows.push(AlignedRow {
+                                pane_lines: vec![old_line, new_line],
+                                row_type: match (old_line, new_line) {
+                                    (Some(_), None) => RowType::Deletion,
+                                    (None, Some(_)) => RowType::Addition,
+                                    (Some(_), Some(_)) => RowType::Modification,
+                                    (None, None) => continue,
+                                },
+                            });
+                        }
+                        offsets[0] += old_n;
+                        offsets[1] += new_n;
                     }
                 }
             }
+        }
 
-            x_offset += width + separator_width;
+        rows
+    }
+}
+```
+
+### Edit Handling
+
+```rust
+impl ChunkAlignment {
+    fn on_buffer_edit(
+        &mut self,
+        pane_idx: usize,
+        edit_start_line: usize,
+        lines_inserted: isize,  // positive = insert, negative = delete
+    ) {
+        // Markers auto-adjust their byte positions - no action needed for them
+
+        // Find which chunk contains the edit
+        for chunk in &mut self.chunks {
+            let chunk_start = chunk.current_start_line(pane_idx);
+            let chunk_end = chunk.current_end_line(pane_idx);
+
+            if let (Some(start), Some(end)) = (chunk_start, chunk_end) {
+                if edit_start_line >= start && edit_start_line < end {
+                    match &mut chunk.kind {
+                        ChunkKind::Context { line_count } => {
+                            // Edit within context: just adjust the count
+                            *line_count = (*line_count as isize + lines_inserted) as usize;
+                        }
+                        ChunkKind::Hunk { .. } => {
+                            // Edit within hunk: mark dirty for recomputation
+                            chunk.dirty = true;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    fn recompute_dirty_chunks(&mut self, pane_buffers: &[&Buffer]) {
+        for chunk in &mut self.chunks {
+            if chunk.dirty {
+                // Extract the text range for this chunk in each pane
+                // Run diff algorithm on just this region
+                // Update chunk.kind with new ops
+                chunk.dirty = false;
+            }
         }
     }
 }
 ```
 
-## What This Reuses
+## Scroll Synchronization
 
-| Component | Reused? | How |
-|-----------|---------|-----|
-| ViewLineIterator | ✅ | Build ViewLine from single line's tokens |
-| ViewLine structure | ✅ | Same struct with char mappings |
-| compute_char_style logic | ✅ | Same style layering for syntax highlighting |
-| Highlighter | ✅ | Query spans by byte range |
-| Theme | ✅ | Same colors and styling |
-| Span/Line/Paragraph | ✅ | Same ratatui widgets |
+The composite buffer has a unified `scroll_display_row`. Each pane's `Viewport.top_byte` is derived:
 
-## What's New/Different
+```rust
+impl CompositeBuffer {
+    fn derive_pane_viewport(
+        &self,
+        pane_idx: usize,
+        pane_buffer: &Buffer,
+        display_row: usize,
+    ) -> Viewport {
+        // Convert display_row to source line for this pane
+        let display_rows = self.alignment.to_display_rows(&self.pane_buffers);
 
-1. **build_view_line_from_line()** - Builds ViewLine from line number instead of byte stream
-2. **get_line_highlights()** - Queries highlighter for a single line's range
-3. **render_composite_view_line()** - Simplified rendering that handles:
-   - Line number display
-   - Horizontal scrolling
-   - Cursor (by column, not byte)
-   - Diff backgrounds
-   - Syntax highlighting
+        let source_line = display_rows
+            .get(display_row)
+            .and_then(|row| row.pane_lines.get(pane_idx))
+            .flatten();
+
+        let top_byte = source_line
+            .and_then(|line| pane_buffer.line_start_offset(line))
+            .unwrap_or(0);
+
+        Viewport {
+            top_byte,
+            left_column: self.pane_viewports[pane_idx].left_column,
+            ..Default::default()
+        }
+    }
+}
+```
+
+## Input Routing
+
+Cursor and edit actions go to the focused pane's EditorState:
+
+```rust
+impl CompositeBuffer {
+    fn handle_action(&mut self, action: Action) -> Option<Event> {
+        match action {
+            // Navigation between panes
+            Action::FocusNextPane => {
+                self.focused_pane = (self.focused_pane + 1) % self.panes.len();
+                None
+            }
+
+            // Vertical movement updates unified scroll
+            Action::CursorDown => {
+                self.scroll_display_row += 1;
+                // Also move cursor in focused pane
+                self.focused_pane_state_mut().handle_cursor_down()
+            }
+
+            // Horizontal movement / editing goes to focused pane
+            Action::CursorRight | Action::Insert(_) | Action::Delete => {
+                self.focused_pane_state_mut().handle_action(action)
+            }
+
+            // Mouse clicks determine focus
+            Action::MouseClick { x, y } => {
+                let pane_idx = self.pane_at_position(x, y);
+                self.focused_pane = pane_idx;
+                self.panes[pane_idx].handle_mouse_click(x, y)
+            }
+
+            _ => None
+        }
+    }
+}
+```
+
+## Diff Highlighting via Overlays
+
+Instead of custom rendering, add overlays to each pane's EditorState:
+
+```rust
+impl CompositeBuffer {
+    fn apply_diff_overlays(&mut self, theme: &Theme) {
+        let display_rows = self.alignment.to_display_rows(&self.pane_buffers);
+
+        for (pane_idx, pane_state) in self.pane_states.iter_mut().enumerate() {
+            // Clear previous diff overlays
+            pane_state.overlays.clear_category("diff");
+
+            for row in &display_rows {
+                if let Some(source_line) = row.pane_lines.get(pane_idx).flatten() {
+                    let bg_color = match row.row_type {
+                        RowType::Addition => Some(theme.diff_add_bg),
+                        RowType::Deletion => Some(theme.diff_remove_bg),
+                        RowType::Modification => Some(theme.diff_modify_bg),
+                        _ => None,
+                    };
+
+                    if let Some(color) = bg_color {
+                        let line_range = pane_state.buffer.line_byte_range(source_line);
+                        pane_state.overlays.add(Overlay {
+                            range: line_range,
+                            face: OverlayFace::Background { color },
+                            category: "diff".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+## Rendering
+
+```rust
+impl CompositeBuffer {
+    fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let pane_rects = self.compute_pane_rects(area);
+
+        for (pane_idx, pane_rect) in pane_rects.iter().enumerate() {
+            // Derive viewport from unified scroll position
+            let viewport = self.derive_pane_viewport(
+                pane_idx,
+                &self.pane_states[pane_idx].buffer,
+                self.scroll_display_row,
+            );
+
+            // Use EXISTING normal buffer rendering!
+            render_buffer_in_split(
+                frame,
+                *pane_rect,
+                &self.pane_states[pane_idx],
+                &viewport,
+                theme,
+                pane_idx == self.focused_pane,  // is_active
+            );
+        }
+
+        // Render separators between panes
+        self.render_separators(frame, &pane_rects, theme);
+    }
+}
+```
+
+## Summary
+
+| Aspect | Design |
+|--------|--------|
+| **Pane rendering** | Full reuse of normal buffer rendering |
+| **Features** | All automatic (syntax, selection, wrapping, etc.) |
+| **Alignment storage** | Chunks with markers at boundaries |
+| **Edit robustness** | Markers auto-adjust; context chunks update count; hunks marked dirty |
+| **Scroll sync** | Unified display_row → per-pane top_byte via alignment |
+| **Diff highlighting** | Overlays on pane EditorStates |
+| **Input handling** | Route to focused pane's EditorState |
+| **Complexity** | Coordination only, no custom rendering |
 
 ## Benefits
 
-1. **Minimal duplication** - Reuses ViewLineIterator, highlighting, theming
-2. **Clean abstraction** - Line-based API vs byte-based API
-3. **Incremental** - Can add features (selection, semantic highlighting) later
-4. **Testable** - Each function is standalone and testable
-
-## Implementation Order
-
-1. Add `build_view_line_from_line()` helper
-2. Add `get_line_highlights()` helper
-3. Replace current `render_composite_buffer()` content rendering with new approach
-4. Verify syntax highlighting works
-5. Add semantic highlighting support
-6. Add selection rendering
+1. **Zero rendering code** - reuses entire normal buffer pipeline
+2. **All features free** - syntax, selection, wrapping, ANSI, virtual text, etc.
+3. **Edit-robust alignment** - markers + chunks handle edits gracefully
+4. **Minimal markers** - O(chunks) not O(lines)
+5. **Localized recomputation** - only dirty chunks re-diffed
+6. **Clean separation** - CompositeBuffer is pure coordination
