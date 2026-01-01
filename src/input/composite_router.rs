@@ -120,18 +120,10 @@ impl CompositeInputRouter {
             (KeyModifiers::NONE, KeyCode::Char('l')) => RoutedEvent::SwitchPane(Direction::Next),
 
             // Hunk navigation
-            (KeyModifiers::NONE, KeyCode::Char('n')) => {
-                RoutedEvent::NavigateHunk(Direction::Next)
-            }
-            (KeyModifiers::NONE, KeyCode::Char('p')) => {
-                RoutedEvent::NavigateHunk(Direction::Prev)
-            }
-            (KeyModifiers::NONE, KeyCode::Char(']')) => {
-                RoutedEvent::NavigateHunk(Direction::Next)
-            }
-            (KeyModifiers::NONE, KeyCode::Char('[')) => {
-                RoutedEvent::NavigateHunk(Direction::Prev)
-            }
+            (KeyModifiers::NONE, KeyCode::Char('n')) => RoutedEvent::NavigateHunk(Direction::Next),
+            (KeyModifiers::NONE, KeyCode::Char('p')) => RoutedEvent::NavigateHunk(Direction::Prev),
+            (KeyModifiers::NONE, KeyCode::Char(']')) => RoutedEvent::NavigateHunk(Direction::Next),
+            (KeyModifiers::NONE, KeyCode::Char('[')) => RoutedEvent::NavigateHunk(Direction::Prev),
 
             // Close
             (KeyModifiers::NONE, KeyCode::Char('q')) | (KeyModifiers::NONE, KeyCode::Esc) => {

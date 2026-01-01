@@ -290,7 +290,10 @@ impl PaneViewport {
     /// Scroll horizontally
     pub fn scroll_horizontal(&mut self, delta: isize, max_column: usize) {
         if delta >= 0 {
-            self.left_column = self.left_column.saturating_add(delta as usize).min(max_column);
+            self.left_column = self
+                .left_column
+                .saturating_add(delta as usize)
+                .min(max_column);
         } else {
             self.left_column = self.left_column.saturating_sub(delta.unsigned_abs());
         }

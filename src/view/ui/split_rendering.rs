@@ -1065,7 +1065,8 @@ impl SplitRenderer {
         for (pane_idx, source) in composite.sources.iter().enumerate() {
             if let Some(source_state) = buffers.get_mut(&source.buffer_id) {
                 // Find the first source line we need for this pane
-                let first_source_line = alignment.rows
+                let first_source_line = alignment
+                    .rows
                     .iter()
                     .skip(scroll_row)
                     .take(visible_rows)
@@ -1075,11 +1076,15 @@ impl SplitRenderer {
 
                 if let Some(first_line) = first_source_line {
                     // Get top_byte for this line
-                    let top_byte = source_state.buffer.line_start_offset(first_line).unwrap_or(0);
+                    let top_byte = source_state
+                        .buffer
+                        .line_start_offset(first_line)
+                        .unwrap_or(0);
 
                     // Create a temporary viewport for building view data
                     let pane_width = pane_widths.get(pane_idx).copied().unwrap_or(80);
-                    let mut viewport = crate::view::viewport::Viewport::new(pane_width, content_height);
+                    let mut viewport =
+                        crate::view::viewport::Viewport::new(pane_width, content_height);
                     viewport.top_byte = top_byte;
                     viewport.line_wrap_enabled = false;
 
@@ -1091,10 +1096,10 @@ impl SplitRenderer {
                     let view_data = Self::build_view_data(
                         source_state,
                         &viewport,
-                        None, // No view transform
-                        80,   // estimated_line_length
+                        None,              // No view transform
+                        80,                // estimated_line_length
                         visible_rows + 10, // visible_count (add buffer)
-                        false, // line_wrap_enabled
+                        false,             // line_wrap_enabled
                         content_width,
                         gutter_width,
                     );
@@ -1126,8 +1131,8 @@ impl SplitRenderer {
                 let mut x = area.x;
                 for &width in &pane_widths {
                     let tilde_area = Rect::new(x, content_y + view_row as u16, width, 1);
-                    let tilde = Paragraph::new("~")
-                        .style(Style::default().fg(theme.line_number_fg));
+                    let tilde =
+                        Paragraph::new("~").style(Style::default().fg(theme.line_number_fg));
                     frame.render_widget(tilde, tilde_area);
                     x += width + separator_width;
                 }
@@ -1168,7 +1173,9 @@ impl SplitRenderer {
                         .get(pane_idx)
                         .and_then(|opt| opt.as_ref())
                         .and_then(|(lines, mapping)| {
-                            mapping.get(&source_line_ref.line).and_then(|&idx| lines.get(idx))
+                            mapping
+                                .get(&source_line_ref.line)
+                                .and_then(|&idx| lines.get(idx))
                         });
 
                     let gutter_width = 4usize;
@@ -1206,14 +1213,16 @@ impl SplitRenderer {
                     } else {
                         // Fallback: get content directly from buffer
                         if let Some(source_state) = buffers.get(&source.buffer_id) {
-                            let line_content = source_state.buffer
+                            let line_content = source_state
+                                .buffer
                                 .get_line(source_line_ref.line)
                                 .map(|line| String::from_utf8_lossy(&line).to_string())
                                 .unwrap_or_default();
 
                             let content_style = Style::default().fg(theme.editor_fg).bg(bg);
                             let chars: Vec<char> = line_content.chars().collect();
-                            let scrolled: String = chars.iter()
+                            let scrolled: String = chars
+                                .iter()
                                 .skip(left_column)
                                 .take(max_content_width)
                                 .collect();
@@ -1238,9 +1247,7 @@ impl SplitRenderer {
                     let is_cursor_pane = pane_idx == view_state.focused_pane;
                     if is_cursor_row && is_cursor_pane && view_state.cursor_column == 0 {
                         // Show cursor on empty line
-                        let cursor_style = Style::default()
-                            .fg(theme.editor_bg)
-                            .bg(theme.editor_fg);
+                        let cursor_style = Style::default().fg(theme.editor_bg).bg(theme.editor_fg);
                         let gutter_width = 4usize;
                         let max_content_width = width.saturating_sub(gutter_width as u16) as usize;
                         let padding = " ".repeat(max_content_width.saturating_sub(1));
@@ -1266,8 +1273,8 @@ impl SplitRenderer {
                 if show_separator && pane_idx < pane_count - 1 {
                     let sep_area =
                         Rect::new(x_offset, content_y + view_row as u16, separator_width, 1);
-                    let sep = Paragraph::new("│")
-                        .style(Style::default().fg(theme.split_separator_fg));
+                    let sep =
+                        Paragraph::new("│").style(Style::default().fg(theme.split_separator_fg));
                     frame.render_widget(sep, sep_area);
                     x_offset += separator_width;
                 }
@@ -1313,7 +1320,9 @@ impl SplitRenderer {
             // Get style for this character
             let token_style = char_styles.get(char_idx).and_then(|s| s.as_ref());
             let char_style = if let Some(ts) = token_style {
-                let fg = ts.fg.map(|(r, g, b)| Color::Rgb(r, g, b))
+                let fg = ts
+                    .fg
+                    .map(|(r, g, b)| Color::Rgb(r, g, b))
                     .unwrap_or(theme.editor_fg);
                 let mut style = Style::default().fg(fg).bg(bg);
                 if ts.bold {
@@ -1361,7 +1370,8 @@ impl SplitRenderer {
         // Pad to fill width
         if rendered < max_width {
             let padding = " ".repeat(max_width - rendered);
-            let pad_style = if show_cursor && rendered <= cursor_column && cursor_column < max_width {
+            let pad_style = if show_cursor && rendered <= cursor_column && cursor_column < max_width
+            {
                 // Cursor is in padding area
                 let cursor_pos = cursor_column - rendered;
                 if cursor_pos == 0 {

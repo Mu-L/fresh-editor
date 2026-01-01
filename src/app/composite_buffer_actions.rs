@@ -68,13 +68,8 @@ impl Editor {
         let buffer_id = BufferId(self.next_buffer_id);
         self.next_buffer_id += 1;
 
-        let composite = CompositeBuffer::new(
-            buffer_id,
-            name.clone(),
-            mode.clone(),
-            layout,
-            sources,
-        );
+        let composite =
+            CompositeBuffer::new(buffer_id, name.clone(), mode.clone(), layout, sources);
         self.composite_buffers.insert(buffer_id, composite);
 
         // Add metadata for display
@@ -224,8 +219,7 @@ impl Editor {
                 Some(true)
             }
             Action::MoveUp => {
-                if let Some(view_state) =
-                    self.composite_view_states.get_mut(&(split_id, buffer_id))
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
                 {
                     view_state.move_cursor_up();
                 }
@@ -252,8 +246,7 @@ impl Editor {
                 Some(true)
             }
             Action::MovePageUp => {
-                if let Some(view_state) =
-                    self.composite_view_states.get_mut(&(split_id, buffer_id))
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
                 {
                     view_state.page_up(viewport_height);
                     // Move cursor to follow scroll
@@ -262,8 +255,7 @@ impl Editor {
                 Some(true)
             }
             Action::MoveDocumentStart => {
-                if let Some(view_state) =
-                    self.composite_view_states.get_mut(&(split_id, buffer_id))
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
                 {
                     view_state.move_cursor_to_top();
                 }
@@ -318,11 +310,7 @@ impl Editor {
         let sources: Vec<SourcePane> = source_configs
             .into_iter()
             .map(|src| {
-                let mut pane = SourcePane::new(
-                    BufferId(src.buffer_id),
-                    src.label,
-                    src.editable,
-                );
+                let mut pane = SourcePane::new(BufferId(src.buffer_id), src.label, src.editable);
                 if let Some(style_config) = src.style {
                     let gutter_style = match style_config.gutter_style.as_deref() {
                         Some("diff-markers") => GutterStyle::DiffMarkers,

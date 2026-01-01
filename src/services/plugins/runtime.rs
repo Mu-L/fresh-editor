@@ -2887,18 +2887,19 @@ async fn op_fresh_create_composite_buffer(
                 buffer_id: src.buffer_id as usize,
                 label: src.label.unwrap_or_default(),
                 editable: src.editable,
-                style: src.style.map(|s| crate::services::plugins::api::CompositePaneStyle {
-                    add_bg: s.add_bg,
-                    remove_bg: s.remove_bg,
-                    modify_bg: s.modify_bg,
-                    gutter_style: s.gutter_style,
-                }),
+                style: src
+                    .style
+                    .map(|s| crate::services::plugins::api::CompositePaneStyle {
+                        add_bg: s.add_bg,
+                        remove_bg: s.remove_bg,
+                        modify_bg: s.modify_bg,
+                        gutter_style: s.gutter_style,
+                    }),
             })
             .collect();
 
-        let hunks: Option<Vec<crate::services::plugins::api::CompositeHunk>> = options
-            .hunks
-            .map(|h| {
+        let hunks: Option<Vec<crate::services::plugins::api::CompositeHunk>> =
+            options.hunks.map(|h| {
                 h.into_iter()
                     .map(|hunk| crate::services::plugins::api::CompositeHunk {
                         old_start: hunk.old_start,
@@ -2932,9 +2933,9 @@ async fn op_fresh_create_composite_buffer(
 
     // Extract buffer ID from response
     match response {
-        crate::services::plugins::api::PluginResponse::CompositeBufferCreated { buffer_id, .. } => {
-            Ok(buffer_id.0 as u32)
-        }
+        crate::services::plugins::api::PluginResponse::CompositeBufferCreated {
+            buffer_id, ..
+        } => Ok(buffer_id.0 as u32),
         _ => Err(JsErrorBox::generic(
             "Unexpected plugin response for composite buffer creation",
         )),
@@ -2963,12 +2964,12 @@ fn op_fresh_update_composite_alignment(
             })
             .collect();
 
-        let _ = runtime_state.command_sender.send(
-            PluginCommand::UpdateCompositeAlignment {
+        let _ = runtime_state
+            .command_sender
+            .send(PluginCommand::UpdateCompositeAlignment {
                 buffer_id: crate::model::event::BufferId(buffer_id as usize),
                 hunks: hunk_configs,
-            },
-        );
+            });
         true
     } else {
         false
@@ -2981,11 +2982,11 @@ fn op_fresh_update_composite_alignment(
 fn op_fresh_close_composite_buffer(state: &mut OpState, buffer_id: u32) -> bool {
     if let Some(runtime_state) = state.try_borrow::<Rc<RefCell<TsRuntimeState>>>() {
         let runtime_state = runtime_state.borrow();
-        let _ = runtime_state.command_sender.send(
-            PluginCommand::CloseCompositeBuffer {
+        let _ = runtime_state
+            .command_sender
+            .send(PluginCommand::CloseCompositeBuffer {
                 buffer_id: crate::model::event::BufferId(buffer_id as usize),
-            },
-        );
+            });
         true
     } else {
         false

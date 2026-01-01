@@ -636,9 +636,9 @@ impl Theme {
             line_number_bg: Color::Rgb(30, 30, 30),
 
             // Diff highlighting colors
-            diff_add_bg: Color::Rgb(35, 60, 35),      // Dark green
-            diff_remove_bg: Color::Rgb(70, 35, 35),   // Dark red
-            diff_modify_bg: Color::Rgb(70, 60, 30),   // Dark yellow/orange
+            diff_add_bg: Color::Rgb(35, 60, 35),    // Dark green
+            diff_remove_bg: Color::Rgb(70, 35, 35), // Dark red
+            diff_modify_bg: Color::Rgb(70, 60, 30), // Dark yellow/orange
 
             // UI element colors
             tab_active_fg: Color::Yellow,
@@ -765,7 +765,7 @@ impl Theme {
             line_number_bg: Color::Rgb(255, 255, 255),
 
             // Diff highlighting colors
-            diff_add_bg: Color::Rgb(200, 255, 200),    // Light green
+            diff_add_bg: Color::Rgb(200, 255, 200), // Light green
             diff_remove_bg: Color::Rgb(255, 200, 200), // Light red
             diff_modify_bg: Color::Rgb(255, 240, 180), // Light yellow
 
@@ -894,9 +894,9 @@ impl Theme {
             line_number_bg: Color::Black,
 
             // Diff highlighting colors
-            diff_add_bg: Color::Rgb(0, 80, 0),       // Dark green
-            diff_remove_bg: Color::Rgb(100, 0, 0),   // Dark red
-            diff_modify_bg: Color::Rgb(100, 80, 0),  // Dark yellow
+            diff_add_bg: Color::Rgb(0, 80, 0),      // Dark green
+            diff_remove_bg: Color::Rgb(100, 0, 0),  // Dark red
+            diff_modify_bg: Color::Rgb(100, 80, 0), // Dark yellow
 
             // UI element colors
             tab_active_fg: Color::Black,
@@ -1073,9 +1073,9 @@ impl Theme {
             line_number_bg: Color::Rgb(0, 0, 170),
 
             // Diff highlighting colors
-            diff_add_bg: Color::Rgb(0, 100, 0),      // DOS green
-            diff_remove_bg: Color::Rgb(170, 0, 0),   // DOS red
-            diff_modify_bg: Color::Rgb(170, 85, 0),  // DOS orange
+            diff_add_bg: Color::Rgb(0, 100, 0),     // DOS green
+            diff_remove_bg: Color::Rgb(170, 0, 0),  // DOS red
+            diff_modify_bg: Color::Rgb(170, 85, 0), // DOS orange
 
             // UI element colors
             tab_active_fg: Color::Rgb(0, 0, 0),
