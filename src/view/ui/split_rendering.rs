@@ -1058,28 +1058,50 @@ impl SplitRenderer {
         let alignment = &composite.alignment;
         let total_rows = alignment.rows.len();
 
-        // Build ViewData for each pane to get syntax-highlighted ViewLines
-        // First, find the range of source lines we need for each pane
-        let mut pane_view_data: Vec<Option<(Vec<ViewLine>, HashMap<usize, usize>)>> = Vec::new();
+        // Build ViewData and get syntax highlighting for each pane
+        // Store: (ViewLines, line->ViewLine mapping, highlight spans)
+        struct PaneRenderData {
+            lines: Vec<ViewLine>,
+            line_to_view_line: HashMap<usize, usize>,
+            highlight_spans: Vec<crate::primitives::highlighter::HighlightSpan>,
+        }
+
+        let mut pane_render_data: Vec<Option<PaneRenderData>> = Vec::new();
 
         for (pane_idx, source) in composite.sources.iter().enumerate() {
             if let Some(source_state) = buffers.get_mut(&source.buffer_id) {
-                // Find the first source line we need for this pane
-                let first_source_line = alignment
+                // Find the first and last source lines we need for this pane
+                let visible_lines: Vec<usize> = alignment
                     .rows
                     .iter()
                     .skip(scroll_row)
                     .take(visible_rows)
                     .filter_map(|row| row.get_pane_line(pane_idx))
                     .map(|r| r.line)
-                    .min();
+                    .collect();
 
-                if let Some(first_line) = first_source_line {
-                    // Get top_byte for this line
+                let first_line = visible_lines.iter().copied().min();
+                let last_line = visible_lines.iter().copied().max();
+
+                if let (Some(first_line), Some(last_line)) = (first_line, last_line) {
+                    // Get byte range for highlighting
                     let top_byte = source_state
                         .buffer
                         .line_start_offset(first_line)
                         .unwrap_or(0);
+                    let end_byte = source_state
+                        .buffer
+                        .line_start_offset(last_line + 1)
+                        .unwrap_or(source_state.buffer.len());
+
+                    // Get syntax highlighting spans from the highlighter
+                    let highlight_spans = source_state.highlighter.highlight_viewport(
+                        &source_state.buffer,
+                        top_byte,
+                        end_byte,
+                        theme,
+                        1024, // highlight_context_bytes
+                    );
 
                     // Create a temporary viewport for building view data
                     let pane_width = pane_widths.get(pane_idx).copied().unwrap_or(80);
@@ -1114,12 +1136,16 @@ impl SplitRenderer {
                         }
                     }
 
-                    pane_view_data.push(Some((view_data.lines, line_to_view_line)));
+                    pane_render_data.push(Some(PaneRenderData {
+                        lines: view_data.lines,
+                        line_to_view_line,
+                        highlight_spans,
+                    }));
                 } else {
-                    pane_view_data.push(None);
+                    pane_render_data.push(None);
                 }
             } else {
-                pane_view_data.push(None);
+                pane_render_data.push(None);
             }
         }
 
@@ -1168,15 +1194,16 @@ impl SplitRenderer {
                 let source_line_opt = aligned_row.get_pane_line(pane_idx);
 
                 if let Some(source_line_ref) = source_line_opt {
-                    // Try to get ViewLine from pre-built data
-                    let view_line_opt = pane_view_data
-                        .get(pane_idx)
-                        .and_then(|opt| opt.as_ref())
-                        .and_then(|(lines, mapping)| {
-                            mapping
-                                .get(&source_line_ref.line)
-                                .and_then(|&idx| lines.get(idx))
-                        });
+                    // Try to get ViewLine and highlight spans from pre-built data
+                    let pane_data = pane_render_data.get(pane_idx).and_then(|opt| opt.as_ref());
+                    let view_line_opt = pane_data.and_then(|data| {
+                        data.line_to_view_line
+                            .get(&source_line_ref.line)
+                            .and_then(|&idx| data.lines.get(idx))
+                    });
+                    let highlight_spans = pane_data
+                        .map(|data| data.highlight_spans.as_slice())
+                        .unwrap_or(&[]);
 
                     let gutter_width = 4usize;
                     let max_content_width = width.saturating_sub(gutter_width as u16) as usize;
@@ -1203,6 +1230,7 @@ impl SplitRenderer {
                         Self::render_view_line_content(
                             &mut spans,
                             view_line,
+                            highlight_spans,
                             left_column,
                             max_content_width,
                             bg,
@@ -1286,6 +1314,7 @@ impl SplitRenderer {
     fn render_view_line_content(
         spans: &mut Vec<Span<'static>>,
         view_line: &ViewLine,
+        highlight_spans: &[crate::primitives::highlighter::HighlightSpan],
         left_column: usize,
         max_width: usize,
         bg: Color,
@@ -1294,7 +1323,7 @@ impl SplitRenderer {
         cursor_column: usize,
     ) {
         let text = &view_line.text;
-        let char_styles = &view_line.char_styles;
+        let char_source_bytes = &view_line.char_source_bytes;
 
         // Apply horizontal scroll and collect visible characters with styles
         let chars: Vec<char> = text.chars().collect();
@@ -1317,21 +1346,20 @@ impl SplitRenderer {
                 break;
             }
 
-            // Get style for this character
-            let token_style = char_styles.get(char_idx).and_then(|s| s.as_ref());
-            let char_style = if let Some(ts) = token_style {
-                let fg = ts
-                    .fg
-                    .map(|(r, g, b)| Color::Rgb(r, g, b))
-                    .unwrap_or(theme.editor_fg);
-                let mut style = Style::default().fg(fg).bg(bg);
-                if ts.bold {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
-                if ts.italic {
-                    style = style.add_modifier(Modifier::ITALIC);
-                }
-                style
+            // Get source byte position for this character
+            let byte_pos = char_source_bytes.get(char_idx).and_then(|b| *b);
+
+            // Get syntax highlight color from highlight_spans
+            let highlight_color = byte_pos.and_then(|bp| {
+                highlight_spans
+                    .iter()
+                    .find(|span| span.range.contains(&bp))
+                    .map(|span| span.color)
+            });
+
+            // Build character style
+            let char_style = if let Some(color) = highlight_color {
+                Style::default().fg(color).bg(bg)
             } else {
                 Style::default().fg(theme.editor_fg).bg(bg)
             };

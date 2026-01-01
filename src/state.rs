@@ -167,14 +167,26 @@ impl EditorState {
     /// Set the syntax highlighting language based on a filename or extension
     /// This allows virtual buffers to get highlighting even without a real file path
     pub fn set_language_from_name(&mut self, name: &str, registry: &GrammarRegistry) {
-        let path = std::path::Path::new(name);
+        // Handle virtual buffer names like "*OLD:test.ts*" or "*OURS*.c"
+        // 1. Strip surrounding * characters
+        // 2. Extract filename after any prefix like "OLD:" or "NEW:"
+        let cleaned_name = name.trim_matches('*');
+        let filename = if let Some(pos) = cleaned_name.rfind(':') {
+            // Extract part after the last colon (e.g., "OLD:test.ts" -> "test.ts")
+            &cleaned_name[pos + 1..]
+        } else {
+            cleaned_name
+        };
+
+        let path = std::path::Path::new(filename);
         self.highlighter = HighlightEngine::for_file(path, registry);
         if let Some(language) = Language::from_path(path) {
             self.semantic_highlighter.set_language(&language);
         }
         tracing::debug!(
-            "Set highlighter for virtual buffer based on name: {} (backend: {})",
+            "Set highlighter for virtual buffer based on name: {} -> {} (backend: {})",
             name,
+            filename,
             self.highlighter.backend_name()
         );
     }
