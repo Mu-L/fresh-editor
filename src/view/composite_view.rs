@@ -33,6 +33,15 @@ pub struct CompositeViewState {
 
     /// Width of each pane (computed during render)
     pub pane_widths: Vec<u16>,
+
+    /// Whether visual selection mode is active
+    pub visual_mode: bool,
+
+    /// Selection anchor row (where selection started)
+    pub selection_anchor_row: usize,
+
+    /// Selection anchor column (where selection started)
+    pub selection_anchor_column: usize,
 }
 
 impl CompositeViewState {
@@ -47,7 +56,42 @@ impl CompositeViewState {
             cursor_column: 0,
             pane_cursors: (0..pane_count).map(|_| Cursors::new()).collect(),
             pane_widths: vec![0; pane_count],
+            visual_mode: false,
+            selection_anchor_row: 0,
+            selection_anchor_column: 0,
         }
+    }
+
+    /// Start visual selection at current cursor position
+    pub fn start_visual_selection(&mut self) {
+        self.visual_mode = true;
+        self.selection_anchor_row = self.cursor_row;
+        self.selection_anchor_column = self.cursor_column;
+    }
+
+    /// Clear visual selection
+    pub fn clear_selection(&mut self) {
+        self.visual_mode = false;
+    }
+
+    /// Get selection row range (start_row, end_row) inclusive
+    /// Returns None if not in visual mode
+    pub fn selection_row_range(&self) -> Option<(usize, usize)> {
+        if !self.visual_mode {
+            return None;
+        }
+        let start = self.selection_anchor_row.min(self.cursor_row);
+        let end = self.selection_anchor_row.max(self.cursor_row);
+        Some((start, end))
+    }
+
+    /// Check if a row is within the selection
+    pub fn is_row_selected(&self, row: usize) -> bool {
+        if !self.visual_mode {
+            return false;
+        }
+        let (start, end) = self.selection_row_range().unwrap();
+        row >= start && row <= end
     }
 
     /// Move cursor down, auto-scrolling if needed

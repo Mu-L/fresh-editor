@@ -1167,14 +1167,20 @@ impl SplitRenderer {
 
             let aligned_row = &alignment.rows[display_row];
             let is_cursor_row = display_row == cursor_row;
+            let is_selected = view_state.is_row_selected(display_row);
 
-            // Determine row background based on type
-            let row_bg = match aligned_row.row_type {
-                RowType::Addition => Some(theme.diff_add_bg),
-                RowType::Deletion => Some(theme.diff_remove_bg),
-                RowType::Modification => Some(theme.diff_modify_bg),
-                RowType::HunkHeader => Some(theme.current_line_bg),
-                RowType::Context => None,
+            // Determine row background based on type and selection
+            let row_bg = if is_selected {
+                // Selection background takes precedence
+                Some(theme.selection_bg)
+            } else {
+                match aligned_row.row_type {
+                    RowType::Addition => Some(theme.diff_add_bg),
+                    RowType::Deletion => Some(theme.diff_remove_bg),
+                    RowType::Modification => Some(theme.diff_modify_bg),
+                    RowType::HunkHeader => Some(theme.current_line_bg),
+                    RowType::Context => None,
+                }
             };
 
             // Render each pane for this row

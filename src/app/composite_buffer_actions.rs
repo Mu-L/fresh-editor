@@ -271,6 +271,74 @@ impl Editor {
                 }
                 Some(true)
             }
+            // Selection: Start visual mode
+            Action::SelectDown | Action::SelectUp => {
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
+                {
+                    if !view_state.visual_mode {
+                        view_state.start_visual_selection();
+                    }
+                    // Move cursor to extend selection
+                    if matches!(action, Action::SelectDown) {
+                        if let Some(composite) = self.composite_buffers.get(&buffer_id) {
+                            let max_row = composite.row_count().saturating_sub(1);
+                            view_state.move_cursor_down(max_row, viewport_height);
+                        }
+                    } else {
+                        view_state.move_cursor_up();
+                    }
+                }
+                Some(true)
+            }
+
+            // Copy selected text from focused pane
+            Action::Copy => {
+                if let (Some(composite), Some(view_state)) = (
+                    self.composite_buffers.get(&buffer_id),
+                    self.composite_view_states.get(&(split_id, buffer_id)),
+                ) {
+                    if let Some((start_row, end_row)) = view_state.selection_row_range() {
+                        // Get the source buffer for the focused pane
+                        if let Some(source) = composite.sources.get(view_state.focused_pane) {
+                            if let Some(source_state) = self.buffers.get(&source.buffer_id) {
+                                // Collect text from selected rows
+                                let mut text = String::new();
+                                for row in start_row..=end_row {
+                                    // Map display row to source line
+                                    if let Some(aligned_row) = composite.alignment.rows.get(row) {
+                                        if let Some(line_ref) =
+                                            aligned_row.get_pane_line(view_state.focused_pane)
+                                        {
+                                            if let Some(line_bytes) =
+                                                source_state.buffer.get_line(line_ref.line)
+                                            {
+                                                if !text.is_empty() {
+                                                    text.push('\n');
+                                                }
+                                                text.push_str(&String::from_utf8_lossy(
+                                                    &line_bytes,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                                // Copy to clipboard
+                                if !text.is_empty() {
+                                    self.clipboard.copy(text);
+                                }
+                            }
+                        }
+                        // Clear selection after copy
+                        if let Some(view_state) =
+                            self.composite_view_states.get_mut(&(split_id, buffer_id))
+                        {
+                            view_state.clear_selection();
+                        }
+                    }
+                }
+                Some(true)
+            }
+
             // For other actions, return None to fall through to normal handling
             _ => None,
         }

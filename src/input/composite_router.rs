@@ -24,12 +24,35 @@ pub enum RoutedEvent {
     },
     /// Cursor movement within focused pane
     PaneCursor(CursorAction),
+    /// Selection action
+    Selection(SelectionAction),
+    /// Yank/copy the selected text
+    Yank,
     /// Event was blocked (e.g., editing read-only pane)
     Blocked(&'static str),
     /// Close the composite view
     Close,
     /// Event not handled by composite router
     Unhandled,
+}
+
+/// Selection actions for visual mode
+#[derive(Debug, Clone, Copy)]
+pub enum SelectionAction {
+    /// Start visual selection at current position
+    StartVisual,
+    /// Start line-wise visual selection
+    StartVisualLine,
+    /// Clear selection
+    ClearSelection,
+    /// Extend selection up
+    ExtendUp,
+    /// Extend selection down
+    ExtendDown,
+    /// Extend selection left
+    ExtendLeft,
+    /// Extend selection right
+    ExtendRight,
 }
 
 /// Scroll actions for the composite view
@@ -129,6 +152,17 @@ impl CompositeInputRouter {
             (KeyModifiers::NONE, KeyCode::Char('q')) | (KeyModifiers::NONE, KeyCode::Esc) => {
                 RoutedEvent::Close
             }
+
+            // Visual selection
+            (KeyModifiers::NONE, KeyCode::Char('v')) => {
+                RoutedEvent::Selection(SelectionAction::StartVisual)
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('V')) => {
+                RoutedEvent::Selection(SelectionAction::StartVisualLine)
+            }
+
+            // Yank (copy) selected text
+            (KeyModifiers::NONE, KeyCode::Char('y')) => RoutedEvent::Yank,
 
             // Editing (if pane is editable)
             (KeyModifiers::NONE, KeyCode::Char(c)) => {

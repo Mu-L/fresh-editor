@@ -1199,6 +1199,13 @@ editor.defineMode("diff-view", "special", [
     ["Up", "move_up"],
     ["PageDown", "move_page_down"],
     ["PageUp", "move_page_up"],
+    // Selection and copy
+    ["Shift+Down", "select_down"],
+    ["Shift+Up", "select_up"],
+    ["Shift+j", "select_down"],
+    ["Shift+k", "select_up"],
+    ["Ctrl+c", "copy"],
+    ["y", "copy"],
 ], true);
 
 // --- Review Comment Actions ---
