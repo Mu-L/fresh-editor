@@ -873,7 +873,7 @@ fn test_vi_colon_write() {
     harness.render().unwrap();
 
     // Wait for prompt to appear (semantic waiting)
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type 'w' and press Enter
     harness.type_text("w").unwrap();
@@ -913,7 +913,7 @@ fn test_vi_colon_quit() {
     harness.render().unwrap();
 
     // Wait for prompt to appear (semantic waiting)
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type 'q' and press Enter
     harness.type_text("q").unwrap();
@@ -968,7 +968,7 @@ fn test_vi_colon_force_quit() {
     harness.render().unwrap();
 
     // Wait for prompt to appear
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type 'q!' and press Enter (force quit)
     harness.type_text("q!").unwrap();
@@ -1023,7 +1023,7 @@ fn test_vi_colon_write_quit() {
     harness.render().unwrap();
 
     // Wait for prompt to appear
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type 'wq' and press Enter
     harness.type_text("wq").unwrap();
@@ -1066,7 +1066,7 @@ fn test_vi_colon_goto_line() {
     harness.render().unwrap();
 
     // Wait for prompt to appear
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type '35' and press Enter to go to line 35
     harness.type_text("35").unwrap();
@@ -1124,7 +1124,7 @@ fn test_vi_colon_buffer_next() {
     harness.render().unwrap();
 
     // Wait for prompt to appear
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type 'bn' and press Enter
     harness.type_text("bn").unwrap();
@@ -1156,7 +1156,7 @@ fn test_vi_colon_split() {
     harness.render().unwrap();
 
     // Wait for prompt to appear
-    harness.wait_for_screen_contains(":").unwrap();
+    harness.wait_for_prompt().unwrap();
 
     // Type 'sp' and press Enter
     harness.type_text("sp").unwrap();
