@@ -1,180 +1,257 @@
-# Plan: Reuse Normal Buffer Rendering for Composite Buffers
+# Clean Architecture for Composite Buffer Rendering
 
-## Problem Statement
-
-The normal buffer rendering (`render_view_lines()`) is a ~700 line function with sophisticated features:
-- ViewLine-based rendering with per-character mappings
-- Syntax highlighting via compute_char_style()
-- Selection rendering (multiple cursors, block selection)
-- ANSI sequence handling
-- Virtual text injection
-- Line wrapping with proper line number handling
-
-The composite buffer rendering is currently simplified and missing these features.
-
-## Current Architecture
+## Pipeline Overview
 
 ```
 Normal Buffer:
-  EditorState
-      ↓
-  build_view_data() → Vec<ViewLine>
-      ↓
-  selection_context() → SelectionContext (byte-based)
-      ↓
-  decoration_context() → DecorationContext (byte-based)
-      ↓
-  render_view_lines(LineRenderInput) → rendered output
+  EditorState.buffer
+    ↓ line_iterator(top_byte) - iterate from byte offset
+  Lines (byte stream)
+    ↓ build_base_tokens()
+  Vec<ViewTokenWire>
+    ↓ ViewLineIterator
+  Vec<ViewLine>
+    ↓ render_view_lines()
+  Screen
+
+Composite Buffer (PROPOSED):
+  Source EditorStates (per pane)
+    ↓ buffer.get_line(line_num) - access by line number
+  Line content (per source line)
+    ↓ build_view_line_from_line()
+  ViewLine (per source line)
+    ↓ render_styled_view_line()
+  Screen (per pane, per row)
 ```
 
-The problem: `render_view_lines()` is tightly coupled to:
-1. **EditorState** - for buffer lookups, debug mode, etc.
-2. **Byte-based contexts** - SelectionContext and DecorationContext use byte offsets
+## Key Insight
 
-For composite buffers, we have:
-- Multiple source buffers (one per pane)
-- Alignment that maps display rows to source lines
-- Per-pane viewports and cursors
+The existing pipeline uses **byte offsets** everywhere:
+- `top_byte` in Viewport
+- `source_offset` in ViewTokenWire
+- `char_source_bytes` in ViewLine
+- Highlight spans use byte ranges
 
-## Proposed Architecture: Extract LineRenderer
+But for composite buffers, we work with **line numbers** and **alignment**:
+- `scroll_row` (display row)
+- `alignment.rows[display_row].get_pane_line(pane_idx)` → source line number
+- Per-pane cursors by (row, column)
 
-### Step 1: Extract Per-Line Rendering
+## Solution: Bridge Line Numbers to ViewLines
 
-Create a new struct that encapsulates line rendering logic:
+### Step 1: Build ViewLine from Source Line
 
 ```rust
-/// Renders a single line with full styling support
-pub struct LineRenderer<'a> {
-    theme: &'a Theme,
+/// Build a ViewLine from a buffer line (by line number)
+fn build_view_line_from_line(
+    buffer: &Buffer,
+    line_num: usize,
+    tab_size: usize,
+) -> Option<ViewLine> {
+    let line_content = buffer.get_line(line_num)?;
+    let line_start = buffer.line_start_offset(line_num)?;
+
+    // Build token for this line
+    let text = String::from_utf8_lossy(&line_content);
+    let text = text.trim_end_matches('\n').trim_end_matches('\r');
+
+    let tokens = vec![ViewTokenWire {
+        source_offset: Some(line_start),  // Absolute byte offset
+        kind: ViewTokenWireKind::Text(text.to_string()),
+        style: None,
+    }];
+
+    ViewLineIterator::new(&tokens, false, true, tab_size).next()
+}
+```
+
+### Step 2: Get Highlight Spans for Source Line
+
+```rust
+/// Get syntax highlight spans for a source line (adjusted to line-relative offsets)
+fn get_line_highlights(
+    state: &EditorState,
+    line_num: usize,
+) -> Vec<HighlightSpan> {
+    let line_start = state.buffer.line_start_offset(line_num).unwrap_or(0);
+    let line_end = state.buffer.line_start_offset(line_num + 1)
+        .unwrap_or_else(|| state.buffer.len());
+
+    // Get spans from highlighter
+    state.highlighter.get_highlight_spans_in_range(line_start, line_end)
+        .into_iter()
+        .map(|mut span| {
+            // Keep absolute offsets - compute_char_style uses them
+            span
+        })
+        .collect()
+}
+```
+
+### Step 3: Render ViewLine with Styling
+
+This is where we can **directly reuse compute_char_style()**:
+
+```rust
+/// Render a ViewLine for a composite buffer pane
+fn render_composite_view_line(
+    view_line: &ViewLine,
+    theme: &Theme,
+    highlight_spans: &[HighlightSpan],
     left_column: usize,
+    cursor_column: Option<usize>,  // None if not cursor row
+    background_override: Option<Color>,  // Diff coloring
+    line_number: Option<usize>,
+    gutter_width: usize,
     is_active: bool,
-}
+) -> Line<'static> {
+    let mut spans = Vec::new();
 
-impl<'a> LineRenderer<'a> {
-    /// Render a ViewLine with styling
-    pub fn render_line(
-        &self,
-        view_line: &ViewLine,
-        line_context: LineContext,
-    ) -> RenderedLine {
-        // Character-by-character rendering with:
-        // - Horizontal scrolling (skip left_column chars)
-        // - Cursor highlighting (if is_cursor)
-        // - Selection highlighting (if in selection range)
-        // - Syntax highlighting (from highlight_spans)
-        // - ANSI handling
+    // Render gutter (line number)
+    if let Some(num) = line_number {
+        let num_str = format!("{:>width$} ", num, width = gutter_width - 1);
+        spans.push(Span::styled(num_str, Style::default().fg(theme.line_number_fg)));
+    } else {
+        spans.push(Span::styled(" ".repeat(gutter_width), Style::default()));
     }
-}
 
-/// Context for a single line (replaces byte-based contexts)
-pub struct LineContext {
-    /// Line number to display (None for continuation lines)
-    pub line_number: Option<usize>,
+    // Render content with styling
+    let text_chars: Vec<char> = view_line.text.chars().collect();
 
-    /// Cursor column position on this line (None if no cursor)
-    pub cursor_column: Option<usize>,
+    for (char_idx, ch) in text_chars.iter().enumerate().skip(left_column) {
+        let byte_pos = view_line.char_source_bytes.get(char_idx).copied().flatten();
 
-    /// Selection ranges within this line (character-based, not byte-based)
-    pub selection_ranges: Vec<Range<usize>>,
+        // Compute style using EXISTING compute_char_style logic
+        let mut style = compute_base_style(byte_pos, highlight_spans, theme);
 
-    /// Highlight spans relative to this line
-    pub highlight_spans: Vec<HighlightSpan>,
+        // Apply background override (diff coloring)
+        if let Some(bg) = background_override {
+            style = style.bg(bg);
+        }
 
-    /// Background color override (for diff highlighting)
-    pub background_override: Option<Color>,
-}
+        // Apply cursor styling
+        if cursor_column == Some(char_idx) {
+            style = Style::default().fg(theme.editor_bg).bg(theme.editor_fg);
+        }
 
-pub struct RenderedLine {
-    pub spans: Vec<Span<'static>>,
-    pub cursor_x: Option<u16>,  // Screen X position of cursor, if on this line
+        spans.push(Span::styled(ch.to_string(), style));
+    }
+
+    Line::from(spans)
 }
 ```
 
-### Step 2: Refactor render_view_lines to Use LineRenderer
+### Step 4: Integrate into render_composite_buffer()
 
 ```rust
-fn render_view_lines(input: LineRenderInput<'_>) -> LineRenderOutput {
-    let renderer = LineRenderer::new(input.theme, input.left_column, input.is_active);
+fn render_composite_buffer(
+    frame: &mut Frame,
+    area: Rect,
+    composite: &CompositeBuffer,
+    buffers: &HashMap<BufferId, EditorState>,
+    theme: &Theme,
+    is_active: bool,
+    view_state: &CompositeViewState,
+) {
+    // ... layout calculation ...
 
-    let mut lines = Vec::new();
-    for (view_line, line_context) in view_lines_with_context(input) {
-        let rendered = renderer.render_line(view_line, line_context);
-        lines.push(Line::from(rendered.spans));
-    }
+    for view_row in 0..visible_rows {
+        let display_row = view_state.scroll_row + view_row;
+        let aligned_row = &composite.alignment.rows[display_row];
+        let is_cursor_row = display_row == view_state.cursor_row;
 
-    LineRenderOutput { lines, ... }
-}
+        // Get diff background
+        let row_bg = match aligned_row.row_type {
+            RowType::Addition => Some(theme.diff_add_bg),
+            RowType::Deletion => Some(theme.diff_remove_bg),
+            RowType::Modification => Some(theme.diff_modify_bg),
+            _ => None,
+        };
 
-/// Builds LineContext for each ViewLine from the byte-based contexts
-fn view_lines_with_context<'a>(
-    input: &'a LineRenderInput<'a>,
-) -> impl Iterator<Item = (&'a ViewLine, LineContext)> {
-    // Convert byte-based SelectionContext to per-line selection ranges
-    // Convert byte-based DecorationContext to per-line highlight spans
-}
-```
+        for (pane_idx, (source, &width)) in composite.sources.iter().zip(&pane_widths).enumerate() {
+            let pane_area = Rect::new(x_offset, content_y + view_row as u16, width, 1);
+            let left_column = view_state.get_pane_viewport(pane_idx)
+                .map(|v| v.left_column).unwrap_or(0);
 
-### Step 3: Use LineRenderer for Composite Buffers
-
-```rust
-fn render_composite_buffer(...) {
-    let renderer = LineRenderer::new(theme, 0, is_active);
-
-    for display_row in visible_rows {
-        let aligned_row = &alignment.rows[display_row];
-
-        for (pane_idx, source) in sources.iter().enumerate() {
-            // Get ViewLine from source buffer
-            let view_line = get_pane_view_line(source_state, aligned_row, pane_idx);
-
-            // Build per-line context
-            let line_context = LineContext {
-                line_number: aligned_row.get_pane_line(pane_idx).map(|r| r.line + 1),
-                cursor_column: if is_cursor_row && is_focused_pane {
-                    Some(view_state.cursor_column)
-                } else {
-                    None
-                },
-                selection_ranges: vec![],  // TODO: from pane_cursors
-                highlight_spans: get_highlight_spans_for_line(source_state, line_num),
-                background_override: get_diff_background(aligned_row.row_type),
+            let is_focused_pane = pane_idx == view_state.focused_pane;
+            let cursor_col = if is_cursor_row && is_focused_pane {
+                Some(view_state.cursor_column)
+            } else {
+                None
             };
 
-            let rendered = renderer.render_line(&view_line, line_context);
-            // ... render to frame
+            if let Some(source_line_ref) = aligned_row.get_pane_line(pane_idx) {
+                if let Some(source_state) = buffers.get(&source.buffer_id) {
+                    // Build ViewLine from source line
+                    let view_line = build_view_line_from_line(
+                        &source_state.buffer,
+                        source_line_ref.line,
+                        source_state.tab_size,
+                    );
+
+                    if let Some(vl) = view_line {
+                        // Get syntax highlighting
+                        let highlights = get_line_highlights(source_state, source_line_ref.line);
+
+                        // Render with full styling
+                        let rendered = render_composite_view_line(
+                            &vl,
+                            theme,
+                            &highlights,
+                            left_column,
+                            cursor_col,
+                            row_bg,
+                            Some(source_line_ref.line + 1),
+                            GUTTER_WIDTH,
+                            is_active,
+                        );
+
+                        let para = Paragraph::new(rendered);
+                        frame.render_widget(para, pane_area);
+                    }
+                }
+            }
+
+            x_offset += width + separator_width;
         }
     }
 }
 ```
 
+## What This Reuses
+
+| Component | Reused? | How |
+|-----------|---------|-----|
+| ViewLineIterator | ✅ | Build ViewLine from single line's tokens |
+| ViewLine structure | ✅ | Same struct with char mappings |
+| compute_char_style logic | ✅ | Same style layering for syntax highlighting |
+| Highlighter | ✅ | Query spans by byte range |
+| Theme | ✅ | Same colors and styling |
+| Span/Line/Paragraph | ✅ | Same ratatui widgets |
+
+## What's New/Different
+
+1. **build_view_line_from_line()** - Builds ViewLine from line number instead of byte stream
+2. **get_line_highlights()** - Queries highlighter for a single line's range
+3. **render_composite_view_line()** - Simplified rendering that handles:
+   - Line number display
+   - Horizontal scrolling
+   - Cursor (by column, not byte)
+   - Diff backgrounds
+   - Syntax highlighting
+
 ## Benefits
 
-1. **Single source of truth** - All character styling logic in LineRenderer
-2. **Testable** - LineRenderer can be unit tested
-3. **Flexible contexts** - LineContext is line-relative, not byte-relative
-4. **Incremental adoption** - Can refactor render_view_lines incrementally
+1. **Minimal duplication** - Reuses ViewLineIterator, highlighting, theming
+2. **Clean abstraction** - Line-based API vs byte-based API
+3. **Incremental** - Can add features (selection, semantic highlighting) later
+4. **Testable** - Each function is standalone and testable
 
 ## Implementation Order
 
-1. Create `LineRenderer` struct with basic render_line() method
-2. Extract character styling loop from render_view_lines() into LineRenderer
-3. Add `LineContext` and context building for normal buffers
-4. Verify normal buffer rendering still works
-5. Add composite buffer support using LineRenderer
-6. Add syntax highlighting for composite panes
-7. Add selection rendering for composite panes
-
-## Estimated Effort
-
-- Phase 1 (Extract LineRenderer): ~2-3 hours of careful refactoring
-- Phase 2 (Composite integration): ~1-2 hours
-- Phase 3 (Full feature parity): ~2-3 hours
-
-## Alternative: Quick Win
-
-If full refactoring is too costly, we can:
-1. Keep the current composite rendering (with scrollbar, cursor, horizontal scroll)
-2. Just add syntax highlighting by querying the source buffer's highlighter
-3. Accept some code similarity (not duplication) between render paths
-
-This gets 80% of the benefit with 20% of the effort.
+1. Add `build_view_line_from_line()` helper
+2. Add `get_line_highlights()` helper
+3. Replace current `render_composite_buffer()` content rendering with new approach
+4. Verify syntax highlighting works
+5. Add semantic highlighting support
+6. Add selection rendering
