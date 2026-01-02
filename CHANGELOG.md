@@ -2,11 +2,13 @@
 
 ## 0.1.68
 
+> **macOS Users**: This release includes significant improvements for macOS terminal compatibility. See the new [macOS Terminal Tips](docs/USER_GUIDE.md#macos-terminal-tips) guide for recommended terminal emulators and keyboard configuration. The macOS keymap ([`keymaps/macos.json`](keymaps/macos.json)) is a work in progress—please submit patches based on your experience with different terminals and keyboard layouts!
+
 ### Features
 
 * **Internationalization (i18n)**: Full i18n support with 11 languages (German, French, Spanish, Japanese, Korean, Chinese, Russian, Ukrainian, Czech, Portuguese, Thai). Select locale via command palette or Settings UI. Plugins support translation via `editor.t()` and `.i18n.json` files.
 
-* **macOS Keymap**: Terminal-friendly VS Code-style keybindings for macOS. Auto-detected on startup (#219).
+* **macOS Keymap**: Terminal-friendly keybindings that avoid broken Ctrl+Shift combinations, ASCII control char collisions (Ctrl+J=LF), and international keyboard conflicts (Ctrl+Alt+L=@ on German). Key bindings: Ctrl+R (redo), Ctrl+G (find next), Ctrl+L (go to line), Ctrl+T (go to symbol), Alt+B/F (word movement). See [macOS Terminal Tips](docs/USER_GUIDE.md#macos-terminal-tips) (#219).
 
 * **4-Level Config System**: Configuration now merges user, platform, project, and session layers. Settings UI shows layer indicators and allows editing specific config files.
 

@@ -217,6 +217,7 @@ cargo build --release
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md)
+- [macOS Tips](docs/USER_GUIDE.md#macos-terminal-tips) - Terminal configuration, keyboard shortcuts, and troubleshooting for Mac users
 - [Plugin Development](docs/PLUGIN_DEVELOPMENT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 
