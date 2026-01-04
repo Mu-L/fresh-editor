@@ -372,18 +372,19 @@ fn start_server(config: Config) {
     let screen = harness.screen_to_string();
     println!("Aligned diff screen:\n{}", screen);
 
-    // Should show OLD and NEW in tab bar or content
-    // The split view should have both panes
+    // Should show OLD and NEW pane headers
+    // The format is "OLD (HEAD)" and "NEW (Working)"
     assert!(
-        screen.contains("[OLD]") || screen.contains("[NEW]"),
+        screen.contains("OLD (HEAD)") || screen.contains("NEW (Working)"),
         "Should show OLD or NEW pane header. Screen:\n{}",
         screen
     );
 
-    // Should show filler lines (░ character pattern)
+    // Verify alignment - the OLD and NEW panes should be side by side with a separator
+    // The left pane has blank lines where content was added on the right
     assert!(
-        screen.contains("░"),
-        "Should show filler lines for alignment. Screen:\n{}",
+        screen.contains("│"),
+        "Should show pane separator for side-by-side view. Screen:\n{}",
         screen
     );
 
