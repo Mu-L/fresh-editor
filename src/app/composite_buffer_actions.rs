@@ -264,60 +264,132 @@ impl Editor {
                 Some(true)
             }
 
-            // Forward navigation/selection to focused source buffer
-            // The composite view handles visual scroll via CompositeViewState
-            Action::MoveDown
-            | Action::MoveUp
-            | Action::MoveLeft
-            | Action::MoveRight
-            | Action::MovePageDown
-            | Action::MovePageUp
-            | Action::MoveDocumentStart
-            | Action::MoveDocumentEnd
-            | Action::MoveLineStart
-            | Action::MoveLineEnd
-            | Action::MoveWordLeft
-            | Action::MoveWordRight
-            | Action::ScrollDown
-            | Action::ScrollUp
-            | Action::SelectDown
-            | Action::SelectUp
-            | Action::SelectLeft
-            | Action::SelectRight
-            | Action::SelectAll
-            | Action::SelectLine
-            | Action::SelectWord => {
-                // Get config values needed for action_to_events
-                let tab_size = self.config.editor.tab_size;
-                let auto_indent = self.config.editor.auto_indent;
+            // Navigation: Update composite view's cursor/scroll position
+            // These operate on the aligned view, not the underlying source buffers
+            Action::MoveDown | Action::MoveUp | Action::MoveLeft | Action::MoveRight => {
                 let viewport_height = self
                     .split_view_states
                     .get(&split_id)
-                    .map(|vs| vs.viewport.height)
+                    .map(|vs| vs.viewport.height as usize)
                     .unwrap_or(24);
 
-                // Apply action to focused source buffer
-                if let Some(source_state) = self.buffers.get_mut(&focused_buffer_id) {
-                    let estimated_line_length = 80; // Default estimate
-                    // Convert action to events and apply
-                    if let Some(events) = crate::input::actions::action_to_events(
-                        source_state,
-                        action.clone(),
-                        tab_size,
-                        auto_indent,
-                        estimated_line_length,
-                        viewport_height,
-                    ) {
-                        for event in events {
-                            source_state.apply(&event);
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
+                {
+                    match action {
+                        Action::MoveDown => {
+                            if let Some(composite) = self.composite_buffers.get(&buffer_id) {
+                                let max_row = composite.row_count().saturating_sub(1);
+                                view_state.move_cursor_down(max_row, viewport_height);
+                            }
                         }
+                        Action::MoveUp => view_state.move_cursor_up(),
+                        Action::MoveLeft => {
+                            view_state.cursor_column = view_state.cursor_column.saturating_sub(1);
+                        }
+                        Action::MoveRight => {
+                            view_state.cursor_column = view_state.cursor_column.saturating_add(1);
+                        }
+                        _ => {}
                     }
                 }
 
-                // Note: Scroll sync between panes is visual-only and handled
-                // by CompositeViewState during rendering
-                let _ = other_buffer_id;
+                let _ = (focused_buffer_id, other_buffer_id);
+                Some(true)
+            }
 
+            // Page navigation
+            Action::MovePageDown | Action::MovePageUp => {
+                let viewport_height = self
+                    .split_view_states
+                    .get(&split_id)
+                    .map(|vs| vs.viewport.height as usize)
+                    .unwrap_or(24);
+
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
+                {
+                    if matches!(action, Action::MovePageDown) {
+                        if let Some(composite) = self.composite_buffers.get(&buffer_id) {
+                            let max_row = composite.row_count().saturating_sub(1);
+                            view_state.page_down(viewport_height, max_row);
+                            view_state.cursor_row = view_state.scroll_row;
+                        }
+                    } else {
+                        view_state.page_up(viewport_height);
+                        view_state.cursor_row = view_state.scroll_row;
+                    }
+                }
+
+                let _ = (focused_buffer_id, other_buffer_id);
+                Some(true)
+            }
+
+            // Document start/end
+            Action::MoveDocumentStart | Action::MoveDocumentEnd => {
+                let viewport_height = self
+                    .split_view_states
+                    .get(&split_id)
+                    .map(|vs| vs.viewport.height as usize)
+                    .unwrap_or(24);
+
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
+                {
+                    if matches!(action, Action::MoveDocumentStart) {
+                        view_state.move_cursor_to_top();
+                    } else if let Some(composite) = self.composite_buffers.get(&buffer_id) {
+                        let max_row = composite.row_count().saturating_sub(1);
+                        view_state.move_cursor_to_bottom(max_row, viewport_height);
+                    }
+                }
+
+                let _ = (focused_buffer_id, other_buffer_id);
+                Some(true)
+            }
+
+            // Scroll without moving cursor
+            Action::ScrollDown | Action::ScrollUp => {
+                let delta = if matches!(action, Action::ScrollDown) {
+                    1
+                } else {
+                    -1
+                };
+                self.composite_scroll(split_id, buffer_id, delta);
+
+                let _ = (focused_buffer_id, other_buffer_id);
+                Some(true)
+            }
+
+            // Selection: Start visual mode and extend
+            Action::SelectDown | Action::SelectUp | Action::SelectLeft | Action::SelectRight => {
+                let viewport_height = self
+                    .split_view_states
+                    .get(&split_id)
+                    .map(|vs| vs.viewport.height as usize)
+                    .unwrap_or(24);
+
+                if let Some(view_state) = self.composite_view_states.get_mut(&(split_id, buffer_id))
+                {
+                    if !view_state.visual_mode {
+                        view_state.start_visual_selection();
+                    }
+                    match action {
+                        Action::SelectDown => {
+                            if let Some(composite) = self.composite_buffers.get(&buffer_id) {
+                                let max_row = composite.row_count().saturating_sub(1);
+                                view_state.move_cursor_down(max_row, viewport_height);
+                            }
+                        }
+                        Action::SelectUp => view_state.move_cursor_up(),
+                        Action::SelectLeft => {
+                            view_state.cursor_column = view_state.cursor_column.saturating_sub(1);
+                        }
+                        Action::SelectRight => {
+                            view_state.cursor_column = view_state.cursor_column.saturating_add(1);
+                        }
+                        _ => {}
+                    }
+                }
+
+                let _ = (focused_buffer_id, other_buffer_id);
                 Some(true)
             }
 
