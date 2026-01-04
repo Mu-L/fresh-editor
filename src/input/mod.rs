@@ -6,6 +6,7 @@ pub mod actions;
 pub mod buffer_mode;
 pub mod command_registry;
 pub mod commands;
+pub mod composite_router;
 pub mod fuzzy;
 pub mod handler;
 pub mod input_history;
