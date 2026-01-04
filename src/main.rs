@@ -11,6 +11,7 @@ use crossterm::{
 };
 #[cfg(target_os = "linux")]
 use fresh::services::gpm::{gpm_to_crossterm, GpmClient};
+use fresh::input::key_translator::KeyTranslator;
 use fresh::services::tracing_setup;
 use fresh::{
     app::Editor, config, config_io::DirectoryContext, services::release_checker,
@@ -96,6 +97,8 @@ struct SetupState {
     /// Stdin streaming state (if --stdin flag or "-" file was used)
     /// Contains temp file path and background thread handle
     stdin_stream: Option<StdinStreamState>,
+    /// Key translator for input calibration
+    key_translator: KeyTranslator,
     #[cfg(target_os = "linux")]
     gpm_client: Option<GpmClient>,
     #[cfg(not(target_os = "linux"))]
@@ -548,6 +551,15 @@ fn initialize_app(args: &Args) -> io::Result<SetupState> {
     let dir_context = DirectoryContext::from_system()?;
     let current_working_dir = working_dir;
 
+    // Load key translator for input calibration
+    let key_translator = match KeyTranslator::load_default() {
+        Ok(translator) => translator,
+        Err(e) => {
+            tracing::warn!("Failed to load key calibration: {}", e);
+            KeyTranslator::new()
+        }
+    };
+
     Ok(SetupState {
         config,
         warning_log_handle,
@@ -558,6 +570,7 @@ fn initialize_app(args: &Args) -> io::Result<SetupState> {
         dir_context,
         current_working_dir,
         stdin_stream,
+        key_translator,
         gpm_client,
     })
 }
@@ -567,12 +580,13 @@ fn run_editor_iteration(
     editor: &mut Editor,
     session_enabled: bool,
     terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
+    key_translator: &KeyTranslator,
     #[cfg(target_os = "linux")] gpm_client: &Option<GpmClient>,
 ) -> io::Result<IterationOutcome> {
     #[cfg(target_os = "linux")]
-    let loop_result = run_event_loop(editor, terminal, session_enabled, gpm_client);
+    let loop_result = run_event_loop(editor, terminal, session_enabled, key_translator, gpm_client);
     #[cfg(not(target_os = "linux"))]
-    let loop_result = run_event_loop(editor, terminal, session_enabled);
+    let loop_result = run_event_loop(editor, terminal, session_enabled, key_translator);
 
     if let Err(e) = editor.end_recovery_session() {
         tracing::warn!("Failed to end recovery session: {}", e);
@@ -642,6 +656,7 @@ fn main() -> io::Result<()> {
         dir_context,
         current_working_dir: initial_working_dir,
         mut stdin_stream,
+        key_translator,
         #[cfg(target_os = "linux")]
         gpm_client,
         #[cfg(not(target_os = "linux"))]
@@ -737,6 +752,7 @@ fn main() -> io::Result<()> {
             &mut editor,
             session_enabled,
             &mut terminal,
+            &key_translator,
             #[cfg(target_os = "linux")]
             &gpm_client,
         )?;
@@ -800,9 +816,10 @@ fn run_event_loop(
     editor: &mut Editor,
     terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
     session_enabled: bool,
+    key_translator: &KeyTranslator,
     gpm_client: &Option<GpmClient>,
 ) -> io::Result<()> {
-    run_event_loop_common(editor, terminal, session_enabled, |timeout| {
+    run_event_loop_common(editor, terminal, session_enabled, key_translator, |timeout| {
         poll_with_gpm(gpm_client.as_ref(), timeout)
     })
 }
@@ -813,8 +830,9 @@ fn run_event_loop(
     editor: &mut Editor,
     terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
     session_enabled: bool,
+    key_translator: &KeyTranslator,
 ) -> io::Result<()> {
-    run_event_loop_common(editor, terminal, session_enabled, |timeout| {
+    run_event_loop_common(editor, terminal, session_enabled, key_translator, |timeout| {
         if event_poll(timeout)? {
             Ok(Some(event_read()?))
         } else {
@@ -827,6 +845,7 @@ fn run_event_loop_common<F>(
     editor: &mut Editor,
     terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
     session_enabled: bool,
+    key_translator: &KeyTranslator,
     mut poll_event: F,
 ) -> io::Result<()>
 where
@@ -906,7 +925,9 @@ where
         match event {
             CrosstermEvent::Key(key_event) => {
                 if key_event.kind == KeyEventKind::Press {
-                    handle_key_event(editor, key_event)?;
+                    // Apply key translation (for input calibration)
+                    let translated_event = key_translator.translate(key_event);
+                    handle_key_event(editor, translated_event)?;
                     needs_render = true;
                 }
             }
