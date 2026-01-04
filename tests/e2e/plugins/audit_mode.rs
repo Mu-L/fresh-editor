@@ -947,3 +947,186 @@ fn helper() {
         screen
     );
 }
+
+/// Test that running "Show Warnings" command while diff view is open doesn't break the diff
+/// Bug: The diff buffer would disappear when "Show Warnings" was triggered
+#[test]
+fn test_side_by_side_diff_survives_show_warnings() {
+    init_tracing_from_env();
+    let repo = GitTestRepo::new();
+    repo.setup_typical_project();
+    setup_audit_mode_plugin(&repo);
+
+    repo.git_add_all();
+    repo.git_commit("Initial commit");
+
+    let main_rs_path = repo.path.join("src/main.rs");
+    let modified_content = r#"fn main() {
+    println!("Modified line");
+}
+"#;
+    fs::write(&main_rs_path, modified_content).expect("Failed to modify file");
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        160,
+        50,
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    harness.open_file(&main_rs_path).unwrap();
+    harness.render().unwrap();
+
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Modified"))
+        .unwrap();
+
+    // Open side-by-side diff
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_prompt().unwrap();
+    harness.type_text("Side-by-Side Diff").unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.wait_for_prompt_closed().unwrap();
+
+    // Wait for diff to load
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            if screen.contains("TypeError") || screen.contains("Error:") {
+                panic!("Error loading diff. Screen:\n{}", screen);
+            }
+            screen.contains("Side-by-side diff:") && !screen.contains("Loading")
+        })
+        .unwrap();
+
+    let screen_before = harness.screen_to_string();
+    println!("Screen before Show Warnings:\n{}", screen_before);
+
+    // Verify we have the diff view (check status bar for diff indicator)
+    assert!(
+        screen_before.contains("Side-by-side diff:"),
+        "Should show diff view. Screen:\n{}",
+        screen_before
+    );
+
+    // Now run "Show Warnings" command
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_prompt().unwrap();
+    harness.type_text("Show Warnings").unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.wait_for_prompt_closed().unwrap();
+    harness.render().unwrap();
+
+    let screen_after = harness.screen_to_string();
+    println!("Screen after Show Warnings:\n{}", screen_after);
+
+    // The diff view should still be visible (either focused or as a tab)
+    // Check for the diff buffer name or pane headers
+    assert!(
+        screen_after.contains("*Diff:")
+            || screen_after.contains("[OLD]")
+            || screen_after.contains("[NEW]"),
+        "Diff view should still be visible after Show Warnings. Screen:\n{}",
+        screen_after
+    );
+}
+
+/// Test that closing buffers doesn't switch to a hidden buffer
+/// Bug: When closing the last visible buffer, the editor would switch to a hidden
+/// source buffer (like *OLD:* or *NEW:*) instead of creating a new buffer
+#[test]
+fn test_close_buffer_skips_hidden_buffers() {
+    init_tracing_from_env();
+    let repo = GitTestRepo::new();
+    repo.setup_typical_project();
+    setup_audit_mode_plugin(&repo);
+
+    repo.git_add_all();
+    repo.git_commit("Initial commit");
+
+    let main_rs_path = repo.path.join("src/main.rs");
+    let modified_content = r#"fn main() {
+    println!("Modified");
+}
+"#;
+    fs::write(&main_rs_path, modified_content).expect("Failed to modify file");
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        160,
+        50,
+        Config::default(),
+        repo.path.clone(),
+    )
+    .unwrap();
+
+    harness.open_file(&main_rs_path).unwrap();
+    harness.render().unwrap();
+
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Modified"))
+        .unwrap();
+
+    // Open side-by-side diff (this creates hidden *OLD:* and *NEW:* buffers)
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_prompt().unwrap();
+    harness.type_text("Side-by-Side Diff").unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.wait_for_prompt_closed().unwrap();
+
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            if screen.contains("TypeError") || screen.contains("Error:") {
+                panic!("Error loading diff. Screen:\n{}", screen);
+            }
+            screen.contains("Side-by-side diff:") && !screen.contains("Loading")
+        })
+        .unwrap();
+
+    // Close the diff view with 'q'
+    harness
+        .send_key(KeyCode::Char('q'), KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Now close the main.rs buffer
+    harness
+        .send_key(KeyCode::Char('w'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    let screen = harness.screen_to_string();
+    println!("Screen after closing buffer:\n{}", screen);
+
+    // Should NOT be showing a hidden buffer (OLD: or NEW:)
+    assert!(
+        !screen.contains("*OLD:") && !screen.contains("*NEW:"),
+        "Should not switch to hidden OLD/NEW buffers. Screen:\n{}",
+        screen
+    );
+
+    // The tab bar should not show *OLD: or *NEW: tabs
+    // (This is enforced by hidden_from_tabs, but double-check)
+    let first_lines: String = screen.lines().take(3).collect::<Vec<_>>().join("\n");
+    assert!(
+        !first_lines.contains("*OLD:") && !first_lines.contains("*NEW:"),
+        "Hidden buffers should not appear in tab bar. Screen:\n{}",
+        screen
+    );
+}
