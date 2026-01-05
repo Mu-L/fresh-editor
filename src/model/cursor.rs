@@ -1,6 +1,16 @@
-use crate::model::event::CursorId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Range;
+
+/// Unique identifier for a cursor
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CursorId(pub usize);
+
+impl CursorId {
+    /// Sentinel value used for inverse events during undo/redo
+    /// This indicates that the event shouldn't move any cursor
+    pub const UNDO_SENTINEL: CursorId = CursorId(usize::MAX);
+}
 
 /// Selection mode for cursors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

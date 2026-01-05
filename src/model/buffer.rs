@@ -1,14 +1,16 @@
 /// Text buffer that uses PieceTree with integrated line tracking
 /// Architecture where the tree is the single source of truth for text and line information
+use crate::model::filesystem::{FileSystem, NoopFileSystem, StdFileSystem};
 use crate::model::piece_tree::{
     BufferData, BufferLocation, Cursor, PieceInfo, PieceRangeIter, PieceTree, Position,
     StringBuffer, TreeStats,
 };
 use crate::model::piece_tree_diff::PieceTreeDiff;
 use crate::primitives::grapheme;
+use crate::view::text_content::{LineEnding as TextLineEnding, TextContentProvider, TextLine};
 use anyhow::{Context, Result};
 use regex::bytes::Regex;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -104,6 +106,10 @@ impl LineNumber {
 /// A text buffer that manages document content using a piece table
 /// with integrated line tracking
 pub struct TextBuffer {
+    /// Filesystem abstraction for file I/O operations
+    /// Stored internally so methods can access it without threading through call chains
+    fs: Arc<dyn FileSystem + Send + Sync>,
+
     /// The piece tree for efficient text manipulation with integrated line tracking
     piece_tree: PieceTree,
 
@@ -157,6 +163,7 @@ impl TextBuffer {
         let piece_tree = PieceTree::empty();
         let line_ending = LineEnding::default();
         TextBuffer {
+            fs: Arc::new(NoopFileSystem),
             saved_root: piece_tree.root(),
             piece_tree,
             buffers: vec![StringBuffer::new(0, Vec::new())],
@@ -192,6 +199,7 @@ impl TextBuffer {
         let saved_root = piece_tree.root();
 
         TextBuffer {
+            fs: Arc::new(NoopFileSystem),
             line_ending,
             original_line_ending: line_ending,
             piece_tree,
@@ -218,6 +226,7 @@ impl TextBuffer {
         let saved_root = piece_tree.root();
         let line_ending = LineEnding::default();
         TextBuffer {
+            fs: Arc::new(NoopFileSystem),
             piece_tree,
             saved_root,
             buffers: vec![StringBuffer::new(0, Vec::new())],
@@ -234,15 +243,19 @@ impl TextBuffer {
     }
 
     /// Load a text buffer from a file
+    ///
+    /// Uses `StdFileSystem` for native filesystem access. For WASM builds where
+    /// content comes from JavaScript, use `from_bytes()` instead.
     pub fn load_from_file<P: AsRef<Path>>(
         path: P,
         large_file_threshold: usize,
     ) -> io::Result<Self> {
+        let fs: Arc<dyn FileSystem + Send + Sync> = Arc::new(StdFileSystem);
         let path = path.as_ref();
 
         // Get file size to determine loading strategy
-        let metadata = std::fs::metadata(path)?;
-        let file_size = metadata.len() as usize;
+        let metadata = fs.metadata(path)?;
+        let file_size = metadata.size as usize;
 
         // Use threshold parameter or default
         let threshold = if large_file_threshold > 0 {
@@ -253,18 +266,18 @@ impl TextBuffer {
 
         // Choose loading strategy based on file size
         if file_size >= threshold {
-            Self::load_large_file(path, file_size)
+            Self::load_large_file(&fs, path, file_size)
         } else {
-            Self::load_small_file(path)
+            Self::load_small_file(&fs, path)
         }
     }
 
     /// Load a small file with full eager loading and line indexing
-    fn load_small_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let path = path.as_ref();
-        let mut file = std::fs::File::open(path)?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)?;
+    fn load_small_file(
+        fs: &Arc<dyn FileSystem + Send + Sync>,
+        path: &Path,
+    ) -> io::Result<Self> {
+        let contents = fs.read_file(path)?;
 
         // Detect if this is a binary file
         let is_binary = Self::detect_binary(&contents);
@@ -274,6 +287,7 @@ impl TextBuffer {
 
         // Keep original line endings - the view layer handles CRLF display
         let mut buffer = Self::from_bytes(contents);
+        buffer.fs = Arc::clone(fs);
         buffer.file_path = Some(path.to_path_buf());
         buffer.modified = false;
         buffer.large_file = false;
@@ -284,22 +298,19 @@ impl TextBuffer {
     }
 
     /// Load a large file with unloaded buffer (no line indexing, lazy loading)
-    fn load_large_file<P: AsRef<Path>>(path: P, file_size: usize) -> io::Result<Self> {
+    fn load_large_file(
+        fs: &Arc<dyn FileSystem + Send + Sync>,
+        path: &Path,
+        file_size: usize,
+    ) -> io::Result<Self> {
         use crate::model::piece_tree::{BufferData, BufferLocation};
-
-        let path = path.as_ref();
 
         // Read a sample of the file to detect if it's binary and line ending format
         // We read the first 8KB for both binary and line ending detection
-        let (is_binary, line_ending) = {
-            let mut file = std::fs::File::open(path)?;
-            let sample_size = file_size.min(8 * 1024);
-            let mut sample = vec![0u8; sample_size];
-            file.read_exact(&mut sample)?;
-            let is_binary = Self::detect_binary(&sample);
-            let line_ending = Self::detect_line_ending(&sample);
-            (is_binary, line_ending)
-        };
+        let sample_size = file_size.min(8 * 1024);
+        let sample = fs.read_range(path, 0, sample_size)?;
+        let is_binary = Self::detect_binary(&sample);
+        let line_ending = Self::detect_line_ending(&sample);
 
         // Create an unloaded buffer that references the entire file
         let buffer = StringBuffer {
@@ -327,6 +338,7 @@ impl TextBuffer {
         );
 
         Ok(TextBuffer {
+            fs: Arc::clone(fs),
             piece_tree,
             saved_root,
             buffers: vec![buffer],
@@ -344,8 +356,8 @@ impl TextBuffer {
 
     /// Save the buffer to its associated file
     pub fn save(&mut self) -> io::Result<()> {
-        if let Some(path) = &self.file_path {
-            self.save_to_file(path.clone())
+        if let Some(path) = &self.file_path.clone() {
+            self.save_to_file(path)
         } else {
             Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -363,12 +375,16 @@ impl TextBuffer {
     /// If the line ending format has been changed (via set_line_ending), all content
     /// will be converted to the new format during save.
     pub fn save_to_file<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+        use crate::model::filesystem::FileReader;
+        use std::io::SeekFrom;
+
+        let fs = &self.fs;
         let dest_path = path.as_ref();
         let total = self.total_bytes();
 
         // Get original file metadata (permissions, owner, etc.) before writing
         // so we can preserve it after creating/renaming the temp file
-        let original_metadata = std::fs::metadata(dest_path).ok();
+        let original_metadata = fs.metadata_if_exists(dest_path);
 
         // Check if we need to convert line endings
         let needs_conversion = self.line_ending != self.original_line_ending;
@@ -376,9 +392,11 @@ impl TextBuffer {
 
         if total == 0 {
             // Empty file - just create it
-            std::fs::File::create(dest_path)?;
+            let _ = fs.create_file(dest_path)?;
             if let Some(ref meta) = original_metadata {
-                Self::restore_file_metadata(dest_path, meta)?;
+                if let Some(ref perms) = meta.permissions {
+                    let _ = fs.set_permissions(dest_path, perms);
+                }
             }
             self.file_path = Some(dest_path.to_path_buf());
             self.mark_saved_snapshot();
@@ -390,10 +408,10 @@ impl TextBuffer {
 
         // Use a temp file to avoid corrupting the original if something goes wrong
         let temp_path = dest_path.with_extension("tmp");
-        let mut out_file = std::fs::File::create(&temp_path)?;
+        let mut out_file = fs.create_file(&temp_path)?;
 
         // Cache for open source files (for streaming unloaded regions)
-        let mut source_file_cache: Option<(PathBuf, std::fs::File)> = None;
+        let mut source_file_cache: Option<(PathBuf, Box<dyn FileReader>)> = None;
 
         // Iterate through all pieces and write them
         for piece_view in self.piece_tree.iter_pieces_in_range(0, total) {
@@ -426,12 +444,12 @@ impl TextBuffer {
                     ..
                 } => {
                     // Stream from source file
-                    let source_file = match &mut source_file_cache {
-                        Some((cached_path, file)) if cached_path == file_path => file,
+                    let source_file: &mut dyn FileReader = match &mut source_file_cache {
+                        Some((cached_path, file)) if cached_path == file_path => file.as_mut(),
                         _ => {
-                            let file = std::fs::File::open(file_path)?;
+                            let file = fs.open_file(file_path)?;
                             source_file_cache = Some((file_path.clone(), file));
-                            &mut source_file_cache.as_mut().unwrap().1
+                            source_file_cache.as_mut().unwrap().1.as_mut()
                         }
                     };
 
@@ -467,16 +485,18 @@ impl TextBuffer {
         out_file.sync_all()?;
         drop(out_file);
 
-        // Restore original file permissions/owner before renaming
+        // Restore original file permissions before renaming
         if let Some(ref meta) = original_metadata {
-            Self::restore_file_metadata(&temp_path, meta)?;
+            if let Some(ref perms) = meta.permissions {
+                let _ = fs.set_permissions(&temp_path, perms);
+            }
         }
 
         // Atomically replace the original file
-        std::fs::rename(&temp_path, dest_path)?;
+        fs.rename(&temp_path, dest_path)?;
 
         // Update saved file size to match the file on disk
-        let new_size = std::fs::metadata(dest_path)?.len() as usize;
+        let new_size = fs.metadata(dest_path)?.size as usize;
         tracing::debug!(
             "Buffer::save: updating saved_file_size from {:?} to {}",
             self.saved_file_size,
@@ -490,30 +510,6 @@ impl TextBuffer {
         // Update original_line_ending to match what we just saved
         // This prevents repeated conversions on subsequent saves
         self.original_line_ending = self.line_ending;
-
-        Ok(())
-    }
-
-    /// Restore file metadata (permissions, owner/group) from original file
-    fn restore_file_metadata(path: &Path, original_meta: &std::fs::Metadata) -> io::Result<()> {
-        // Restore permissions (works cross-platform)
-        std::fs::set_permissions(path, original_meta.permissions())?;
-
-        // On Unix, also restore owner and group
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let uid = original_meta.uid();
-            let gid = original_meta.gid();
-            // Use libc to set owner/group - ignore errors since we may not have permission
-            // (e.g., only root can chown to a different user)
-            unsafe {
-                use std::os::unix::ffi::OsStrExt;
-                let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-                libc::chown(c_path.as_ptr(), uid, gid);
-            }
-        }
 
         Ok(())
     }
@@ -1155,7 +1151,7 @@ impl TextBuffer {
                         self.buffers
                             .get_mut(new_buffer_id)
                             .context("Chunk buffer not found")?
-                            .load()
+                            .load(self.fs.as_ref())
                             .context("Failed to load chunk")?;
 
                         // Restart iteration with the modified tree
@@ -1166,7 +1162,7 @@ impl TextBuffer {
                         self.buffers
                             .get_mut(buffer_id)
                             .context("Buffer not found")?
-                            .load()
+                            .load(self.fs.as_ref())
                             .context("Failed to load buffer")?;
                     }
                 }
@@ -2309,6 +2305,9 @@ impl TextBuffer {
     ///
     /// This iterator lazily loads chunks as needed, never scanning the entire file.
     /// For large files with unloaded buffers, chunks are loaded on-demand (1MB at a time).
+    ///
+    /// Note: In WASM with NoopFileSystem, lazy loading will fail. Use `from_bytes()`
+    /// to create fully-loaded buffers instead.
     pub fn line_iterator(
         &mut self,
         byte_pos: usize,
@@ -2435,6 +2434,112 @@ impl TextBuffer {
     #[cfg(test)]
     pub fn new_test() -> Self {
         Self::empty()
+    }
+}
+
+// ============================================================================
+// TextContentProvider Implementation
+// ============================================================================
+
+/// Implementation of TextContentProvider for shared rendering with WASM
+impl TextContentProvider for TextBuffer {
+    fn len(&self) -> usize {
+        self.total_bytes()
+    }
+
+    fn is_binary(&self) -> bool {
+        self.is_binary
+    }
+
+    fn line_ending(&self) -> TextLineEnding {
+        match self.line_ending {
+            LineEnding::LF => TextLineEnding::Lf,
+            LineEnding::CRLF => TextLineEnding::CrLf,
+            LineEnding::CR => TextLineEnding::Cr,
+        }
+    }
+
+    fn line_count(&self) -> usize {
+        // Use piece_tree's line count if available, otherwise estimate from content
+        self.piece_tree.line_count().unwrap_or_else(|| {
+            // For large files without line indexing, count lines on demand
+            // This is expensive but correct
+            self.get_all_text()
+                .map(|text| text.iter().filter(|&&b| b == b'\n').count() + 1)
+                .unwrap_or(1)
+        })
+    }
+
+    fn get_line(&self, line_num: usize) -> Option<TextLine> {
+        let start = self.line_start_offset(line_num)?;
+        let next_start = self.line_start_offset(line_num + 1);
+
+        // Calculate line content (without line ending)
+        let line_bytes = if let Some(next) = next_start {
+            // Get bytes between this line start and next line start
+            let raw = self.get_text_range(start, next - start)?;
+
+            // Trim trailing line ending
+            let mut end = raw.len();
+            if end > 0 && raw[end - 1] == b'\n' {
+                end -= 1;
+                if end > 0 && raw[end - 1] == b'\r' {
+                    end -= 1;
+                }
+            } else if end > 0 && raw[end - 1] == b'\r' {
+                end -= 1;
+            }
+            raw[..end].to_vec()
+        } else {
+            // Last line - get remaining content
+            let total = self.total_bytes();
+            if start >= total {
+                Vec::new()
+            } else {
+                self.get_text_range(start, total - start).unwrap_or_default()
+            }
+        };
+
+        let content = String::from_utf8_lossy(&line_bytes).into_owned();
+        let line_ending_len = if let Some(next) = next_start {
+            next - start - line_bytes.len()
+        } else {
+            0
+        };
+
+        Some(TextLine {
+            start_byte: start,
+            content,
+            line_ending_len,
+        })
+    }
+
+    fn slice_bytes(&self, range: Range<usize>) -> Vec<u8> {
+        self.get_text_range(range.start, range.end.saturating_sub(range.start))
+            .unwrap_or_default()
+    }
+
+    fn byte_to_line(&self, byte_offset: usize) -> usize {
+        self.offset_to_position(byte_offset)
+            .map(|pos| pos.line)
+            .unwrap_or(0)
+    }
+
+    fn line_to_byte(&self, line: usize) -> Option<usize> {
+        self.line_start_offset(line)
+    }
+
+    fn get_text_range(&self, start: usize, end: usize) -> String {
+        let bytes = self
+            .get_text_range(start, end.saturating_sub(start))
+            .unwrap_or_default();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    fn content(&self) -> String {
+        self.get_all_text()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default()
     }
 }
 
@@ -2993,7 +3098,8 @@ mod tests {
             assert!(!buffer.is_loaded());
 
             // Load the buffer
-            buffer.load().unwrap();
+            let fs = crate::model::filesystem::StdFileSystem;
+            buffer.load(&fs).unwrap();
 
             // Now it should be loaded
             assert!(buffer.is_loaded());

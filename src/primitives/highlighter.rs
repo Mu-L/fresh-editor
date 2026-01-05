@@ -1,5 +1,8 @@
 //! Syntax highlighting with tree-sitter
 //!
+//! This module provides tree-sitter based syntax highlighting (runtime-only).
+//! For WASM-compatible highlighting, see `highlight_engine` which uses syntect.
+//!
 //! # Design
 //! - **Viewport-only parsing**: Only highlights visible lines for instant performance with large files
 //! - **Incremental updates**: Re-parses only edited regions
@@ -12,108 +15,14 @@
 use crate::config::LARGE_FILE_THRESHOLD_BYTES;
 use crate::model::buffer::Buffer;
 use crate::view::theme::Theme;
-use ratatui::style::Color;
 use std::ops::Range;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter as TSHighlighter};
 
+// Re-export shared types from highlight_engine (WASM-compatible)
+pub use crate::primitives::highlight_engine::{HighlightCategory, HighlightSpan, Language};
+
 /// Maximum bytes to parse in a single operation (for viewport highlighting)
 const MAX_PARSE_BYTES: usize = LARGE_FILE_THRESHOLD_BYTES as usize; // 1MB
-
-/// Highlight category names used for default languages.
-/// The order matches the `configure()` call in `highlight_config()`.
-/// Index 0 = attribute, 1 = comment, 2 = constant, 3 = function, 4 = keyword,
-/// 5 = number, 6 = operator, 7 = property, 8 = string, 9 = type, 10 = variable
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HighlightCategory {
-    Attribute,
-    Comment,
-    Constant,
-    Function,
-    Keyword,
-    Number,
-    Operator,
-    Property,
-    String,
-    Type,
-    Variable,
-}
-
-impl HighlightCategory {
-    /// Map a default language highlight index to a category
-    fn from_default_index(index: usize) -> Option<Self> {
-        match index {
-            0 => Some(Self::Attribute),
-            1 => Some(Self::Comment),
-            2 => Some(Self::Constant),
-            3 => Some(Self::Function),
-            4 => Some(Self::Keyword),
-            5 => Some(Self::Number),
-            6 => Some(Self::Operator),
-            7 => Some(Self::Property),
-            8 => Some(Self::String),
-            9 => Some(Self::Type),
-            10 => Some(Self::Variable),
-            _ => None,
-        }
-    }
-
-    /// Map a TypeScript highlight index to a category.
-    /// TypeScript has more categories; we map them to the closest theme color.
-    fn from_typescript_index(index: usize) -> Option<Self> {
-        match index {
-            0 => Some(Self::Attribute), // attribute
-            1 => Some(Self::Comment),   // comment
-            2 => Some(Self::Constant),  // constant
-            3 => Some(Self::Constant),  // constant.builtin
-            4 => Some(Self::Type),      // constructor
-            5 => Some(Self::String),    // embedded (template substitutions)
-            6 => Some(Self::Function),  // function
-            7 => Some(Self::Function),  // function.builtin
-            8 => Some(Self::Function),  // function.method
-            9 => Some(Self::Keyword),   // keyword
-            10 => Some(Self::Number),   // number
-            11 => Some(Self::Operator), // operator
-            12 => Some(Self::Property), // property
-            13 => Some(Self::Operator), // punctuation.bracket
-            14 => Some(Self::Operator), // punctuation.delimiter
-            15 => Some(Self::Constant), // punctuation.special (template ${})
-            16 => Some(Self::String),   // string
-            17 => Some(Self::String),   // string.special (regex)
-            18 => Some(Self::Type),     // type
-            19 => Some(Self::Type),     // type.builtin
-            20 => Some(Self::Variable), // variable
-            21 => Some(Self::Constant), // variable.builtin (this, super, arguments)
-            22 => Some(Self::Variable), // variable.parameter
-            _ => None,
-        }
-    }
-
-    /// Get the color for this category from the theme
-    pub fn color(&self, theme: &Theme) -> Color {
-        match self {
-            Self::Attribute => theme.syntax_constant, // No specific attribute color, use constant
-            Self::Comment => theme.syntax_comment,
-            Self::Constant => theme.syntax_constant,
-            Self::Function => theme.syntax_function,
-            Self::Keyword => theme.syntax_keyword,
-            Self::Number => theme.syntax_constant,
-            Self::Operator => theme.syntax_operator,
-            Self::Property => theme.syntax_variable, // Properties are like variables
-            Self::String => theme.syntax_string,
-            Self::Type => theme.syntax_type,
-            Self::Variable => theme.syntax_variable,
-        }
-    }
-}
-
-/// A highlighted span of text
-#[derive(Debug, Clone)]
-pub struct HighlightSpan {
-    /// Byte range in the buffer
-    pub range: Range<usize>,
-    /// Color for this span
-    pub color: Color,
-}
 
 /// Internal span used for caching (stores category instead of color)
 #[derive(Debug, Clone)]
@@ -124,55 +33,7 @@ struct CachedSpan {
     category: HighlightCategory,
 }
 
-/// Language configuration for syntax highlighting
-#[derive(Debug, Clone, Copy)]
-pub enum Language {
-    Rust,
-    Python,
-    JavaScript,
-    TypeScript,
-    HTML,
-    CSS,
-    C,
-    Cpp,
-    Go,
-    Json,
-    Java,
-    CSharp,
-    Php,
-    Ruby,
-    Bash,
-    Lua,
-    Pascal,
-    // Markdown,  // Disabled due to tree-sitter version conflict
-}
-
 impl Language {
-    /// Detect language from file extension
-    pub fn from_path(path: &std::path::Path) -> Option<Self> {
-        match path.extension()?.to_str()? {
-            "rs" => Some(Language::Rust),
-            "py" => Some(Language::Python),
-            "js" | "jsx" => Some(Language::JavaScript),
-            "ts" | "tsx" => Some(Language::TypeScript),
-            "html" => Some(Language::HTML),
-            "css" => Some(Language::CSS),
-            "c" | "h" => Some(Language::C),
-            "cpp" | "hpp" | "cc" | "hh" | "cxx" | "hxx" => Some(Language::Cpp),
-            "go" => Some(Language::Go),
-            "json" => Some(Language::Json),
-            "java" => Some(Language::Java),
-            "cs" => Some(Language::CSharp),
-            "php" => Some(Language::Php),
-            "rb" => Some(Language::Ruby),
-            "sh" | "bash" => Some(Language::Bash),
-            "lua" => Some(Language::Lua),
-            "pas" | "p" => Some(Language::Pascal),
-            // "md" => Some(Language::Markdown),  // Disabled
-            _ => None,
-        }
-    }
-
     /// Get tree-sitter highlight configuration for this language
     fn highlight_config(&self) -> Result<HighlightConfiguration, String> {
         match self {

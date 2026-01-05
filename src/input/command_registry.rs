@@ -3,10 +3,9 @@
 //! This module allows plugins to register custom commands dynamically
 //! while maintaining the built-in command set.
 
+use crate::input::action::{Action, KeyContext};
 use crate::input::commands::{get_all_commands, Command, Suggestion};
 use crate::input::fuzzy::fuzzy_match;
-use crate::input::keybindings::Action;
-use crate::input::keybindings::KeyContext;
 use std::sync::{Arc, RwLock};
 
 /// Registry for managing editor commands

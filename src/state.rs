@@ -9,8 +9,7 @@ use crate::model::event::{
 };
 use crate::model::marker::MarkerList;
 use crate::primitives::grammar_registry::GrammarRegistry;
-use crate::primitives::highlight_engine::HighlightEngine;
-use crate::primitives::highlighter::Language;
+use crate::primitives::highlight_engine::{HighlightEngine, Language};
 use crate::primitives::indent::IndentCalculator;
 use crate::primitives::semantic_highlight::SemanticHighlighter;
 use crate::primitives::text_property::TextPropertyManager;

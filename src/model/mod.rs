@@ -1,6 +1,7 @@
 //! Core data model for documents
 //!
 //! This module contains pure data structures with minimal external dependencies.
+//! All submodules are pure Rust and WASM-compatible.
 
 pub mod buffer;
 pub mod composite_buffer;
@@ -9,6 +10,7 @@ pub mod cursor;
 pub mod document_model;
 pub mod edit;
 pub mod event;
+pub mod filesystem;
 pub mod line_diff;
 pub mod marker;
 pub mod marker_tree;
