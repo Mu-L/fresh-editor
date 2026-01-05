@@ -1,29 +1,170 @@
 //! Unified highlighting engine
 //!
-//! This module provides a unified abstraction over different highlighting backends:
-//! - TextMate grammars via syntect (default for highlighting)
-//! - Tree-sitter (available via explicit preference, also used for non-highlighting features)
+//! This module provides syntax highlighting using TextMate grammars via syntect.
+//! This is the default and WASM-compatible highlighting backend.
 //!
-//! # Backend Selection
-//! By default, syntect/TextMate is used for syntax highlighting because it provides
-//! broader language coverage. Tree-sitter language detection is still performed
-//! to support non-highlighting features like auto-indentation and semantic highlighting.
-//!
-//! # Non-Highlighting Features
-//! Even when using TextMate for highlighting, tree-sitter `Language` is detected
-//! and available via `.language()` for:
-//! - Auto-indentation (via IndentCalculator)
-//! - Semantic highlighting (variable scope tracking)
-//! - Other syntax-aware features
+//! For tree-sitter based features (semantic highlighting, indentation), see the
+//! `highlighter` module which is runtime-only.
 
 use crate::model::buffer::Buffer;
 use crate::primitives::grammar_registry::GrammarRegistry;
-use crate::primitives::highlighter::{HighlightCategory, HighlightSpan, Highlighter, Language};
 use crate::view::theme::Theme;
+use ratatui::style::Color;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 use syntect::parsing::SyntaxSet;
+
+
+// =============================================================================
+// Shared Types (WASM-compatible)
+// =============================================================================
+
+/// Categories of syntax elements for highlighting
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HighlightCategory {
+    Attribute,
+    Comment,
+    Constant,
+    Function,
+    Keyword,
+    Number,
+    Operator,
+    Property,
+    String,
+    Type,
+    Variable,
+}
+
+impl HighlightCategory {
+    /// Get the color for this category from the theme
+    pub fn color(&self, theme: &Theme) -> Color {
+        match self {
+            Self::Attribute => theme.syntax_constant, // No specific attribute color, use constant
+            Self::Comment => theme.syntax_comment,
+            Self::Constant => theme.syntax_constant,
+            Self::Function => theme.syntax_function,
+            Self::Keyword => theme.syntax_keyword,
+            Self::Number => theme.syntax_constant,
+            Self::Operator => theme.syntax_operator,
+            Self::Property => theme.syntax_variable, // Properties are like variables
+            Self::String => theme.syntax_string,
+            Self::Type => theme.syntax_type,
+            Self::Variable => theme.syntax_variable,
+        }
+    }
+
+    /// Map a default language highlight index to a category (for tree-sitter)
+    pub(crate) fn from_default_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::Attribute),
+            1 => Some(Self::Comment),
+            2 => Some(Self::Constant),
+            3 => Some(Self::Function),
+            4 => Some(Self::Keyword),
+            5 => Some(Self::Number),
+            6 => Some(Self::Operator),
+            7 => Some(Self::Property),
+            8 => Some(Self::String),
+            9 => Some(Self::Type),
+            10 => Some(Self::Variable),
+            _ => None,
+        }
+    }
+
+    /// Map a TypeScript highlight index to a category (for tree-sitter)
+    pub(crate) fn from_typescript_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Self::Attribute), // attribute
+            1 => Some(Self::Comment),   // comment
+            2 => Some(Self::Constant),  // constant
+            3 => Some(Self::Constant),  // constant.builtin
+            4 => Some(Self::Type),      // constructor
+            5 => Some(Self::String),    // embedded (template substitutions)
+            6 => Some(Self::Function),  // function
+            7 => Some(Self::Function),  // function.builtin
+            8 => Some(Self::Function),  // function.method
+            9 => Some(Self::Keyword),   // keyword
+            10 => Some(Self::Number),   // number
+            11 => Some(Self::Operator), // operator
+            12 => Some(Self::Property), // property
+            13 => Some(Self::Operator), // punctuation.bracket
+            14 => Some(Self::Operator), // punctuation.delimiter
+            15 => Some(Self::Constant), // punctuation.special (template ${})
+            16 => Some(Self::String),   // string
+            17 => Some(Self::String),   // string.special (regex)
+            18 => Some(Self::Type),     // type
+            19 => Some(Self::Type),     // type.builtin
+            20 => Some(Self::Variable), // variable
+            21 => Some(Self::Constant), // variable.builtin (this, super, arguments)
+            22 => Some(Self::Variable), // variable.parameter
+            _ => None,
+        }
+    }
+}
+
+/// A highlighted span in the buffer
+#[derive(Debug, Clone)]
+pub struct HighlightSpan {
+    /// Byte range in the buffer
+    pub range: Range<usize>,
+    /// Color for this span
+    pub color: Color,
+}
+
+/// Language enum for syntax detection
+///
+/// Used for both TextMate grammar lookup and tree-sitter language selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Language {
+    Rust,
+    Python,
+    JavaScript,
+    TypeScript,
+    HTML,
+    CSS,
+    C,
+    Cpp,
+    Go,
+    Json,
+    Java,
+    CSharp,
+    Php,
+    Ruby,
+    Bash,
+    Lua,
+    Pascal,
+}
+
+impl Language {
+    /// Detect language from file extension
+    pub fn from_path(path: &std::path::Path) -> Option<Self> {
+        match path.extension()?.to_str()? {
+            "rs" => Some(Language::Rust),
+            "py" => Some(Language::Python),
+            "js" | "jsx" => Some(Language::JavaScript),
+            "ts" | "tsx" => Some(Language::TypeScript),
+            "html" => Some(Language::HTML),
+            "css" => Some(Language::CSS),
+            "c" | "h" => Some(Language::C),
+            "cpp" | "hpp" | "cc" | "hh" | "cxx" | "hxx" => Some(Language::Cpp),
+            "go" => Some(Language::Go),
+            "json" => Some(Language::Json),
+            "java" => Some(Language::Java),
+            "cs" => Some(Language::CSharp),
+            "php" => Some(Language::Php),
+            "rb" => Some(Language::Ruby),
+            "sh" | "bash" => Some(Language::Bash),
+            "lua" => Some(Language::Lua),
+            "pas" | "p" => Some(Language::Pascal),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Highlighting Engine
+// =============================================================================
 
 /// Map TextMate scope to highlight category
 fn scope_to_category(scope: &str) -> Option<HighlightCategory> {
@@ -171,20 +312,15 @@ fn scope_to_category(scope: &str) -> Option<HighlightCategory> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HighlighterPreference {
     /// Use TextMate/syntect for highlighting (default)
-    /// Tree-sitter language is still detected for other features (indentation, semantic highlighting)
     #[default]
     Auto,
-    /// Force tree-sitter for highlighting (useful for testing/comparison)
-    TreeSitter,
     /// Explicitly use TextMate grammar (same as Auto)
     TextMate,
 }
 
-/// Unified highlighting engine supporting multiple backends
+/// Highlighting engine using TextMate grammars via syntect
 pub enum HighlightEngine {
-    /// Tree-sitter based highlighting (built-in languages)
-    TreeSitter(Highlighter),
-    /// TextMate grammar based highlighting
+    /// TextMate grammar based highlighting (WASM-compatible)
     TextMate(TextMateEngine),
     /// No highlighting available
     None,
@@ -514,54 +650,28 @@ impl HighlightEngine {
         path: &Path,
         registry: &GrammarRegistry,
         languages: &std::collections::HashMap<String, crate::config::LanguageConfig>,
-        preference: HighlighterPreference,
+        _preference: HighlighterPreference,
     ) -> Self {
-        match preference {
-            // Auto now defaults to TextMate for highlighting (syntect has broader coverage)
-            // but still detects tree-sitter language for indentation/semantic features
-            HighlighterPreference::Auto | HighlighterPreference::TextMate => {
-                Self::textmate_for_file_with_languages(path, registry, languages)
-            }
-            HighlighterPreference::TreeSitter => {
-                if let Some(lang) = Language::from_path(path) {
-                    if let Ok(highlighter) = Highlighter::new(lang) {
-                        return Self::TreeSitter(highlighter);
-                    }
-                }
-                Self::None
-            }
-        }
+        // All preferences now use TextMate/syntect (WASM-compatible)
+        Self::textmate_for_file_with_languages(path, registry, languages)
     }
 
     /// Create a highlighting engine with explicit preference
     pub fn for_file_with_preference(
         path: &Path,
         registry: &GrammarRegistry,
-        preference: HighlighterPreference,
+        _preference: HighlighterPreference,
     ) -> Self {
-        match preference {
-            // Auto now defaults to TextMate for highlighting (syntect has broader coverage)
-            // but still detects tree-sitter language for indentation/semantic features
-            HighlighterPreference::Auto | HighlighterPreference::TextMate => {
-                Self::textmate_for_file(path, registry)
-            }
-            HighlighterPreference::TreeSitter => {
-                if let Some(lang) = Language::from_path(path) {
-                    if let Ok(highlighter) = Highlighter::new(lang) {
-                        return Self::TreeSitter(highlighter);
-                    }
-                }
-                Self::None
-            }
-        }
+        // All preferences now use TextMate/syntect (WASM-compatible)
+        Self::textmate_for_file(path, registry)
     }
 
-    /// Create a TextMate engine for a file, falling back to tree-sitter if no TextMate grammar
+    /// Create a TextMate engine for a file
     fn textmate_for_file(path: &Path, registry: &GrammarRegistry) -> Self {
         let syntax_set = registry.syntax_set_arc();
 
-        // Detect tree-sitter language for non-highlighting features
-        let ts_language = Language::from_path(path);
+        // Detect language for non-highlighting features
+        let language = Language::from_path(path);
 
         // Find syntax by file extension
         if let Some(syntax) = registry.find_syntax_for_file(path) {
@@ -574,20 +684,8 @@ impl HighlightEngine {
                 return Self::TextMate(TextMateEngine::with_language(
                     syntax_set,
                     index,
-                    ts_language,
+                    language,
                 ));
-            }
-        }
-
-        // No TextMate grammar found - fall back to tree-sitter if available
-        // This handles languages like TypeScript that syntect doesn't include by default
-        if let Some(lang) = ts_language {
-            if let Ok(highlighter) = Highlighter::new(lang) {
-                tracing::debug!(
-                    "No TextMate grammar for {:?}, falling back to tree-sitter",
-                    path.extension()
-                );
-                return Self::TreeSitter(highlighter);
             }
         }
 
@@ -602,8 +700,8 @@ impl HighlightEngine {
     ) -> Self {
         let syntax_set = registry.syntax_set_arc();
 
-        // Detect tree-sitter language for non-highlighting features
-        let ts_language = Language::from_path(path);
+        // Detect language for non-highlighting features
+        let language = Language::from_path(path);
 
         // Find syntax by file extension, checking languages config first
         if let Some(syntax) = registry.find_syntax_for_file_with_languages(path, languages) {
@@ -616,20 +714,8 @@ impl HighlightEngine {
                 return Self::TextMate(TextMateEngine::with_language(
                     syntax_set,
                     index,
-                    ts_language,
+                    language,
                 ));
-            }
-        }
-
-        // No TextMate grammar found - fall back to tree-sitter if available
-        // This handles languages like TypeScript that syntect doesn't include by default
-        if let Some(lang) = ts_language {
-            if let Ok(highlighter) = Highlighter::new(lang) {
-                tracing::debug!(
-                    "No TextMate grammar for {:?}, falling back to tree-sitter",
-                    path.extension()
-                );
-                return Self::TreeSitter(highlighter);
             }
         }
 
@@ -649,9 +735,6 @@ impl HighlightEngine {
         context_bytes: usize,
     ) -> Vec<HighlightSpan> {
         match self {
-            Self::TreeSitter(h) => {
-                h.highlight_viewport(buffer, viewport_start, viewport_end, theme, context_bytes)
-            }
             Self::TextMate(h) => {
                 h.highlight_viewport(buffer, viewport_start, viewport_end, theme, context_bytes)
             }
@@ -662,7 +745,6 @@ impl HighlightEngine {
     /// Invalidate cache for an edited range
     pub fn invalidate_range(&mut self, edit_range: Range<usize>) {
         match self {
-            Self::TreeSitter(h) => h.invalidate_range(edit_range),
             Self::TextMate(h) => h.invalidate_range(edit_range),
             Self::None => {}
         }
@@ -671,7 +753,6 @@ impl HighlightEngine {
     /// Invalidate entire cache
     pub fn invalidate_all(&mut self) {
         match self {
-            Self::TreeSitter(h) => h.invalidate_all(),
             Self::TextMate(h) => h.invalidate_all(),
             Self::None => {}
         }
@@ -685,7 +766,6 @@ impl HighlightEngine {
     /// Get a description of the active backend
     pub fn backend_name(&self) -> &str {
         match self {
-            Self::TreeSitter(_) => "tree-sitter",
             Self::TextMate(_) => "textmate",
             Self::None => "none",
         }
@@ -694,17 +774,14 @@ impl HighlightEngine {
     /// Get the language/syntax name if available
     pub fn syntax_name(&self) -> Option<&str> {
         match self {
-            Self::TreeSitter(_) => None, // Tree-sitter doesn't expose name easily
             Self::TextMate(h) => Some(h.syntax_name()),
             Self::None => None,
         }
     }
 
-    /// Get the tree-sitter Language for non-highlighting features
-    /// Returns the language even when using TextMate for highlighting
+    /// Get the Language for non-highlighting features (indentation, etc.)
     pub fn language(&self) -> Option<&Language> {
         match self {
-            Self::TreeSitter(h) => Some(h.language()),
             Self::TextMate(h) => h.language(),
             Self::None => None,
         }
@@ -859,7 +936,7 @@ mod tests {
 
     #[test]
     fn test_textmate_backend_selection() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::load_from_config_dir();
 
         // Languages with TextMate grammars use TextMate for highlighting
         let engine = HighlightEngine::for_file(Path::new("test.rs"), &registry);
@@ -875,32 +952,16 @@ mod tests {
         assert_eq!(engine.backend_name(), "textmate");
         assert!(engine.language().is_some());
 
-        // TypeScript falls back to tree-sitter (syntect doesn't include TS by default)
+        // TypeScript - no built-in TextMate grammar, returns None
         let engine = HighlightEngine::for_file(Path::new("test.ts"), &registry);
-        assert_eq!(engine.backend_name(), "tree-sitter");
-        assert!(engine.language().is_some());
-
-        let engine = HighlightEngine::for_file(Path::new("test.tsx"), &registry);
-        assert_eq!(engine.backend_name(), "tree-sitter");
-        assert!(engine.language().is_some());
-    }
-
-    #[test]
-    fn test_tree_sitter_explicit_preference() {
-        let registry = GrammarRegistry::load();
-
-        // Force tree-sitter for highlighting
-        let engine = HighlightEngine::for_file_with_preference(
-            Path::new("test.rs"),
-            &registry,
-            HighlighterPreference::TreeSitter,
-        );
-        assert_eq!(engine.backend_name(), "tree-sitter");
+        assert_eq!(engine.backend_name(), "none");
+        // But language detection still works
+        assert!(Language::from_path(Path::new("test.ts")).is_some());
     }
 
     #[test]
     fn test_unknown_extension() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::load_from_config_dir();
 
         // Unknown extension
         let engine = HighlightEngine::for_file(Path::new("test.unknown_xyz_123"), &registry);
@@ -919,7 +980,7 @@ mod tests {
         // - viewport_start > context_bytes (so parse_start > 0 after saturating_sub)
         // - parse_end = min(viewport_end + context_bytes, buffer.len()) = 0
         // - parse_end - parse_start would underflow (0 - positive = overflow)
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::load_from_config_dir();
 
         let mut engine = HighlightEngine::for_file(Path::new("test.rs"), &registry);
 
@@ -942,7 +1003,7 @@ mod tests {
     /// offset drift per line because it strips line terminators.
     #[test]
     fn test_textmate_engine_crlf_byte_offsets() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::load_from_config_dir();
 
         let mut engine = HighlightEngine::for_file(Path::new("test.java"), &registry);
 

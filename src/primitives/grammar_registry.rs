@@ -3,15 +3,29 @@
 //! This module handles discovery and loading of TextMate grammars from:
 //! 1. Built-in syntect grammars (100+ languages)
 //! 2. Embedded grammars for languages not in syntect (TOML, etc.)
-//! 3. User-installed grammars in ~/.config/fresh/grammars/
+//! 3. User-provided grammars (passed via constructor or loaded from disk)
 //!
-//! User grammars use VSCode extension format for compatibility.
+//! The module is WASM-compatible - file system access is opt-in via
+//! `load_from_config_dir()` which is only available in runtime builds.
 
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use syntect::parsing::{SyntaxDefinition, SyntaxReference, SyntaxSet, SyntaxSetBuilder};
+
+/// A user-provided grammar definition
+///
+/// This allows grammars to be passed to the registry constructor,
+/// enabling WASM builds to receive grammars from JavaScript.
+#[derive(Debug, Clone)]
+pub struct UserGrammar {
+    /// The grammar content (sublime-syntax or tmLanguage format)
+    pub content: String,
+    /// File extensions this grammar handles (without leading dot)
+    pub extensions: Vec<String>,
+    /// The scope name for this grammar
+    pub scope_name: String,
+}
 
 /// Embedded TOML grammar (syntect doesn't include one)
 const TOML_GRAMMAR: &str = include_str!("../grammars/toml.sublime-syntax");
@@ -27,14 +41,91 @@ pub struct GrammarRegistry {
 }
 
 impl GrammarRegistry {
-    /// Create a fully-loaded grammar registry for the editor
-    /// Loads built-in, embedded, and user grammars
-    pub fn for_editor() -> Arc<Self> {
-        Arc::new(Self::load())
+    /// Create a grammar registry with built-in, embedded, and user-provided grammars.
+    ///
+    /// This is the core constructor that works in both native and WASM builds.
+    /// User grammars are passed directly rather than loaded from the filesystem.
+    ///
+    /// # Arguments
+    /// * `user_grammars` - User-provided grammars (e.g., from JavaScript in WASM)
+    pub fn new(user_grammars: Vec<UserGrammar>) -> Self {
+        let mut user_extensions = HashMap::new();
+
+        // Start with syntect defaults, convert to builder to add more
+        let defaults = SyntaxSet::load_defaults_newlines();
+        let mut builder = defaults.into_builder();
+
+        // Add embedded grammars (TOML, etc.)
+        Self::add_embedded_grammars(&mut builder);
+
+        // Add user-provided grammars
+        for grammar in user_grammars {
+            match SyntaxDefinition::load_from_str(&grammar.content, true, Some(&grammar.scope_name))
+            {
+                Ok(syntax) => {
+                    builder.add(syntax);
+                    // Map extensions to scope name
+                    for ext in &grammar.extensions {
+                        user_extensions.insert(ext.clone(), grammar.scope_name.clone());
+                    }
+                    tracing::debug!("Loaded user grammar: {}", grammar.scope_name);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to load user grammar {}: {}",
+                        grammar.scope_name,
+                        e
+                    );
+                }
+            }
+        }
+
+        let syntax_set = builder.build();
+
+        // Build filename -> scope mappings for dotfiles and special files
+        let filename_scopes = Self::build_filename_scopes();
+
+        tracing::info!(
+            "Loaded {} syntaxes, {} user extension mappings, {} filename mappings",
+            syntax_set.syntaxes().len(),
+            user_extensions.len(),
+            filename_scopes.len()
+        );
+
+        Self {
+            syntax_set: Arc::new(syntax_set),
+            user_extensions,
+            filename_scopes,
+        }
     }
 
-    /// Load grammar registry, scanning user grammars directory
-    pub fn load() -> Self {
+    /// Create a grammar registry with only built-in grammars (no user grammars).
+    ///
+    /// This is useful for WASM builds or when user grammars aren't needed.
+    pub fn builtin_only() -> Self {
+        Self::new(vec![])
+    }
+
+    /// Create a fully-loaded grammar registry for the editor.
+    ///
+    /// On native builds, this loads user grammars from the config directory.
+    /// On WASM builds, this returns builtin grammars only.
+    pub fn for_editor() -> Arc<Self> {
+        #[cfg(feature = "runtime")]
+        {
+            Arc::new(Self::load_from_config_dir())
+        }
+        #[cfg(not(feature = "runtime"))]
+        {
+            Arc::new(Self::builtin_only())
+        }
+    }
+
+    /// Load grammar registry, scanning user grammars from the config directory.
+    ///
+    /// This method reads from the filesystem and is only available in native builds.
+    #[cfg(feature = "runtime")]
+    pub fn load_from_config_dir() -> Self {
         let mut user_extensions = HashMap::new();
 
         // Start with syntect defaults, convert to builder to add more
@@ -47,14 +138,13 @@ impl GrammarRegistry {
         // Add user grammars from config directory
         if let Some(grammars_dir) = Self::grammars_directory() {
             if grammars_dir.exists() {
-                Self::load_user_grammars_into(&grammars_dir, &mut builder, &mut user_extensions);
+                Self::load_user_grammars_from_dir(&grammars_dir, &mut builder, &mut user_extensions);
             }
         }
 
         let syntax_set = builder.build();
 
         // Build filename -> scope mappings for dotfiles and special files
-        // These are files that syntect may not recognize by default
         let filename_scopes = Self::build_filename_scopes();
 
         tracing::info!(
@@ -82,7 +172,8 @@ impl GrammarRegistry {
         })
     }
 
-    /// Get the grammars directory path
+    /// Get the grammars directory path (runtime-only)
+    #[cfg(feature = "runtime")]
     pub fn grammars_directory() -> Option<PathBuf> {
         dirs::config_dir().map(|p| p.join("fresh/grammars"))
     }
@@ -126,8 +217,9 @@ impl GrammarRegistry {
         map
     }
 
-    /// Load user grammars into builder
-    fn load_user_grammars_into(
+    /// Load user grammars from directory into builder (runtime-only)
+    #[cfg(feature = "runtime")]
+    fn load_user_grammars_from_dir(
         dir: &Path,
         builder: &mut SyntaxSetBuilder,
         user_extensions: &mut HashMap<String, String>,
@@ -163,7 +255,8 @@ impl GrammarRegistry {
         }
     }
 
-    /// Load a grammar directly from a .tmLanguage.json file
+    /// Load a grammar directly from a .tmLanguage.json file (runtime-only)
+    #[cfg(feature = "runtime")]
     fn load_direct_grammar(
         dir: &Path,
         builder: &mut SyntaxSetBuilder,
@@ -195,7 +288,8 @@ impl GrammarRegistry {
         }
     }
 
-    /// Parse a VSCode package.json manifest
+    /// Parse a VSCode package.json manifest (runtime-only)
+    #[cfg(feature = "runtime")]
     fn parse_package_json(path: &Path) -> Result<PackageManifest, String> {
         let content =
             std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
@@ -203,7 +297,8 @@ impl GrammarRegistry {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {}", e))
     }
 
-    /// Process a package manifest and load its grammars
+    /// Process a package manifest and load its grammars (runtime-only)
+    #[cfg(feature = "runtime")]
     fn process_manifest(
         package_dir: &Path,
         manifest: PackageManifest,
@@ -409,40 +504,47 @@ impl GrammarRegistry {
 
 impl Default for GrammarRegistry {
     fn default() -> Self {
-        Self::load()
+        Self::builtin_only()
     }
 }
 
-// VSCode package.json structures
+// VSCode package.json structures (runtime-only, used for loading from config dir)
+#[cfg(feature = "runtime")]
+mod manifest {
+    use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-struct PackageManifest {
-    #[serde(default)]
-    contributes: Option<Contributes>,
+    #[derive(Debug, Deserialize)]
+    pub struct PackageManifest {
+        #[serde(default)]
+        pub contributes: Option<Contributes>,
+    }
+
+    #[derive(Debug, Deserialize, Default)]
+    pub struct Contributes {
+        #[serde(default)]
+        pub languages: Vec<LanguageContribution>,
+        #[serde(default)]
+        pub grammars: Vec<GrammarContribution>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct LanguageContribution {
+        pub id: String,
+        #[serde(default)]
+        pub extensions: Vec<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct GrammarContribution {
+        pub language: String,
+        #[serde(rename = "scopeName")]
+        pub scope_name: String,
+        pub path: String,
+    }
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct Contributes {
-    #[serde(default)]
-    languages: Vec<LanguageContribution>,
-    #[serde(default)]
-    grammars: Vec<GrammarContribution>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LanguageContribution {
-    id: String,
-    #[serde(default)]
-    extensions: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GrammarContribution {
-    language: String,
-    #[serde(rename = "scopeName")]
-    scope_name: String,
-    path: String,
-}
+#[cfg(feature = "runtime")]
+use manifest::*;
 
 #[cfg(test)]
 mod tests {
@@ -450,14 +552,14 @@ mod tests {
 
     #[test]
     fn test_registry_creation() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
         // Should have built-in syntaxes
         assert!(!registry.available_syntaxes().is_empty());
     }
 
     #[test]
     fn test_find_syntax_for_common_extensions() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
 
         // Test common extensions that syntect should support
         let test_cases = [
@@ -486,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_syntax_set_arc() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
         let arc1 = registry.syntax_set_arc();
         let arc2 = registry.syntax_set_arc();
         // Both should point to the same data
@@ -495,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_shell_dotfiles_detection() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
 
         // All these should be detected as shell scripts
         let shell_files = [".zshrc", ".zprofile", ".zshenv", ".bash_aliases"];
@@ -522,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_pkgbuild_detection() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
 
         // PKGBUILD and APKBUILD should be detected as shell scripts
         for filename in ["PKGBUILD", "APKBUILD"] {
@@ -545,9 +647,11 @@ mod tests {
         }
     }
 
+    // This test uses crate::config which is runtime-only
+    #[cfg(feature = "runtime")]
     #[test]
     fn test_find_syntax_with_custom_languages_config() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
 
         // Create a custom languages config that maps "custom.myext" files to bash
         let mut languages = std::collections::HashMap::new();
@@ -603,7 +707,7 @@ mod tests {
 
     #[test]
     fn test_list_all_syntaxes() {
-        let registry = GrammarRegistry::load();
+        let registry = GrammarRegistry::builtin_only();
         let syntax_set = registry.syntax_set();
 
         let mut syntaxes: Vec<_> = syntax_set

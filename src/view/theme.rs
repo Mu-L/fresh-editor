@@ -1,5 +1,7 @@
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "runtime")]
 use std::path::Path;
 
 /// Convert a ratatui Color to RGB values.
@@ -816,7 +818,8 @@ impl From<ThemeFile> for Theme {
 }
 
 impl Theme {
-    /// Load theme from a JSON file
+    /// Load theme from a JSON file (runtime only)
+    #[cfg(feature = "runtime")]
     fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read theme file: {}", e))?;
@@ -825,7 +828,8 @@ impl Theme {
         Ok(theme_file.into())
     }
 
-    /// Load builtin theme from the themes directory
+    /// Load builtin theme from the themes directory (runtime only)
+    #[cfg(feature = "runtime")]
     fn load_builtin_theme(name: &str) -> Option<Self> {
         // Build list of paths to search
         let mut theme_paths = vec![
@@ -1247,7 +1251,8 @@ impl Theme {
     }
 
     /// Get a theme by name, defaults to dark if not found
-    /// Tries to load from JSON file first, falls back to hardcoded themes
+    /// Runtime version: tries to load from JSON file first, falls back to hardcoded themes
+    #[cfg(feature = "runtime")]
     pub fn from_name(name: &str) -> Self {
         let normalized_name = name.to_lowercase().replace('_', "-");
 
@@ -1257,7 +1262,20 @@ impl Theme {
         }
 
         // Fall back to hardcoded themes
-        match normalized_name.as_str() {
+        Self::from_name_embedded(&normalized_name)
+    }
+
+    /// Get a theme by name, defaults to dark if not found
+    /// Non-runtime version: only uses hardcoded themes
+    #[cfg(not(feature = "runtime"))]
+    pub fn from_name(name: &str) -> Self {
+        let normalized_name = name.to_lowercase().replace('_', "-");
+        Self::from_name_embedded(&normalized_name)
+    }
+
+    /// Get a theme from embedded/hardcoded themes only
+    fn from_name_embedded(normalized_name: &str) -> Self {
+        match normalized_name {
             "light" => Self::light(),
             "high-contrast" => Self::high_contrast(),
             "nostalgia" => Self::nostalgia(),
@@ -1266,13 +1284,10 @@ impl Theme {
     }
 
     /// Get all available theme names (builtin + user themes)
+    /// Runtime version: scans user themes directory
+    #[cfg(feature = "runtime")]
     pub fn available_themes() -> Vec<String> {
-        let mut themes: Vec<String> = vec![
-            "dark".to_string(),
-            "light".to_string(),
-            "high-contrast".to_string(),
-            "nostalgia".to_string(),
-        ];
+        let mut themes = Self::embedded_themes();
 
         // Scan built-in themes directory (themes/*.json in the project)
         if let Ok(entries) = std::fs::read_dir("themes") {
@@ -1310,6 +1325,23 @@ impl Theme {
         }
 
         themes
+    }
+
+    /// Get all available theme names (embedded only)
+    /// Non-runtime version: only returns hardcoded themes
+    #[cfg(not(feature = "runtime"))]
+    pub fn available_themes() -> Vec<String> {
+        Self::embedded_themes()
+    }
+
+    /// Get embedded/hardcoded theme names
+    pub fn embedded_themes() -> Vec<String> {
+        vec![
+            "dark".to_string(),
+            "light".to_string(),
+            "high-contrast".to_string(),
+            "nostalgia".to_string(),
+        ]
     }
 
     /// Nostalgia theme (Turbo Pascal 5 / WordPerfect 5 inspired)

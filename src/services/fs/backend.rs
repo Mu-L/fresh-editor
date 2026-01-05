@@ -1,3 +1,21 @@
+//! Async filesystem backend trait for directory operations
+//!
+//! # Relationship to `model::filesystem::FileSystem`
+//!
+//! This crate has two filesystem abstractions:
+//!
+//! - **`services::fs::FsBackend`** (this module): Async trait for directory traversal
+//!   and metadata. Used by the file tree UI for listing directories.
+//!
+//! - **`model::filesystem::FileSystem`**: Sync trait for file content I/O.
+//!   Used by `Buffer` for loading/saving file contents. Lives in `model` to support
+//!   WASM builds where `services` is unavailable.
+//!
+//! These are kept separate because:
+//! 1. Different concerns: directory navigation vs content I/O
+//! 2. Different styles: async (UI with slow/network FS) vs sync (buffer ops)
+//! 3. Different availability: `services` is runtime-only, `model` works in WASM
+
 use async_trait::async_trait;
 use std::io;
 use std::path::{Path, PathBuf};

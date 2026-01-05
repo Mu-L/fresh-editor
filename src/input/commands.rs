@@ -1,6 +1,6 @@
 //! Command palette system for executing editor actions by name
 
-use crate::input::keybindings::{Action, KeyContext};
+use crate::input::action::{Action, KeyContext};
 use rust_i18n::t;
 
 /// Source of a command (builtin or from a plugin)
