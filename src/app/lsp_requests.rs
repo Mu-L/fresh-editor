@@ -654,6 +654,10 @@ impl Editor {
             state.popups.show(popup);
             tracing::info!("Showing hover popup (markdown={})", is_markdown);
         }
+
+        // Mark hover request as sent to prevent duplicate popups during race conditions
+        // (e.g., when mouse moves while a hover response is pending)
+        self.mouse_state.lsp_hover_request_sent = true;
     }
 
     /// Apply inlay hints to editor state as virtual text

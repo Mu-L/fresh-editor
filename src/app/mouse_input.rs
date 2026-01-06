@@ -387,6 +387,8 @@ impl Editor {
     /// - Mouse is within the hovered symbol range
     /// Hover is dismissed when mouse leaves the editor area entirely.
     fn update_lsp_hover_state(&mut self, col: u16, row: u16) {
+        tracing::trace!(col, row, "update_lsp_hover_state: raw mouse position");
+
         // Check if mouse is over a transient popup - if so, keep hover active
         if self.is_mouse_over_transient_popup(col, row) {
             return;
@@ -458,13 +460,37 @@ impl Editor {
         let text_col = content_col.saturating_sub(gutter_width) as usize;
         let visual_row = row.saturating_sub(content_rect.y) as usize;
 
-        let is_past_line_end = cached_mappings
+        let line_info = cached_mappings
             .as_ref()
             .and_then(|mappings| mappings.get(visual_row))
-            .map(|line_mapping| text_col >= line_mapping.visual_to_char.len())
-            .unwrap_or(false);
+            .map(|line_mapping| (line_mapping.visual_to_char.len(), line_mapping.line_end_byte));
 
-        if is_past_line_end {
+        let is_past_line_end_or_empty = line_info
+            .map(|(line_len, _)| {
+                // Empty lines (just newline) should not trigger hover
+                if line_len <= 1 {
+                    return true;
+                }
+                text_col >= line_len
+            })
+            // If mouse is below all mapped lines (no mapping), don't trigger hover
+            .unwrap_or(true);
+
+        tracing::trace!(
+            col,
+            row,
+            content_col,
+            text_col,
+            visual_row,
+            gutter_width,
+            byte_pos,
+            ?line_info,
+            is_past_line_end_or_empty,
+            "update_lsp_hover_state: position check"
+        );
+
+        if is_past_line_end_or_empty {
+            tracing::trace!("update_lsp_hover_state: mouse past line end or empty line, clearing hover");
             // Mouse is past end of line content - clear hover state and don't trigger new hover
             if self.mouse_state.lsp_hover_state.is_some() {
                 self.mouse_state.lsp_hover_state = None;
