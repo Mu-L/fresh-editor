@@ -5242,3 +5242,99 @@ fn test_hover_popup_scrollbar_click_scrolls_content() -> std::io::Result<()> {
 
     Ok(())
 }
+
+/// Test that hover does not trigger when mouse is past end of line
+///
+/// Expected behavior: Hovering past the end of a line (in empty space) should not
+/// trigger an LSP hover popup.
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "FakeLspServer uses a Bash script which is not available on Windows"
+)]
+fn test_hover_does_not_trigger_past_end_of_line() -> std::io::Result<()> {
+    use crate::common::fake_lsp::FakeLspServer;
+    use std::time::Duration;
+
+    // Spawn fake LSP server
+    let _fake_server = FakeLspServer::spawn()?;
+
+    // Create temp dir and test file with a short line
+    let temp_dir = tempfile::tempdir()?;
+    let test_file = temp_dir.path().join("test.rs");
+    // Short line - "fn foo() {}" is about 11 chars, so column 50 is way past end
+    let file_content = "fn foo() {}\n";
+    std::fs::write(&test_file, file_content)?;
+
+    // Configure editor to use the fake LSP server
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: FakeLspServer::script_path().to_string_lossy().to_string(),
+            args: vec![],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        120,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    // First, verify that hover DOES work when mouse is on actual content
+    // Hover over "foo" (around column 10 with gutter)
+    let on_content_col = 10u16;
+    let line_row = 2u16; // First line of content (after tab bar)
+    harness.mouse_move(on_content_col, line_row)?;
+    harness.render()?;
+    harness.sleep(Duration::from_millis(600));
+    harness.editor_mut().force_check_mouse_hover();
+
+    // Wait for hover to appear - this proves the LSP is working
+    harness.wait_until(|h| h.screen_to_string().contains("Test hover content"))?;
+    harness.assert_screen_contains("Test hover content");
+
+    // Dismiss the hover by moving away
+    harness.mouse_move(0, 0)?;
+    harness.render()?;
+    harness.sleep(Duration::from_millis(100));
+    harness.editor_mut().force_check_mouse_hover();
+    harness.wait_until(|h| !h.screen_to_string().contains("Test hover content"))?;
+
+    // Now move mouse past the end of the line
+    // Col 50 should be well past the end of "fn foo() {}"
+    let past_eol_col = 50u16;
+    harness.mouse_move(past_eol_col, line_row)?;
+    harness.render()?;
+
+    // Advance time and force hover check
+    harness.sleep(Duration::from_millis(600));
+    harness.editor_mut().force_check_mouse_hover();
+
+    // Give time for hover to appear if it would (but it shouldn't)
+    for _ in 0..10 {
+        harness.process_async_and_render()?;
+        harness.sleep(Duration::from_millis(100));
+    }
+
+    // Hover should NOT appear because mouse is past end of line
+    assert!(
+        !harness.screen_to_string().contains("Test hover content"),
+        "Hover popup should NOT appear when mouse is past end of line. \
+         Mouse was at column {} which is past the line content. \
+         Screen:\n{}",
+        past_eol_col,
+        harness.screen_to_string()
+    );
+
+    Ok(())
+}

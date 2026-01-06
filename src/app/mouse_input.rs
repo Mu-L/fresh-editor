@@ -453,6 +453,27 @@ impl Editor {
             return;
         };
 
+        // Check if mouse is past the end of line content - don't trigger hover for empty space
+        let content_col = col.saturating_sub(content_rect.x);
+        let text_col = content_col.saturating_sub(gutter_width) as usize;
+        let visual_row = row.saturating_sub(content_rect.y) as usize;
+
+        let is_past_line_end = cached_mappings
+            .as_ref()
+            .and_then(|mappings| mappings.get(visual_row))
+            .map(|line_mapping| text_col >= line_mapping.visual_to_char.len())
+            .unwrap_or(false);
+
+        if is_past_line_end {
+            // Mouse is past end of line content - clear hover state and don't trigger new hover
+            if self.mouse_state.lsp_hover_state.is_some() {
+                self.mouse_state.lsp_hover_state = None;
+                self.mouse_state.lsp_hover_request_sent = false;
+                self.dismiss_transient_popups();
+            }
+            return;
+        }
+
         // Check if mouse is within the hovered symbol range - if so, keep hover active
         if let Some((start, end)) = self.hover_symbol_range {
             if byte_pos >= start && byte_pos < end {
