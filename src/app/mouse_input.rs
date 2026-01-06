@@ -134,6 +134,9 @@ impl Editor {
                 self.mouse_state.dragging_text_selection = false;
                 self.mouse_state.drag_selection_split = None;
                 self.mouse_state.drag_selection_anchor = None;
+                // Clear popup scrollbar drag state
+                self.mouse_state.dragging_popup_scrollbar = None;
+                self.mouse_state.drag_start_popup_scroll = None;
 
                 // If we finished dragging a separator, resize visible terminals
                 if was_dragging_separator {
@@ -982,10 +985,21 @@ impl Editor {
             );
 
         if let Some((popup_idx, target_scroll)) = scrollbar_scroll_info {
+            // Set up drag state for popup scrollbar (reuse drag_start_row like editor scrollbar)
+            self.mouse_state.dragging_popup_scrollbar = Some(popup_idx);
+            self.mouse_state.drag_start_row = Some(row);
+            // Get current scroll offset before mutable borrow
+            let current_scroll = self
+                .active_state()
+                .popups
+                .get(popup_idx)
+                .map(|p| p.scroll_offset)
+                .unwrap_or(0);
+            self.mouse_state.drag_start_popup_scroll = Some(current_scroll);
+            // Now do the scroll
             let state = self.active_state_mut();
             if let Some(popup) = state.popups.get_mut(popup_idx) {
-                let current_scroll = popup.scroll_offset as i32;
-                let delta = target_scroll - current_scroll;
+                let delta = target_scroll - current_scroll as i32;
                 popup.scroll_by(delta);
             }
             return Ok(());
@@ -1365,6 +1379,40 @@ impl Editor {
                     return Ok(());
                 }
             }
+        }
+
+        // If dragging popup scrollbar, update popup scroll position
+        if let Some(popup_idx) = self.mouse_state.dragging_popup_scrollbar {
+            // Find the popup's scrollbar rect from cached layout
+            if let Some((_, _, inner_rect, _, _, scrollbar_rect, total_lines)) = self
+                .cached_layout
+                .popup_areas
+                .iter()
+                .find(|(idx, _, _, _, _, _, _)| *idx == popup_idx)
+            {
+                if let Some(sb_rect) = scrollbar_rect {
+                    let track_height = sb_rect.height as usize;
+                    let visible_lines = inner_rect.height as usize;
+
+                    if track_height > 0 && *total_lines > visible_lines {
+                        let relative_row = row.saturating_sub(sb_rect.y) as usize;
+                        let max_scroll = total_lines.saturating_sub(visible_lines);
+                        let target_scroll = if track_height > 1 {
+                            (relative_row * max_scroll) / (track_height.saturating_sub(1))
+                        } else {
+                            0
+                        };
+
+                        let state = self.active_state_mut();
+                        if let Some(popup) = state.popups.get_mut(popup_idx) {
+                            let current_scroll = popup.scroll_offset as i32;
+                            let delta = target_scroll as i32 - current_scroll;
+                            popup.scroll_by(delta);
+                        }
+                    }
+                }
+            }
+            return Ok(());
         }
 
         // If dragging separator, update split ratio

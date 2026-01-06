@@ -842,6 +842,11 @@ impl PopupManager {
         self.popups.last_mut()
     }
 
+    /// Get reference to popup by index
+    pub fn get(&self, index: usize) -> Option<&Popup> {
+        self.popups.get(index)
+    }
+
     /// Get mutable reference to popup by index
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Popup> {
         self.popups.get_mut(index)
