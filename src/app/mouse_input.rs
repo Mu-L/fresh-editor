@@ -1014,33 +1014,46 @@ impl Editor {
             return Ok(());
         }
 
-        // Check if click is on a popup content area (they're rendered on top)
-        for (_popup_idx, _popup_rect, inner_rect, scroll_offset, num_items, _, _) in
+        // Check if click is on a popup (they're rendered on top)
+        for (_popup_idx, popup_rect, inner_rect, scroll_offset, num_items, _, _) in
             self.cached_layout.popup_areas.iter().rev()
         {
-            if col >= inner_rect.x
-                && col < inner_rect.x + inner_rect.width
-                && row >= inner_rect.y
-                && row < inner_rect.y + inner_rect.height
-                && *num_items > 0
+            if col >= popup_rect.x
+                && col < popup_rect.x + popup_rect.width
+                && row >= popup_rect.y
+                && row < popup_rect.y + popup_rect.height
             {
-                // Calculate which item was clicked
-                let relative_row = (row - inner_rect.y) as usize;
-                let item_idx = scroll_offset + relative_row;
+                // Click is on the popup (either content or border)
 
-                if item_idx < *num_items {
-                    // Select and execute the clicked item
-                    let state = self.active_state_mut();
-                    if let Some(popup) = state.popups.top_mut() {
-                        if let crate::view::popup::PopupContent::List { items: _, selected } =
-                            &mut popup.content
-                        {
-                            *selected = item_idx;
+                // If it's a list popup, check if we clicked an item
+                if *num_items > 0
+                    && col >= inner_rect.x
+                    && col < inner_rect.x + inner_rect.width
+                    && row >= inner_rect.y
+                    && row < inner_rect.y + inner_rect.height
+                {
+                    // Calculate which item was clicked
+                    let relative_row = (row - inner_rect.y) as usize;
+                    let item_idx = scroll_offset + relative_row;
+
+                    if item_idx < *num_items {
+                        // Select and execute the clicked item
+                        let state = self.active_state_mut();
+                        if let Some(popup) = state.popups.top_mut() {
+                            if let crate::view::popup::PopupContent::List { items: _, selected } =
+                                &mut popup.content
+                            {
+                                *selected = item_idx;
+                            }
                         }
+                        // Execute the popup selection (same as pressing Enter)
+                        return self.handle_action(Action::PopupConfirm);
                     }
-                    // Execute the popup selection (same as pressing Enter)
-                    return self.handle_action(Action::PopupConfirm);
                 }
+
+                // Click was on the popup area but not on a specific item (e.g. border or empty space)
+                // Consume the click to prevent it falling through to the editor
+                return Ok(());
             }
         }
 
