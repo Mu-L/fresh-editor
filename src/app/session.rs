@@ -220,15 +220,25 @@ impl Editor {
             menu_bar_hidden: Some(!self.menu_bar_visible),
         };
 
-        // Capture histories using the items() accessor
-        // Note: Only search and replace histories exist in Editor currently.
-        // Other history fields are placeholders for future features.
+        // Capture histories using the items() accessor from the prompt_histories HashMap
         let histories = SessionHistories {
-            search: self.search_history.items().to_vec(),
-            replace: self.replace_history.items().to_vec(),
+            search: self
+                .prompt_histories
+                .get("search")
+                .map(|h| h.items().to_vec())
+                .unwrap_or_default(),
+            replace: self
+                .prompt_histories
+                .get("replace")
+                .map(|h| h.items().to_vec())
+                .unwrap_or_default(),
             command_palette: Vec::new(), // Future: when command palette has history
-            goto_line: Vec::new(),       // Future: when goto line prompt has history
-            open_file: Vec::new(),       // Future: when file open prompt has history
+            goto_line: self
+                .prompt_histories
+                .get("goto_line")
+                .map(|h| h.items().to_vec())
+                .unwrap_or_default(),
+            open_file: Vec::new(), // Future: when file open prompt has history
         };
         tracing::trace!(
             "Captured histories: {} search, {} replace",
@@ -440,15 +450,22 @@ impl Editor {
 
         // 3. Restore histories (merge with any existing)
         tracing::debug!(
-            "Restoring histories: {} search, {} replace",
+            "Restoring histories: {} search, {} replace, {} goto_line",
             session.histories.search.len(),
-            session.histories.replace.len()
+            session.histories.replace.len(),
+            session.histories.goto_line.len()
         );
         for item in &session.histories.search {
-            self.search_history.push(item.clone());
+            self.get_or_create_prompt_history("search")
+                .push(item.clone());
         }
         for item in &session.histories.replace {
-            self.replace_history.push(item.clone());
+            self.get_or_create_prompt_history("replace")
+                .push(item.clone());
+        }
+        for item in &session.histories.goto_line {
+            self.get_or_create_prompt_history("goto_line")
+                .push(item.clone());
         }
 
         // 4. Restore file explorer state

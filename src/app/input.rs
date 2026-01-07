@@ -2454,15 +2454,12 @@ impl Editor {
 
         // Reset history navigation when user starts typing
         // This allows them to press Up to get back to history items
+        // Reset history navigation when typing in a prompt
         if let Some(ref prompt) = self.prompt {
-            match &prompt.prompt_type {
-                PromptType::Search | PromptType::ReplaceSearch | PromptType::QueryReplaceSearch => {
-                    self.search_history.reset_navigation();
+            if let Some(key) = Self::prompt_type_to_history_key(&prompt.prompt_type) {
+                if let Some(history) = self.prompt_histories.get_mut(&key) {
+                    history.reset_navigation();
                 }
-                PromptType::Replace { .. } | PromptType::QueryReplace { .. } => {
-                    self.replace_history.reset_navigation();
-                }
-                _ => {}
             }
         }
 

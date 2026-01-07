@@ -3679,10 +3679,12 @@ impl Editor {
     /// Clear the search history
     /// Used primarily for testing to ensure test isolation
     pub fn clear_search_history(&mut self) {
-        self.search_history.clear();
+        if let Some(history) = self.prompt_histories.get_mut("search") {
+            history.clear();
+        }
     }
 
-    /// Save search and replace histories to disk
+    /// Save all prompt histories to disk
     /// Called on shutdown to persist history across sessions
     pub fn save_histories(&self) {
         // Ensure data directory exists
@@ -3691,20 +3693,14 @@ impl Editor {
             return;
         }
 
-        // Save search history
-        let search_path = self.dir_context.search_history_path();
-        if let Err(e) = self.search_history.save_to_file(&search_path) {
-            tracing::warn!("Failed to save search history: {}", e);
-        } else {
-            tracing::debug!("Saved search history to {:?}", search_path);
-        }
-
-        // Save replace history
-        let replace_path = self.dir_context.replace_history_path();
-        if let Err(e) = self.replace_history.save_to_file(&replace_path) {
-            tracing::warn!("Failed to save replace history: {}", e);
-        } else {
-            tracing::debug!("Saved replace history to {:?}", replace_path);
+        // Save all prompt histories
+        for (key, history) in &self.prompt_histories {
+            let path = self.dir_context.prompt_history_path(key);
+            if let Err(e) = history.save_to_file(&path) {
+                tracing::warn!("Failed to save {} history: {}", key, e);
+            } else {
+                tracing::debug!("Saved {} history to {:?}", key, path);
+            }
         }
     }
 

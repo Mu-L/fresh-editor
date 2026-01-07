@@ -367,11 +367,9 @@ pub struct Editor {
     /// Maps panel ID (e.g., "diagnostics") to buffer ID
     panel_ids: HashMap<String, BufferId>,
 
-    /// Search history (for search and find operations)
-    search_history: crate::input::input_history::InputHistory,
-
-    /// Replace history (for replace operations)
-    replace_history: crate::input::input_history::InputHistory,
+    /// Prompt histories keyed by prompt type name (e.g., "search", "replace", "goto_line", "plugin:custom_name")
+    /// This provides a generic history system that works for all prompt types including plugin prompts.
+    prompt_histories: HashMap<String, crate::input::input_history::InputHistory>,
 
     /// LSP progress tracking (token -> progress info)
     lsp_progress: std::collections::HashMap<String, LspProgressInfo>,
@@ -919,25 +917,19 @@ impl Editor {
             plugin_manager,
             seen_byte_ranges: HashMap::new(),
             panel_ids: HashMap::new(),
-            search_history: {
-                // Load search history from disk if available
-                let path = dir_context.search_history_path();
-                crate::input::input_history::InputHistory::load_from_file(&path).unwrap_or_else(
-                    |e| {
-                        tracing::warn!("Failed to load search history: {}", e);
-                        crate::input::input_history::InputHistory::new()
-                    },
-                )
-            },
-            replace_history: {
-                // Load replace history from disk if available
-                let path = dir_context.replace_history_path();
-                crate::input::input_history::InputHistory::load_from_file(&path).unwrap_or_else(
-                    |e| {
-                        tracing::warn!("Failed to load replace history: {}", e);
-                        crate::input::input_history::InputHistory::new()
-                    },
-                )
+            prompt_histories: {
+                // Load prompt histories from disk if available
+                let mut histories = HashMap::new();
+                for history_name in ["search", "replace", "goto_line"] {
+                    let path = dir_context.prompt_history_path(history_name);
+                    let history = crate::input::input_history::InputHistory::load_from_file(&path)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to load {} history: {}", history_name, e);
+                            crate::input::input_history::InputHistory::new()
+                        });
+                    histories.insert(history_name.to_string(), history);
+                }
+                histories
             },
             lsp_progress: std::collections::HashMap::new(),
             lsp_server_statuses: std::collections::HashMap::new(),
@@ -2435,8 +2427,10 @@ impl Editor {
 
         // Determine the default text: selection > last history > empty
         let from_history = selected_text.is_none();
-        let default_text =
-            selected_text.or_else(|| self.search_history.last().map(|s| s.to_string()));
+        let default_text = selected_text.or_else(|| {
+            self.get_prompt_history("search")
+                .and_then(|h| h.last().map(|s| s.to_string()))
+        });
 
         // Start the prompt
         self.start_prompt(message, prompt_type);
@@ -2449,7 +2443,7 @@ impl Editor {
                 prompt.cursor_pos = text.len();
             }
             if from_history {
-                self.search_history.init_at_last();
+                self.get_or_create_prompt_history("search").init_at_last();
             }
             self.update_search_highlights(&text);
         }
@@ -2683,13 +2677,15 @@ impl Editor {
 
         // Determine prompt type and reset appropriate history navigation
         if let Some(ref prompt) = self.prompt {
+            // Reset history navigation for this prompt type
+            if let Some(key) = Self::prompt_type_to_history_key(&prompt.prompt_type) {
+                if let Some(history) = self.prompt_histories.get_mut(&key) {
+                    history.reset_navigation();
+                }
+            }
             match &prompt.prompt_type {
                 PromptType::Search | PromptType::ReplaceSearch | PromptType::QueryReplaceSearch => {
-                    self.search_history.reset_navigation();
                     self.clear_search_highlights();
-                }
-                PromptType::Replace { .. } | PromptType::QueryReplace { .. } => {
-                    self.replace_history.reset_navigation();
                 }
                 PromptType::Plugin { custom_type } => {
                     // Fire plugin hook for prompt cancellation
@@ -2750,8 +2746,15 @@ impl Editor {
                 // Use the selected suggestion if any
                 if let Some(selected_idx) = prompt.selected_suggestion {
                     if let Some(suggestion) = prompt.suggestions.get(selected_idx) {
-                        // Don't confirm disabled commands
+                        // Don't confirm disabled commands, but still record usage for history
                         if suggestion.disabled {
+                            // Record usage even for disabled commands so they appear in history
+                            if matches!(prompt.prompt_type, PromptType::Command) {
+                                self.command_registry
+                                    .write()
+                                    .unwrap()
+                                    .record_usage(&suggestion.text);
+                            }
                             self.set_status_message(
                                 t!(
                                     "error.command_not_available",
@@ -2790,18 +2793,10 @@ impl Editor {
             }
 
             // Add to appropriate history based on prompt type
-            match prompt.prompt_type {
-                PromptType::Search | PromptType::ReplaceSearch | PromptType::QueryReplaceSearch => {
-                    self.search_history.push(final_input.clone());
-                    // Reset navigation state
-                    self.search_history.reset_navigation();
-                }
-                PromptType::Replace { .. } | PromptType::QueryReplace { .. } => {
-                    self.replace_history.push(final_input.clone());
-                    // Reset navigation state
-                    self.replace_history.reset_navigation();
-                }
-                _ => {}
+            if let Some(key) = Self::prompt_type_to_history_key(&prompt.prompt_type) {
+                let history = self.get_or_create_prompt_history(&key);
+                history.push(final_input.clone());
+                history.reset_navigation();
             }
 
             Some((final_input, prompt.prompt_type, selected_index))
@@ -2813,6 +2808,37 @@ impl Editor {
     /// Check if currently in prompt mode
     pub fn is_prompting(&self) -> bool {
         self.prompt.is_some()
+    }
+
+    /// Get or create a prompt history for the given key
+    fn get_or_create_prompt_history(
+        &mut self,
+        key: &str,
+    ) -> &mut crate::input::input_history::InputHistory {
+        self.prompt_histories
+            .entry(key.to_string())
+            .or_insert_with(crate::input::input_history::InputHistory::new)
+    }
+
+    /// Get a prompt history for the given key (immutable)
+    fn get_prompt_history(&self, key: &str) -> Option<&crate::input::input_history::InputHistory> {
+        self.prompt_histories.get(key)
+    }
+
+    /// Get the history key for a prompt type
+    fn prompt_type_to_history_key(prompt_type: &crate::view::prompt::PromptType) -> Option<String> {
+        use crate::view::prompt::PromptType;
+        match prompt_type {
+            PromptType::Search | PromptType::ReplaceSearch | PromptType::QueryReplaceSearch => {
+                Some("search".to_string())
+            }
+            PromptType::Replace { .. } | PromptType::QueryReplace { .. } => {
+                Some("replace".to_string())
+            }
+            PromptType::GotoLine => Some("goto_line".to_string()),
+            PromptType::Plugin { custom_type } => Some(format!("plugin:{}", custom_type)),
+            _ => None,
+        }
     }
 
     /// Get the current global editor mode (e.g., "vi-normal", "vi-insert")
@@ -2905,17 +2931,32 @@ impl Editor {
                 // Update incremental search highlights as user types
                 self.update_search_highlights(&input);
                 // Reset history navigation when user types - allows Up to navigate history
-                self.search_history.reset_navigation();
+                if let Some(history) = self.prompt_histories.get_mut("search") {
+                    history.reset_navigation();
+                }
             }
             PromptType::Replace { .. } | PromptType::QueryReplace { .. } => {
                 // Reset history navigation when user types - allows Up to navigate history
-                self.replace_history.reset_navigation();
+                if let Some(history) = self.prompt_histories.get_mut("replace") {
+                    history.reset_navigation();
+                }
+            }
+            PromptType::GotoLine => {
+                // Reset history navigation when user types - allows Up to navigate history
+                if let Some(history) = self.prompt_histories.get_mut("goto_line") {
+                    history.reset_navigation();
+                }
             }
             PromptType::OpenFile | PromptType::SwitchProject | PromptType::SaveFileAs => {
                 // For OpenFile/SwitchProject/SaveFileAs, update the file browser filter (native implementation)
                 self.update_file_open_filter();
             }
             PromptType::Plugin { custom_type } => {
+                // Reset history navigation when user types - allows Up to navigate history
+                let key = format!("plugin:{}", custom_type);
+                if let Some(history) = self.prompt_histories.get_mut(&key) {
+                    history.reset_navigation();
+                }
                 // Fire plugin hook for prompt input change
                 use crate::services::plugins::hooks::HookArgs;
                 self.plugin_manager.run_hook(
