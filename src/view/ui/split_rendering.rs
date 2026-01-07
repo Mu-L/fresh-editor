@@ -4177,6 +4177,7 @@ mod tests {
     use super::*;
     use crate::model::buffer::Buffer;
     use crate::primitives::display_width::str_width;
+    use crate::view::theme;
     use crate::view::theme::Theme;
     use crate::view::viewport::Viewport;
 
@@ -4231,7 +4232,7 @@ mod tests {
             content.len().max(1),
             visible_count,
         );
-        let theme = Theme::default();
+        let theme = Theme::from_name(theme::THEME_DARK).unwrap();
         let decorations = SplitRenderer::decoration_context(
             &mut state,
             viewport_start,

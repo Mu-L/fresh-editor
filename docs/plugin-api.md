@@ -557,6 +557,12 @@ Plugins are responsible for parsing the schema and resolving $ref references.
 getThemeSchema(): unknown
 ```
 
+#### `getBuiltinThemes`
+
+```typescript
+getBuiltinThemes(): unknown
+```
+
 #### `getConfig`
 
 Get the current editor configuration

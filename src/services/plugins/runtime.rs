@@ -223,6 +223,13 @@ fn op_fresh_get_theme_schema() -> serde_json::Value {
     get_theme_schema()
 }
 
+#[op2]
+#[serde]
+fn op_fresh_get_builtin_themes() -> serde_json::Value {
+    use crate::view::theme::get_builtin_themes;
+    get_builtin_themes()
+}
+
 /// Reload configuration from file
 ///
 /// After a plugin saves config changes to the config file, call this to reload
@@ -3681,6 +3688,7 @@ extension!(
         op_fresh_set_status,
         op_fresh_apply_theme,
         op_fresh_get_theme_schema,
+        op_fresh_get_builtin_themes,
         op_fresh_reload_config,
         op_fresh_get_config,
         op_fresh_get_user_config,
@@ -3903,6 +3911,9 @@ impl TypeScriptRuntime {
                     },
                     getThemeSchema() {
                         return core.ops.op_fresh_get_theme_schema();
+                    },
+                    getBuiltinThemes() {
+                        return core.ops.op_fresh_get_builtin_themes();
                     },
 
                     // Config operations

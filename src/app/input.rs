@@ -1964,20 +1964,24 @@ impl Editor {
     /// Apply a theme by name and persist it to config
     pub(super) fn apply_theme(&mut self, theme_name: &str) {
         if !theme_name.is_empty() {
-            self.theme = crate::view::theme::Theme::from_name(theme_name);
+            if let Some(theme) = crate::view::theme::Theme::from_name(theme_name) {
+                self.theme = theme;
 
-            // Set terminal cursor color to match theme
-            self.theme.set_terminal_cursor_color();
+                // Set terminal cursor color to match theme
+                self.theme.set_terminal_cursor_color();
 
-            // Update the config in memory
-            self.config.theme = self.theme.name.clone().into();
+                // Update the config in memory
+                self.config.theme = self.theme.name.clone().into();
 
-            // Persist to config file
-            self.save_theme_to_config();
+                // Persist to config file
+                self.save_theme_to_config();
 
-            self.set_status_message(
-                t!("view.theme_changed", theme = self.theme.name.clone()).to_string(),
-            );
+                self.set_status_message(
+                    t!("view.theme_changed", theme = self.theme.name.clone()).to_string(),
+                );
+            } else {
+                self.set_status_message(format!("Theme '{}' not found", theme_name));
+            }
         }
     }
 
@@ -1985,8 +1989,10 @@ impl Editor {
     /// Used for live preview when navigating theme selection
     pub(super) fn preview_theme(&mut self, theme_name: &str) {
         if !theme_name.is_empty() && theme_name != self.theme.name {
-            self.theme = crate::view::theme::Theme::from_name(theme_name);
-            self.theme.set_terminal_cursor_color();
+            if let Some(theme) = crate::view::theme::Theme::from_name(theme_name) {
+                self.theme = theme;
+                self.theme.set_terminal_cursor_color();
+            }
         }
     }
 

@@ -182,6 +182,7 @@ pub fn apply_diagnostics_to_state(
 mod tests {
     use super::*;
     use crate::model::buffer::Buffer;
+    use crate::view::theme;
     use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
     #[test]
@@ -232,7 +233,7 @@ mod tests {
             data: None,
         };
 
-        let theme = crate::view::theme::Theme::dark();
+        let theme = crate::view::theme::Theme::from_name(theme::THEME_DARK).unwrap();
         let result = diagnostic_to_overlay(&diagnostic, &buffer, &theme);
         assert!(result.is_some());
 
@@ -273,7 +274,7 @@ mod tests {
             data: None,
         };
 
-        let theme = crate::view::theme::Theme::dark();
+        let theme = crate::view::theme::Theme::from_name(theme::THEME_DARK).unwrap();
         let result = diagnostic_to_overlay(&diagnostic, &buffer, &theme);
         assert!(result.is_some());
 
@@ -314,7 +315,7 @@ mod tests {
             data: None,
         };
 
-        let theme = crate::view::theme::Theme::dark();
+        let theme = crate::view::theme::Theme::from_name(theme::THEME_DARK).unwrap();
         let result = diagnostic_to_overlay(&diagnostic, &buffer, &theme);
         assert!(result.is_some());
 

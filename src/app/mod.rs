@@ -672,7 +672,8 @@ impl Editor {
         let working_dir = working_dir.canonicalize().unwrap_or_else(|_| working_dir);
 
         // Load theme from config
-        let theme = crate::view::theme::Theme::from_name(&config.theme);
+        let theme = crate::view::theme::Theme::from_name(&config.theme)
+            .ok_or_else(|| anyhow::anyhow!("Theme '{:?}' not found", config.theme))?;
 
         // Set terminal cursor color to match theme
         theme.set_terminal_cursor_color();
@@ -2741,7 +2742,7 @@ impl Editor {
     pub fn confirm_prompt(&mut self) -> Option<(String, PromptType, Option<usize>)> {
         if let Some(prompt) = self.prompt.take() {
             let selected_index = prompt.selected_suggestion;
-            // For command, file, theme, and LSP stop prompts, prefer the selected suggestion over raw input
+            // For command, file, theme, plugin, and LSP stop prompts, prefer the selected suggestion over raw input
             let final_input = if matches!(
                 prompt.prompt_type,
                 PromptType::Command
@@ -2752,6 +2753,7 @@ impl Editor {
                     | PromptType::SelectTheme { .. }
                     | PromptType::SelectLocale
                     | PromptType::SwitchToTab
+                    | PromptType::Plugin { .. }
             ) {
                 // Use the selected suggestion if any
                 if let Some(selected_idx) = prompt.selected_suggestion {

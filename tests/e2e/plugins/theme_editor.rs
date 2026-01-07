@@ -1868,3 +1868,273 @@ fn test_color_swatches_displayed() {
         screen
     );
 }
+
+/// Test that selecting the built-in "nostalgia" theme displays its actual colors
+/// Bug reproduction: when selecting Nostalgia from the Edit Theme suggestion list,
+/// the theme that opens should have Nostalgia's colors (blue background #0000AA),
+/// not Dark theme colors (#1E1E1E)
+///
+/// This test types the theme name to select it.
+#[test]
+fn test_theme_editor_nostalgia_builtin_shows_correct_colors() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let project_root = temp_dir.path().join("project_root");
+    fs::create_dir(&project_root).unwrap();
+
+    // Create plugins directory
+    let plugins_dir = project_root.join("plugins");
+    fs::create_dir(&plugins_dir).unwrap();
+
+    copy_plugin(&plugins_dir, "theme_editor");
+
+    // Don't create a themes directory - we want to use the built-in themes only
+
+    let mut harness =
+        EditorTestHarness::with_config_and_working_dir(120, 40, Default::default(), project_root)
+            .unwrap();
+
+    harness.render().unwrap();
+
+    // Open command palette
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Type to find the Edit Theme command
+    harness.type_text("Edit Theme").unwrap();
+    harness.render().unwrap();
+
+    // Execute the command
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Wait for theme selection prompt to appear
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Select theme to edit"))
+        .unwrap();
+
+    // Type "nostalgia" to filter/select the nostalgia theme
+    harness.type_text("nostalgia").unwrap();
+    harness.render().unwrap();
+
+    // Select it
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Wait for theme editor to fully load with the nostalgia theme
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            screen.contains("Theme Editor") && screen.contains("nostalgia")
+        })
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+
+    // Nostalgia theme has editor.bg = [0, 0, 170] which is #0000AA in hex
+    // The theme editor should display this value
+    let has_nostalgia_bg = screen.contains("#0000AA") || screen.contains("#0000aa");
+
+    // Dark theme has editor.bg = [30, 30, 30] which is #1E1E1E in hex
+    // This should NOT appear if nostalgia was loaded correctly
+    let has_dark_bg = screen.contains("#1E1E1E") || screen.contains("#1e1e1e");
+
+    assert!(
+        has_nostalgia_bg,
+        "Theme editor should show Nostalgia's background color #0000AA. Screen:\n{}",
+        screen
+    );
+
+    assert!(
+        !has_dark_bg,
+        "Theme editor should NOT show Dark theme's background color #1E1E1E when Nostalgia is selected. Screen:\n{}",
+        screen
+    );
+}
+
+/// Test that selecting nostalgia theme via arrow navigation displays its actual colors
+/// This tests the case where user navigates the suggestions list with arrow keys
+/// and selects a suggestion (which sends the suggestion's `value` field, not `text`)
+#[test]
+fn test_theme_editor_nostalgia_builtin_via_arrow_selection() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let project_root = temp_dir.path().join("project_root");
+    fs::create_dir(&project_root).unwrap();
+
+    // Create plugins directory
+    let plugins_dir = project_root.join("plugins");
+    fs::create_dir(&plugins_dir).unwrap();
+
+    copy_plugin(&plugins_dir, "theme_editor");
+
+    // Don't create a themes directory - we want to use the built-in themes only
+
+    let mut harness =
+        EditorTestHarness::with_config_and_working_dir(120, 40, Default::default(), project_root)
+            .unwrap();
+
+    harness.render().unwrap();
+
+    // Open command palette
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Type to find the Edit Theme command
+    harness.type_text("Edit Theme").unwrap();
+    harness.render().unwrap();
+
+    // Execute the command
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Wait for theme selection prompt to appear
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Select theme to edit"))
+        .unwrap();
+
+    // Type "nostalgia" to filter suggestions to just nostalgia
+    harness.type_text("nostalgia").unwrap();
+    harness.render().unwrap();
+
+    // Wait for suggestions to update
+    harness
+        .wait_until(|h| h.screen_to_string().contains("nostalgia"))
+        .unwrap();
+
+    // Press Down arrow to select the suggestion from the list
+    // This should send the `value` field from the suggestion (e.g., "builtin:nostalgia")
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Now press Enter to confirm selection
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Wait for theme editor to fully load with the nostalgia theme
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            screen.contains("Theme Editor") && screen.contains("nostalgia")
+        })
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+
+    // Nostalgia theme has editor.bg = [0, 0, 170] which is #0000AA in hex
+    let has_nostalgia_bg = screen.contains("#0000AA") || screen.contains("#0000aa");
+
+    // Dark theme has editor.bg = [30, 30, 30] which is #1E1E1E in hex
+    let has_dark_bg = screen.contains("#1E1E1E") || screen.contains("#1e1e1e");
+
+    assert!(
+        has_nostalgia_bg,
+        "Theme editor should show Nostalgia's background color #0000AA when selected via arrow navigation. Screen:\n{}",
+        screen
+    );
+
+    assert!(
+        !has_dark_bg,
+        "Theme editor should NOT show Dark theme's background color #1E1E1E when Nostalgia is selected. Screen:\n{}",
+        screen
+    );
+}
+
+/// Bug regression test: selecting nostalgia from suggestion dropdown should load nostalgia colors
+/// The bug was that plugin prompts didn't use the suggestion's `value` field when a suggestion
+/// was selected, so "builtin:nostalgia" was not being passed correctly to the handler.
+#[test]
+fn test_theme_editor_select_nostalgia_from_dropdown() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let project_root = temp_dir.path().join("project_root");
+    fs::create_dir(&project_root).unwrap();
+
+    let plugins_dir = project_root.join("plugins");
+    fs::create_dir(&plugins_dir).unwrap();
+
+    copy_plugin(&plugins_dir, "theme_editor");
+
+    let mut harness =
+        EditorTestHarness::with_config_and_working_dir(120, 40, Default::default(), project_root)
+            .unwrap();
+
+    harness.render().unwrap();
+
+    // Open command palette
+    harness
+        .send_key(KeyCode::Char('p'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    harness.type_text("Edit Theme").unwrap();
+    harness.render().unwrap();
+
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Wait for theme selection prompt
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Select theme to edit"))
+        .unwrap();
+
+    // Type "nostalgia" to filter the list
+    harness.type_text("nostalgia").unwrap();
+    harness.render().unwrap();
+
+    // Press Down to select the nostalgia suggestion from the dropdown
+    // This is the key part - selecting from dropdown sends the suggestion's `value`
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Confirm selection
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Wait for theme editor to fully load
+    harness
+        .wait_until(|h| {
+            let screen = h.screen_to_string();
+            screen.contains("Theme Editor") && !screen.contains("Loading theme editor")
+        })
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+
+    // Verify nostalgia theme loaded correctly:
+    // 1. Title should show "Theme Editor: nostalgia"
+    // 2. Background color should be #0000AA (nostalgia's blue), NOT #1E1E1E (dark's gray)
+
+    assert!(
+        screen.contains("Theme Editor: nostalgia"),
+        "Title should show 'Theme Editor: nostalgia'. Screen:\n{}",
+        screen
+    );
+
+    // Nostalgia has bg = [0, 0, 170] = #0000AA
+    assert!(
+        screen.contains("#0000AA") || screen.contains("#0000aa"),
+        "Should show Nostalgia's blue background #0000AA. Screen:\n{}",
+        screen
+    );
+
+    // Should NOT have dark theme's background color
+    assert!(
+        !screen.contains("#1E1E1E"),
+        "Should NOT show Dark theme's background #1E1E1E. Screen:\n{}",
+        screen
+    );
+}

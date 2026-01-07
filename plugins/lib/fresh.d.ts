@@ -414,6 +414,7 @@ interface EditorAPI {
    * @returns JSON Schema object
    */
   getThemeSchema(): unknown;
+  getBuiltinThemes(): unknown;
   /**
    * Get the current editor configuration
    *

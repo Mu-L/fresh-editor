@@ -455,29 +455,27 @@ function findThemesDir(): string {
  * Load list of available built-in themes
  */
 async function loadBuiltinThemes(): Promise<string[]> {
-  const themesDir = findThemesDir();
   try {
-    const entries = editor.readDir(themesDir);
-    return entries
-      .filter(e => e.is_file && e.name.endsWith(".json"))
-      .map(e => e.name.replace(".json", ""));
-  } catch {
-    return ["dark", "light", "high-contrast", "dracula", "nord", "solarized-dark"];
+    const builtinThemes = editor.getBuiltinThemes();
+    return Object.keys(builtinThemes);
+  } catch (e) {
+    editor.debug(`Failed to load built-in themes list: ${e}`);
+    throw e;
   }
 }
 
 /**
- * Load a theme file from built-in themes directory
+ * Load a theme file from built-in themes
  */
 async function loadThemeFile(name: string): Promise<Record<string, unknown> | null> {
-  const themesDir = findThemesDir();
-  const themePath = editor.pathJoin(themesDir, `${name}.json`);
-
   try {
-    const content = await editor.readFile(themePath);
-    return JSON.parse(content);
-  } catch {
-    editor.debug(`Failed to load theme: ${name}`);
+    const builtinThemes = editor.getBuiltinThemes();
+    if (name in builtinThemes) {
+      return JSON.parse(builtinThemes[name]);
+    }
+    return null;
+  } catch (e) {
+    editor.debug(`Failed to load theme data for '${name}': ${e}`);
     return null;
   }
 }
