@@ -653,12 +653,15 @@ fn compute_char_style(ctx: &CharStyleContext) -> CharStyleOutput {
             .bg(ctx.theme.selection_bg);
     }
 
-    // Apply cursor styling - make secondary cursors visible with reversed colors
-    // Don't apply REVERSED to primary cursor to preserve terminal cursor visibility
-    // For inactive splits, ALL cursors use a less pronounced color (no hardware cursor)
+    // Apply cursor styling - make all cursors visible with reversed colors
+    // For active splits: apply REVERSED to ensure character under cursor is visible
+    // (especially important for block cursors where white-on-white would be invisible)
+    // For inactive splits: use a less pronounced background color (no hardware cursor)
     let is_secondary_cursor = ctx.is_cursor && ctx.byte_pos != Some(ctx.primary_cursor_position);
     if ctx.is_active {
-        if is_secondary_cursor {
+        if ctx.is_cursor {
+            // Apply REVERSED to all cursor positions (primary and secondary)
+            // This ensures the character under the cursor is always visible
             style = style.add_modifier(Modifier::REVERSED);
         }
     } else if ctx.is_cursor {
@@ -4322,13 +4325,14 @@ mod tests {
     // Helper to count all cursor positions in rendered output
     // Cursors can appear as:
     // 1. Primary cursor in output.cursor (hardware cursor position)
-    // 2. Visual spans with REVERSED modifier (secondary cursors)
+    // 2. Visual spans with REVERSED modifier (secondary cursors, or primary cursor with contrast fix)
     // 3. Visual spans with special background color (inactive cursors)
     fn count_all_cursors(output: &LineRenderOutput) -> Vec<(u16, u16)> {
         let mut cursor_positions = Vec::new();
 
         // Check for primary cursor in output.cursor field
-        if let Some(cursor_pos) = output.cursor {
+        let primary_cursor = output.cursor;
+        if let Some(cursor_pos) = primary_cursor {
             cursor_positions.push(cursor_pos);
         }
 
@@ -4342,8 +4346,12 @@ mod tests {
                     .add_modifier
                     .contains(ratatui::style::Modifier::REVERSED)
                 {
-                    // Found a visual cursor - record its position
-                    cursor_positions.push((col, line_idx as u16));
+                    let pos = (col, line_idx as u16);
+                    // Only add if this is not the primary cursor position
+                    // (primary cursor may also have REVERSED for contrast)
+                    if primary_cursor != Some(pos) {
+                        cursor_positions.push(pos);
+                    }
                 }
                 // Count the visual width of this span's content
                 col += str_width(&span.content) as u16;
