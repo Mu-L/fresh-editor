@@ -6,7 +6,7 @@ use std::fs;
 
 /// Helper function to open the theme editor via command palette
 /// After running "Edit Theme" command, this waits for the theme selection prompt
-/// and presses Enter to select the first available theme.
+/// and types "dark" to explicitly select the dark builtin theme.
 fn open_theme_editor(harness: &mut EditorTestHarness) {
     // Open command palette
     harness
@@ -29,7 +29,12 @@ fn open_theme_editor(harness: &mut EditorTestHarness) {
         .wait_until(|h| h.screen_to_string().contains("Select theme to edit"))
         .unwrap();
 
-    // Select the first theme
+    // Type "dark" to select the dark builtin theme explicitly
+    // (Plugin prompts now use suggestion values when selected, so we type to be explicit)
+    harness.type_text("dark").unwrap();
+    harness.render().unwrap();
+
+    // Select it
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
