@@ -1808,6 +1808,16 @@ impl Editor {
         // These take precedence over implicit cursor updates from Insert/Delete
         for (cursor_id, ref mut pos, ref mut anchor) in &mut new_cursors {
             let mut found_move_cursor = false;
+            // Save original position before any modifications - needed for shift calculation
+            let original_pos = *pos;
+
+            // Check if this cursor has an Insert at its original position (auto-close pattern).
+            // For auto-close, Insert is at cursor position and MoveCursor is relative to original state.
+            // For other operations (like indent), Insert is elsewhere and MoveCursor already accounts for shifts.
+            let insert_at_cursor_pos = events.iter().any(|e| {
+                matches!(e, Event::Insert { position, cursor_id: c, .. }
+                    if *c == *cursor_id && *position == original_pos)
+            });
 
             // First pass: look for explicit MoveCursor events for this cursor
             for event in &events {
@@ -1819,7 +1829,15 @@ impl Editor {
                 } = event
                 {
                     if event_cursor == cursor_id {
-                        *pos = *new_position;
+                        // Only adjust for shifts if the Insert was at the cursor's original position
+                        // (like auto-close). For other operations (like indent where Insert is at
+                        // line start), the MoveCursor already accounts for the shift.
+                        let shift = if insert_at_cursor_pos {
+                            calc_shift(original_pos)
+                        } else {
+                            0
+                        };
+                        *pos = (*new_position as isize + shift) as usize;
                         *anchor = *new_anchor;
                         found_move_cursor = true;
                     }
