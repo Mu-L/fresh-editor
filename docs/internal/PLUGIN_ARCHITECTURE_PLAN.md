@@ -193,8 +193,8 @@ This API would:
 #### Phase 3: Migrate Plugins (Long-term)
 
 Migrate existing plugins to use the new API:
-- Find References → `showResultsPanel` ✓ (Done)
-- Diagnostics Panel → Keep as Controller (needs bidirectional cursor sync, filter toggle, auto-refresh)
+- Find References → `showResultsPanel` ✓ (Done - with syncWithEditor, groupBy)
+- Diagnostics Panel → `showResultsPanel` ✓ (Done - with Provider pattern for live updates)
 - Search Replace → Consider `showResultsPanel` with `multiSelect` (already simplified keybindings)
 
 ---
@@ -248,12 +248,18 @@ The key insight is: **Let the editor own the UI.** Plugins should provide data a
 
 ---
 
-## Immediate Actions (Phase 1)
+## Immediate Actions (Phase 1) - ALL COMPLETE ✓
 
-1. ~~Create ResultsPanel abstraction~~ ✓ (Done - `plugins/lib/results-panel.ts`)
-2. ~~Migrate Find References to use ResultsPanel~~ ✓ (Done)
+1. ~~Create ResultsPanel abstraction~~ ✓ (Done - `plugins/lib/results-panel.ts` with VS Code-style Provider pattern)
+2. ~~Migrate Find References to use ResultsPanel~~ ✓ (Done - with syncWithEditor, groupBy: "file")
 3. ~~Fix Live Grep preview update issue~~ ✓ (Done - added `prompt_selection_changed` hook)
 4. ~~Git Grep cursor positioning~~ ✓ (Verified - code is correct, uses same pattern as Find References)
 5. ~~Simplify Search Replace keybindings~~ ✓ (Done - uses Enter/Space/Escape, inherits from normal)
-6. ~~Diagnostics Panel migration~~ → Keep as Controller (too complex for ResultsPanel)
-7. Document the Provider pattern as the recommended approach
+6. ~~Diagnostics Panel migration~~ ✓ (Done - uses Provider pattern with live updates via onDidChangeResults)
+7. ~~Document the Provider pattern~~ ✓ (This document + inline code documentation)
+
+### Key Architecture Features Implemented:
+- **Provider Pattern**: ResultsProvider interface with provideResults() and onDidChangeResults event
+- **Bidirectional Cursor Sync**: syncWithEditor option auto-syncs panel selection with source cursor
+- **Event System**: EventEmitter<T> for typed events, Disposable for cleanup
+- **Static Provider Helper**: createStaticProvider() for one-shot data like Find References
