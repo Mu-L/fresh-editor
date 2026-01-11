@@ -548,10 +548,7 @@ pub fn build_pages(
         layer_sources,
         target_layer,
     };
-    categories
-        .iter()
-        .map(|cat| build_page(cat, &ctx))
-        .collect()
+    categories.iter().map(|cat| build_page(cat, &ctx)).collect()
 }
 
 /// Build a single page from a category
