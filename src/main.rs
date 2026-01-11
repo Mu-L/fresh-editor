@@ -66,6 +66,10 @@ struct Args {
     /// Print the directories used by Fresh and exit
     #[arg(long)]
     show_paths: bool,
+
+    /// Override the locale (e.g., 'en', 'ja', 'zh-CN')
+    #[arg(long, value_name = "LOCALE")]
+    locale: Option<String>,
 }
 
 /// Parsed file location from CLI argument in file:line:col format
@@ -505,9 +509,10 @@ fn initialize_app(args: &Args) -> AnyhowResult<SetupState> {
         config::Config::load_with_layers(&dir_context, &effective_working_dir)
     };
 
-    // Initialize i18n with the config's locale before creating the editor
+    // Initialize i18n with locale: CLI arg > config > environment
     // This ensures menu defaults are created with the correct translations
-    fresh::i18n::init_with_config(config.locale.as_option());
+    let locale_override = args.locale.as_deref().or(config.locale.as_option());
+    fresh::i18n::init_with_config(locale_override);
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;

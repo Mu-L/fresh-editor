@@ -114,12 +114,8 @@ impl SettingsState {
         let config_value = serde_json::to_value(config)?;
         let layer_sources = HashMap::new(); // Populated via set_layer_sources()
         let target_layer = ConfigLayer::User; // Default to user-global settings
-        let pages = super::items::build_pages(
-            &categories,
-            &config_value,
-            &layer_sources,
-            target_layer,
-        );
+        let pages =
+            super::items::build_pages(&categories, &config_value, &layer_sources, target_layer);
 
         Ok(Self {
             categories,
