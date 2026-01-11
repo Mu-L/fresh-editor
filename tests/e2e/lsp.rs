@@ -1281,6 +1281,643 @@ fn test_semantic_tokens_range_only_viewport_highlighting() -> anyhow::Result<()>
     Ok(())
 }
 
+/// Ensure semantic token overlays persist after terminal resize.
+#[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "FakeLspServer uses a Bash script which is not available on Windows"
+)]
+fn test_semantic_tokens_persist_on_resize() -> anyhow::Result<()> {
+    use crate::common::fake_lsp::FakeLspServer;
+    use std::collections::HashSet;
+
+    let _fake_server = FakeLspServer::spawn_with_semantic_tokens_delay(200)?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let test_file = temp_dir.path().join("semantic_resize.rs");
+    std::fs::write(&test_file, "fn main() { let value = 1; }\n")?;
+
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: FakeLspServer::semantic_tokens_delay_script_path()
+                .to_string_lossy()
+                .to_string(),
+            args: vec![],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        100,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    let ns = fresh::services::lsp::semantic_tokens::lsp_semantic_tokens_namespace();
+    harness.wait_until(|h| {
+        let state = h.editor().active_state();
+        state
+            .overlays
+            .all()
+            .iter()
+            .any(|o| o.namespace.as_ref() == Some(&ns))
+    })?;
+
+    let handles_before: HashSet<_> = harness
+        .editor()
+        .active_state()
+        .overlays
+        .all()
+        .iter()
+        .filter(|o| o.namespace.as_ref() == Some(&ns))
+        .map(|o| o.handle.clone())
+        .collect();
+    assert!(
+        !handles_before.is_empty(),
+        "Expected semantic token overlays before resize"
+    );
+
+    // Resize terminal - this triggers viewport recalculation and new range requests
+    harness.resize(120, 40)?;
+    harness.process_async_and_render()?;
+
+    let handles_after: HashSet<_> = harness
+        .editor()
+        .active_state()
+        .overlays
+        .all()
+        .iter()
+        .filter(|o| o.namespace.as_ref() == Some(&ns))
+        .map(|o| o.handle.clone())
+        .collect();
+
+    assert!(
+        !handles_after.is_empty(),
+        "Semantic token overlays should not be cleared after resize"
+    );
+    assert!(
+        !handles_before.is_disjoint(&handles_after),
+        "Expected semantic token overlays to persist after terminal resize"
+    );
+
+    Ok(())
+}
+
+/// Test that semantic token colors persist in rendered output after pressing Enter.
+/// This verifies that the actual foreground colors in the terminal output remain
+/// correct after edits, not just that overlay handles exist.
+#[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "FakeLspServer uses a Bash script which is not available on Windows"
+)]
+fn test_semantic_token_rendered_colors_persist_on_enter() -> anyhow::Result<()> {
+    use crate::common::fake_lsp::FakeLspServer;
+    use ratatui::style::Color;
+
+    let _fake_server = FakeLspServer::spawn_with_semantic_tokens_delay(50)?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let test_file = temp_dir.path().join("semantic_colors.rs");
+    // The fake LSP returns tokens for "fn" (keyword, type 0) and "main" (function, type 1)
+    std::fs::write(&test_file, "fn main() { let value = 1; }\n")?;
+
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: FakeLspServer::semantic_tokens_delay_script_path()
+                .to_string_lossy()
+                .to_string(),
+            args: vec![],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        100,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    // Wait for semantic tokens to arrive
+    let ns = fresh::services::lsp::semantic_tokens::lsp_semantic_tokens_namespace();
+    harness.wait_until(|h| {
+        let state = h.editor().active_state();
+        state
+            .overlays
+            .all()
+            .iter()
+            .any(|o| o.namespace.as_ref() == Some(&ns))
+    })?;
+
+    harness.render()?;
+
+    // Find the column and row where "fn" starts (after gutter)
+    let screen = harness.screen_to_string();
+
+    // Find which line contains "fn main" - use char position, not byte position
+    // (the gutter has multi-byte "│" character which breaks byte-based indexing)
+    let (fn_row, fn_col) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            let chars: Vec<char> = line.chars().collect();
+            for i in 0..chars.len().saturating_sub(6) {
+                if chars[i..].iter().take(7).collect::<String>() == "fn main" {
+                    return Some((row as u16, i as u16));
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "Could not find 'fn main' in rendered output:\n{}",
+                screen
+            )
+        });
+
+    // Get the foreground color of "fn" keyword
+    let color_before = harness
+        .get_cell_style(fn_col, fn_row)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color before Enter");
+
+    // The semantic token for "fn" should have a non-white color
+    assert!(
+        !matches!(color_before, Color::White | Color::Reset),
+        "Expected 'fn' to have semantic token color before Enter, got {:?}",
+        color_before
+    );
+
+    // Press Enter at end of line
+    harness.send_key(KeyCode::End, KeyModifiers::NONE)?;
+    harness.send_key(KeyCode::Enter, KeyModifiers::NONE)?;
+    harness.process_async_and_render()?;
+
+    // Give a moment for any async updates
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    harness.process_async_and_render()?;
+
+    // Get the color again - "fn" should still have the same semantic token color
+    // Note: After Enter at end of line, "fn main" moves down one row
+    let screen_after = harness.screen_to_string();
+
+    // Find position using character offset (same bug fix as above)
+    let (fn_row_after, fn_col_after) = screen_after
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            let chars: Vec<char> = line.chars().collect();
+            for i in 0..chars.len().saturating_sub(6) {
+                if chars[i..].iter().take(7).collect::<String>() == "fn main" {
+                    return Some((row as u16, i as u16));
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "Could not find 'fn main' after Enter:\n{}",
+                screen_after
+            )
+        });
+
+    let color_after = harness
+        .get_cell_style(fn_col_after, fn_row_after)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color after Enter");
+
+    // The semantic token color should persist after Enter
+    assert!(
+        !matches!(color_after, Color::White | Color::Reset),
+        "Semantic token color lost after Enter, got {:?}",
+        color_after
+    );
+
+    // Color should be the same as before
+    assert_eq!(
+        color_before, color_after,
+        "Semantic token color changed after Enter: before={:?}, after={:?}",
+        color_before, color_after
+    );
+
+    Ok(())
+}
+
+/// Test that semantic token colors persist when pressing Enter at the BEGINNING of the file.
+/// This is a regression test for the bug where inserting a newline at position 0
+/// caused semantic token overlays to lose their colors.
+#[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "FakeLspServer uses a Bash script which is not available on Windows"
+)]
+fn test_semantic_token_colors_persist_on_enter_at_beginning() -> anyhow::Result<()> {
+    use crate::common::fake_lsp::FakeLspServer;
+    use ratatui::style::Color;
+
+    let _fake_server = FakeLspServer::spawn_with_semantic_tokens_delay(50)?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let test_file = temp_dir.path().join("semantic_begin.rs");
+    // The fake LSP returns tokens for "fn" (keyword) and "main" (function)
+    std::fs::write(&test_file, "fn main() { let value = 1; }\n")?;
+
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: FakeLspServer::semantic_tokens_delay_script_path()
+                .to_string_lossy()
+                .to_string(),
+            args: vec![],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        100,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    // Wait for semantic tokens to arrive
+    let ns = fresh::services::lsp::semantic_tokens::lsp_semantic_tokens_namespace();
+    harness.wait_until(|h| {
+        let state = h.editor().active_state();
+        state
+            .overlays
+            .all()
+            .iter()
+            .any(|o| o.namespace.as_ref() == Some(&ns))
+    })?;
+
+    harness.render()?;
+
+    // Helper to find "fn main" position using character offset
+    let find_fn_position = |screen: &str| -> Option<(u16, u16)> {
+        screen.lines().enumerate().find_map(|(row, line)| {
+            let chars: Vec<char> = line.chars().collect();
+            for i in 0..chars.len().saturating_sub(6) {
+                if chars[i..].iter().take(7).collect::<String>() == "fn main" {
+                    return Some((row as u16, i as u16));
+                }
+            }
+            None
+        })
+    };
+
+    let screen = harness.screen_to_string();
+    let (fn_row, fn_col) = find_fn_position(&screen)
+        .unwrap_or_else(|| panic!("Could not find 'fn main' in:\n{}", screen));
+
+    let color_before = harness
+        .get_cell_style(fn_col, fn_row)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color before Enter");
+
+    assert!(
+        !matches!(color_before, Color::White | Color::Reset),
+        "Expected 'fn' to have semantic token color before Enter, got {:?}",
+        color_before
+    );
+
+    // Move cursor to the BEGINNING of the file (position 0)
+    harness.send_key(KeyCode::Home, KeyModifiers::CONTROL)?;
+    harness.render()?;
+
+    // Press Enter at position 0 - this inserts a newline and shifts ALL content by 1 byte
+    harness.send_key(KeyCode::Enter, KeyModifiers::NONE)?;
+    harness.process_async_and_render()?;
+
+    // Give a moment for any async updates
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    harness.process_async_and_render()?;
+
+    // Get the screen again - "fn main" should now be on line 2
+    let screen_after = harness.screen_to_string();
+
+    let (fn_row_after, fn_col_after) = find_fn_position(&screen_after).unwrap_or_else(|| {
+        panic!(
+            "Could not find 'fn main' after Enter at beginning:\n{}",
+            screen_after
+        )
+    });
+
+    // Verify the line moved down
+    assert!(
+        fn_row_after > fn_row,
+        "Expected 'fn main' to move down after Enter at beginning"
+    );
+
+    let color_after = harness
+        .get_cell_style(fn_col_after, fn_row_after)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color after Enter");
+
+    // The semantic token color should persist after Enter at beginning
+    assert!(
+        !matches!(color_after, Color::White | Color::Reset),
+        "Semantic token color lost after Enter at beginning, got {:?}",
+        color_after
+    );
+
+    // Color should be the same as before
+    assert_eq!(
+        color_before, color_after,
+        "Semantic token color changed after Enter at beginning: before={:?}, after={:?}",
+        color_before, color_after
+    );
+
+    Ok(())
+}
+
+/// Test that semantic token colors are NOT replaced by stale LSP tokens.
+///
+/// This test reproduces the issue where rust-analyzer sends semantic tokens with
+/// "unresolvedReference" type immediately after an edit (before analysis completes).
+/// These stale tokens should NOT replace the existing correct tokens.
+///
+/// The fake LSP simulates this by:
+/// 1. Sending correct tokens (keyword=Cyan, function=Yellow) initially
+/// 2. After didChange, sending tokens with "variable" type (White) for everything
+///
+/// EXPECTED BEHAVIOR: The original colors should be preserved until correct tokens arrive.
+/// CURRENT BUG: The stale tokens replace correct tokens, causing colors to become White.
+#[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "FakeLspServer uses a Bash script which is not available on Windows"
+)]
+fn test_semantic_tokens_not_replaced_by_stale_lsp_tokens() -> anyhow::Result<()> {
+    use crate::common::fake_lsp::FakeLspServer;
+    use ratatui::style::Color;
+
+    let _fake_server = FakeLspServer::spawn_with_stale_semantic_tokens()?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let test_file = temp_dir.path().join("stale_tokens.rs");
+    // The fake LSP returns tokens for "fn" (keyword) and "main" (function)
+    std::fs::write(&test_file, "fn main() {}\n")?;
+
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: FakeLspServer::stale_semantic_tokens_script_path()
+                .to_string_lossy()
+                .to_string(),
+            args: vec![],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        100,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    // Wait for semantic tokens to arrive
+    let ns = fresh::services::lsp::semantic_tokens::lsp_semantic_tokens_namespace();
+    harness.wait_until(|h| {
+        let state = h.editor().active_state();
+        state
+            .overlays
+            .all()
+            .iter()
+            .any(|o| o.namespace.as_ref() == Some(&ns))
+    })?;
+
+    harness.render()?;
+
+    // Helper to find "fn main" position
+    let find_fn_position = |screen: &str| -> Option<(u16, u16)> {
+        screen.lines().enumerate().find_map(|(row, line)| {
+            let chars: Vec<char> = line.chars().collect();
+            for i in 0..chars.len().saturating_sub(6) {
+                if chars[i..].iter().take(7).collect::<String>() == "fn main" {
+                    return Some((row as u16, i as u16));
+                }
+            }
+            None
+        })
+    };
+
+    let screen = harness.screen_to_string();
+    let (fn_row, fn_col) = find_fn_position(&screen)
+        .unwrap_or_else(|| panic!("Could not find 'fn main' in:\n{}", screen));
+
+    // Get the color of "fn" keyword before edit
+    let color_before = harness
+        .get_cell_style(fn_col, fn_row)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color before edit");
+
+    println!("Color before edit: {:?}", color_before);
+
+    // Verify initial color is NOT white (should be Cyan for keyword)
+    assert!(
+        !matches!(color_before, Color::White | Color::Reset),
+        "Expected 'fn' to have semantic token color (Cyan) before edit, got {:?}",
+        color_before
+    );
+
+    // Press Enter to trigger didChange - this will cause LSP to send stale tokens
+    harness.send_key(KeyCode::Enter, KeyModifiers::NONE)?;
+
+    // Process async messages (this is where the stale tokens arrive)
+    harness.process_async_and_render()?;
+
+    // Give time for LSP response
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    harness.process_async_and_render()?;
+
+    // Get the screen again - "fn main" should now be on line 2
+    let screen_after = harness.screen_to_string();
+    let (fn_row_after, fn_col_after) = find_fn_position(&screen_after).unwrap_or_else(|| {
+        panic!(
+            "Could not find 'fn main' after edit:\n{}",
+            screen_after
+        )
+    });
+
+    // Get the color of "fn" keyword after edit
+    let color_after = harness
+        .get_cell_style(fn_col_after, fn_row_after)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color after edit");
+
+    println!("Color after edit: {:?}", color_after);
+
+    // THE BUG: After the edit, the LSP sends stale tokens with "variable" type (White).
+    // These should NOT replace the correct tokens.
+    // This assertion will FAIL until the bug is fixed.
+    assert!(
+        !matches!(color_after, Color::White | Color::Reset),
+        "BUG REPRODUCED: Semantic token color became White after edit due to stale LSP tokens. \
+         Expected color to remain {:?}, but got {:?}. \
+         The LSP sent tokens with 'variable' type after didChange, which should not replace \
+         the existing correct 'keyword' tokens.",
+        color_before, color_after
+    );
+
+    // Color should be the same as before (or at least not white)
+    assert_eq!(
+        color_before, color_after,
+        "Semantic token color changed after edit: before={:?}, after={:?}",
+        color_before, color_after
+    );
+
+    Ok(())
+}
+
+/// Test that semantic token colors persist after terminal resize.
+#[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "FakeLspServer uses a Bash script which is not available on Windows"
+)]
+fn test_semantic_token_rendered_colors_persist_on_resize() -> anyhow::Result<()> {
+    use crate::common::fake_lsp::FakeLspServer;
+    use ratatui::style::Color;
+
+    let _fake_server = FakeLspServer::spawn_with_semantic_tokens_delay(50)?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let test_file = temp_dir.path().join("semantic_resize.rs");
+    std::fs::write(&test_file, "fn main() { let value = 1; }\n")?;
+
+    let mut config = fresh::config::Config::default();
+    config.lsp.insert(
+        "rust".to_string(),
+        fresh::services::lsp::LspServerConfig {
+            command: FakeLspServer::semantic_tokens_delay_script_path()
+                .to_string_lossy()
+                .to_string(),
+            args: vec![],
+            enabled: true,
+            auto_start: true,
+            process_limits: fresh::services::process_limits::ProcessLimits::default(),
+            initialization_options: None,
+        },
+    );
+
+    let mut harness = EditorTestHarness::with_config_and_working_dir(
+        100,
+        30,
+        config,
+        temp_dir.path().to_path_buf(),
+    )?;
+
+    harness.open_file(&test_file)?;
+    harness.render()?;
+
+    // Wait for semantic tokens to arrive
+    let ns = fresh::services::lsp::semantic_tokens::lsp_semantic_tokens_namespace();
+    harness.wait_until(|h| {
+        let state = h.editor().active_state();
+        state
+            .overlays
+            .all()
+            .iter()
+            .any(|o| o.namespace.as_ref() == Some(&ns))
+    })?;
+
+    harness.render()?;
+
+    // Helper to find "fn main" position using character offset
+    let find_fn_position = |screen: &str| -> (u16, u16) {
+        screen
+            .lines()
+            .enumerate()
+            .find_map(|(row, line)| {
+                let chars: Vec<char> = line.chars().collect();
+                for i in 0..chars.len().saturating_sub(6) {
+                    if chars[i..].iter().take(7).collect::<String>() == "fn main" {
+                        return Some((row as u16, i as u16));
+                    }
+                }
+                None
+            })
+            .expect("Could not find 'fn main'")
+    };
+
+    let screen = harness.screen_to_string();
+    let (fn_row, fn_col) = find_fn_position(&screen);
+
+    let color_before = harness
+        .get_cell_style(fn_col, fn_row)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color before resize");
+
+    assert!(
+        !matches!(color_before, Color::White | Color::Reset),
+        "Expected 'fn' to have semantic token color before resize, got {:?}",
+        color_before
+    );
+
+    // Resize the terminal (simulate user resizing window)
+    harness.resize(120, 40)?;
+    harness.process_async_and_render()?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    harness.process_async_and_render()?;
+
+    // Find position again after resize
+    let screen_after = harness.screen_to_string();
+    let (fn_row_after, fn_col_after) = find_fn_position(&screen_after);
+
+    let color_after = harness
+        .get_cell_style(fn_col_after, fn_row_after)
+        .and_then(|s| s.fg)
+        .expect("Expected 'fn' to have a foreground color after resize");
+
+    assert!(
+        !matches!(color_after, Color::White | Color::Reset),
+        "Semantic token color lost after resize, got {:?}",
+        color_after
+    );
+
+    assert_eq!(
+        color_before, color_after,
+        "Semantic token color changed after resize: before={:?}, after={:?}",
+        color_before, color_after
+    );
+
+    Ok(())
+}
+
 /// Test that popup properly hides buffer text behind it
 #[test]
 fn test_lsp_completion_popup_hides_background() -> anyhow::Result<()> {

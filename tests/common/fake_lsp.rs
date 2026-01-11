@@ -409,6 +409,127 @@ done
         std::env::temp_dir().join("fake_lsp_server_semantic_tokens_range_only.sh")
     }
 
+    /// Spawn a fake LSP server that simulates rust-analyzer's "unresolvedReference" behavior.
+    ///
+    /// This version sends correct semantic tokens (keyword, function) on initial request,
+    /// but after a didChange notification, subsequent semantic token requests return
+    /// tokens with "variable" type (which maps to White color). This simulates rust-analyzer
+    /// returning "unresolvedReference" tokens when analysis is incomplete after an edit.
+    pub fn spawn_with_stale_semantic_tokens() -> anyhow::Result<Self> {
+        let (stop_tx, stop_rx) = mpsc::channel();
+
+        let script = r#"#!/bin/bash
+
+# Track if we've received a didChange notification
+EDIT_HAPPENED=0
+
+# Function to read a message
+read_message() {
+    # Read headers
+    local content_length=0
+    while IFS=: read -r key value; do
+        key=$(echo "$key" | tr -d '\r\n')
+        value=$(echo "$value" | tr -d '\r\n ')
+        if [ "$key" = "Content-Length" ]; then
+            content_length=$value
+        fi
+        # Empty line marks end of headers
+        if [ -z "$key" ]; then
+            break
+        fi
+    done
+
+    # Read content
+    if [ $content_length -gt 0 ]; then
+        dd bs=1 count=$content_length 2>/dev/null
+    fi
+}
+
+# Function to send a message
+send_message() {
+    local message="$1"
+    local length=${#message}
+    echo -en "Content-Length: $length\r\n\r\n$message"
+}
+
+# Main loop
+while true; do
+    # Read incoming message
+    msg=$(read_message)
+
+    if [ -z "$msg" ]; then
+        break
+    fi
+
+    # Extract method from JSON
+    method=$(echo "$msg" | grep -o '"method":"[^"]*"' | cut -d'"' -f4)
+    msg_id=$(echo "$msg" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+
+case "$method" in
+    "initialize")
+        # Legend: tokenTypes=["keyword","function","variable"]
+        # type=0 -> keyword (cyan), type=1 -> function (yellow), type=2 -> variable (white)
+        send_message '{"jsonrpc":"2.0","id":'$msg_id',"result":{"capabilities":{"textDocumentSync":2,"semanticTokensProvider":{"legend":{"tokenTypes":["keyword","function","variable"],"tokenModifiers":[]},"full":true,"range":true}}}}'
+        ;;
+    "textDocument/didChange")
+        # Mark that an edit happened
+        EDIT_HAPPENED=1
+        ;;
+    "textDocument/semanticTokens/full"|"textDocument/semanticTokens/range")
+        if [ $EDIT_HAPPENED -eq 0 ]; then
+            # Before edit: send correct tokens at line 0
+            # Token 1: line 0, char 0, len 2, type 0 (keyword) -> "fn"
+            # Token 2: line 0, char 3, len 4, type 1 (function) -> "main"
+            send_message '{"jsonrpc":"2.0","id":'$msg_id',"result":{"data":[0,0,2,0,0,0,3,4,1,0]}}'
+        else
+            # After edit: send tokens with type 2 (variable -> white) at LINE 1 (the new position)
+            # This simulates rust-analyzer sending tokens for the updated document positions
+            # but with "unresolvedReference" type because analysis is incomplete
+            # Token 1: line 1, char 0, len 2, type 2 (variable -> white) -> "fn"
+            # Token 2: line 1, char 3, len 4, type 2 (variable -> white) -> "main"
+            send_message '{"jsonrpc":"2.0","id":'$msg_id',"result":{"data":[1,0,2,2,0,0,3,4,2,0]}}'
+        fi
+        ;;
+    "textDocument/didOpen"|"textDocument/didSave")
+        # Notifications - no response
+        ;;
+    "textDocument/diagnostic")
+        send_message '{"jsonrpc":"2.0","id":'$msg_id',"result":{"items":[]}}'
+        ;;
+    "textDocument/inlayHint")
+        send_message '{"jsonrpc":"2.0","id":'$msg_id',"result":[]}'
+        ;;
+    "shutdown")
+        send_message '{"jsonrpc":"2.0","id":'$msg_id',"result":null}'
+        break
+        ;;
+esac
+done
+"#;
+
+        let script_path = Self::stale_semantic_tokens_script_path();
+        std::fs::write(&script_path, script)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path)?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms)?;
+        }
+
+        let handle = Some(thread::spawn(move || {
+            let _ = stop_rx.recv();
+        }));
+
+        Ok(Self { handle, stop_tx })
+    }
+
+    /// Path to the stale semantic tokens script.
+    pub fn stale_semantic_tokens_script_path() -> std::path::PathBuf {
+        std::env::temp_dir().join("fake_lsp_server_stale_semantic_tokens.sh")
+    }
+
     /// Get the path to the fake LSP server script
     pub fn script_path() -> std::path::PathBuf {
         std::env::temp_dir().join("fake_lsp_server.sh")
