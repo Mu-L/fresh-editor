@@ -11,7 +11,7 @@ use crate::primitives::text_property::TextPropertyEntry;
 use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand, PluginResponse};
 #[cfg(test)]
 use crate::services::plugins::api::CursorInfo;
-use crate::services::plugins::transpile::{bundle_module, has_es_imports, transpile_typescript};
+use crate::services::plugins::transpile::{bundle_module, has_es_imports, has_es_module_syntax, strip_imports_and_exports, transpile_typescript};
 use crate::view::overlay::OverlayNamespace;
 use anyhow::{anyhow, Result};
 use rquickjs::{Context, Function, Object, Runtime, Value};
@@ -1021,9 +1021,13 @@ impl QuickJsBackend {
         let source = std::fs::read_to_string(&path_buf)
             .map_err(|e| anyhow!("Failed to read plugin {}: {}", path, e))?;
 
-        // Check for ES imports
+        let filename = path_buf.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("plugin.ts");
+
+        // Check for ES imports - these need bundling to resolve dependencies
         if has_es_imports(&source) {
-            // Try to bundle
+            // Try to bundle (this also strips imports and exports)
             match bundle_module(&path_buf) {
                 Ok(bundled) => {
                     self.execute_js(&bundled, path)?;
@@ -1036,18 +1040,22 @@ impl QuickJsBackend {
                     return Ok(()); // Skip plugins with unresolvable imports
                 }
             }
+        } else if has_es_module_syntax(&source) {
+            // Has exports but no imports - strip exports and transpile
+            let stripped = strip_imports_and_exports(&source);
+            let js_code = if filename.ends_with(".ts") {
+                transpile_typescript(&stripped, filename)?
+            } else {
+                stripped
+            };
+            self.execute_js(&js_code, path)?;
         } else {
-            // Transpile and execute
-            let filename = path_buf.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("plugin.ts");
-
+            // Plain code - just transpile if TypeScript
             let js_code = if filename.ends_with(".ts") {
                 transpile_typescript(&source, filename)?
             } else {
                 source
             };
-
             self.execute_js(&js_code, path)?;
         }
 
