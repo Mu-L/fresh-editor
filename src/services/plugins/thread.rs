@@ -774,18 +774,31 @@ async fn handle_request(
         PluginRequest::RunHook { hook_name, args } => {
             // Fire-and-forget hook execution
             let hook_start = std::time::Instant::now();
-            tracing::trace!(hook = %hook_name, "RunHook request received");
+            // Use info level for prompt hooks to aid debugging
+            if hook_name == "prompt_confirmed" || hook_name == "prompt_cancelled" {
+                tracing::info!(hook = %hook_name, ?args, "RunHook request received (prompt hook)");
+            } else {
+                tracing::trace!(hook = %hook_name, "RunHook request received");
+            }
             if let Err(e) = run_hook_internal_rc(Rc::clone(&runtime), &hook_name, &args).await {
                 let error_msg = format!("Plugin error in '{}': {}", hook_name, e);
                 tracing::error!("{}", error_msg);
                 // Surface the error to the UI
                 runtime.borrow_mut().send_status(error_msg);
             }
-            tracing::trace!(
-                hook = %hook_name,
-                elapsed_ms = hook_start.elapsed().as_millis(),
-                "RunHook completed"
-            );
+            if hook_name == "prompt_confirmed" || hook_name == "prompt_cancelled" {
+                tracing::info!(
+                    hook = %hook_name,
+                    elapsed_ms = hook_start.elapsed().as_millis(),
+                    "RunHook completed (prompt hook)"
+                );
+            } else {
+                tracing::trace!(
+                    hook = %hook_name,
+                    elapsed_ms = hook_start.elapsed().as_millis(),
+                    "RunHook completed"
+                );
+            }
         }
 
         PluginRequest::HasHookHandlers {
@@ -802,8 +815,10 @@ async fn handle_request(
         }
 
         PluginRequest::ResolveCallback { callback_id, result_json } => {
+            tracing::info!("ResolveCallback: resolving callback_id={} with result_json={}", callback_id, result_json);
             runtime.borrow_mut().resolve_callback(callback_id, &result_json);
             // resolve_callback now runs execute_pending_job() internally
+            tracing::info!("ResolveCallback: done resolving callback_id={}", callback_id);
         }
 
         PluginRequest::RejectCallback { callback_id, error } => {

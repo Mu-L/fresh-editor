@@ -188,14 +188,19 @@ impl Editor {
                 );
             }
             PromptType::Plugin { custom_type } => {
+                tracing::info!(
+                    "prompt_confirmed: dispatching hook for prompt_type='{}', input='{}', selected_index={:?}",
+                    custom_type, input, selected_index
+                );
                 self.plugin_manager.run_hook(
                     "prompt_confirmed",
                     HookArgs::PromptConfirmed {
-                        prompt_type: custom_type,
+                        prompt_type: custom_type.clone(),
                         input,
                         selected_index,
                     },
                 );
+                tracing::info!("prompt_confirmed: hook dispatched for prompt_type='{}'", custom_type);
             }
             PromptType::ConfirmRevert => {
                 let input_lower = input.trim().to_lowercase();

@@ -1201,7 +1201,12 @@ globalThis.onThemeSelectInitialPromptConfirmed = async function(args: {
   selected_index: number | null;
   input: string;
 }): Promise<boolean> {
-  if (args.prompt_type !== "theme-select-initial") return true;
+  editor.debug(`[theme_editor] onThemeSelectInitialPromptConfirmed called with: ${JSON.stringify(args)}`);
+  if (args.prompt_type !== "theme-select-initial") {
+    editor.debug(`[theme_editor] prompt_type mismatch, expected 'theme-select-initial', got '${args.prompt_type}'`);
+    return true;
+  }
+  editor.debug(`[theme_editor] prompt_type matched, processing selection...`);
 
   const value = args.input.trim();
 
@@ -1263,7 +1268,9 @@ globalThis.onThemeSelectInitialPromptConfirmed = async function(args: {
   }
 
   // Now open the editor with loaded theme
+  editor.debug(`[theme_editor] About to call doOpenThemeEditor()`);
   await doOpenThemeEditor();
+  editor.debug(`[theme_editor] doOpenThemeEditor() completed`);
 
   return true;
 };
@@ -1720,10 +1727,13 @@ globalThis.open_theme_editor = async function(): Promise<void> {
  * Actually open the theme editor with loaded theme data
  */
 async function doOpenThemeEditor(): Promise<void> {
+  editor.debug("[theme_editor] doOpenThemeEditor: building display entries");
   // Build initial entries
   const entries = buildDisplayEntries();
+  editor.debug(`[theme_editor] doOpenThemeEditor: built ${entries.length} entries`);
 
   // Create virtual buffer in current split (no new split)
+  editor.debug("[theme_editor] doOpenThemeEditor: calling createVirtualBuffer...");
   const bufferId = await editor.createVirtualBuffer({
     name: "*Theme Editor*",
     mode: "theme-editor",
@@ -1733,6 +1743,7 @@ async function doOpenThemeEditor(): Promise<void> {
     show_cursors: true,
     editing_disabled: true,
   });
+  editor.debug(`[theme_editor] doOpenThemeEditor: createVirtualBuffer returned bufferId=${bufferId}`);
 
   if (bufferId !== null) {
     state.bufferId = bufferId;

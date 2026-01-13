@@ -4310,7 +4310,7 @@ impl Editor {
 
                         // Send response if request_id is present
                         if let Some(req_id) = request_id {
-                            tracing::trace!(
+                            tracing::info!(
                                 "CreateVirtualBufferWithContent: resolving callback for request_id={}, buffer_id={:?}",
                                 req_id,
                                 buffer_id
@@ -4320,6 +4320,7 @@ impl Editor {
                                 "splitId": null
                             });
                             self.plugin_manager.resolve_callback(req_id, result.to_string());
+                            tracing::info!("CreateVirtualBufferWithContent: resolve_callback sent for request_id={}", req_id);
                         }
                     }
                     Err(e) => {

@@ -714,6 +714,48 @@ impl QuickJsBackend {
             })?)?;
 
             // === Virtual buffers ===
+
+            // createVirtualBuffer is async - creates in current split, returns buffer_id
+            // _createVirtualBufferStart(opts) -> callbackId
+            let request_id = Rc::clone(&next_request_id);
+            let cmd_sender = command_sender.clone();
+            editor.set("_createVirtualBufferStart", Function::new(ctx.clone(), move |ctx: rquickjs::Ctx, opts: Object| -> rquickjs::Result<u64> {
+                let id = {
+                    let mut id_ref = request_id.borrow_mut();
+                    let id = *id_ref;
+                    *id_ref += 1;
+                    id
+                };
+
+                let name: String = opts.get("name")?;
+                let mode: String = opts.get("mode").unwrap_or_default();
+                let read_only: bool = opts.get("readOnly").unwrap_or(false);
+                let show_line_numbers: bool = opts.get("showLineNumbers").unwrap_or(false);
+                let show_cursors: bool = opts.get("showCursors").unwrap_or(true);
+                let editing_disabled: bool = opts.get("editingDisabled").unwrap_or(false);
+                let hidden_from_tabs: bool = opts.get("hiddenFromTabs").unwrap_or(false);
+
+                // entries is array of {text: string, properties?: object}
+                let entries_arr: Vec<Object> = opts.get("entries").unwrap_or_default();
+                let entries: Vec<TextPropertyEntry> = entries_arr.iter()
+                    .filter_map(|obj| parse_text_property_entry(&ctx, obj))
+                    .collect();
+
+                tracing::debug!("_createVirtualBufferStart: sending CreateVirtualBufferWithContent command, request_id={}", id);
+                let _ = cmd_sender.send(PluginCommand::CreateVirtualBufferWithContent {
+                    name,
+                    mode,
+                    read_only,
+                    entries,
+                    show_line_numbers,
+                    show_cursors,
+                    editing_disabled,
+                    hidden_from_tabs,
+                    request_id: Some(id),
+                });
+                Ok(id)
+            })?)?;
+
             // createVirtualBufferInSplit is async - returns callback_id, resolves to {bufferId, splitId}
             // _createVirtualBufferInSplitStart(opts) -> callbackId
             let request_id = Rc::clone(&next_request_id);
@@ -1036,25 +1078,62 @@ impl QuickJsBackend {
                     }
                 };
 
+                // Async operation timeout in ms (30 seconds)
+                const ASYNC_TIMEOUT_MS = 30000;
+
                 // Generic async wrapper decorator
                 // Wraps a function that returns a callbackId into a promise-returning function
-                // Usage: editor.foo = _wrapAsync(editor._fooStart);
-                globalThis._wrapAsync = function(startFn) {
+                // Usage: editor.foo = _wrapAsync(editor._fooStart, "foo");
+                globalThis._wrapAsync = function(startFn, fnName) {
+                    if (typeof startFn !== 'function') {
+                        // Return a function that always throws - catches missing implementations
+                        return function(...args) {
+                            const error = new Error(`editor.${fnName || 'unknown'} is not implemented (missing _${fnName}Start)`);
+                            editor.debug(`[ASYNC ERROR] ${error.message}`);
+                            throw error;
+                        };
+                    }
                     return function(...args) {
                         const callbackId = startFn.apply(this, args);
                         return new Promise((resolve, reject) => {
-                            globalThis._pendingCallbacks.set(callbackId, { resolve, reject });
+                            const timeoutId = setTimeout(() => {
+                                globalThis._pendingCallbacks.delete(callbackId);
+                                const error = new Error(`editor.${fnName || 'unknown'} timed out after ${ASYNC_TIMEOUT_MS}ms (callbackId=${callbackId})`);
+                                editor.debug(`[ASYNC TIMEOUT] ${error.message}`);
+                                reject(error);
+                            }, ASYNC_TIMEOUT_MS);
+                            globalThis._pendingCallbacks.set(callbackId, {
+                                resolve: (value) => { clearTimeout(timeoutId); resolve(value); },
+                                reject: (err) => { clearTimeout(timeoutId); reject(err); }
+                            });
                         });
                     };
                 };
 
                 // Async wrapper that returns a thenable object (for APIs like spawnProcess)
                 // The returned object has .result promise and is itself thenable
-                globalThis._wrapAsyncThenable = function(startFn) {
+                globalThis._wrapAsyncThenable = function(startFn, fnName) {
+                    if (typeof startFn !== 'function') {
+                        // Return a function that always throws - catches missing implementations
+                        return function(...args) {
+                            const error = new Error(`editor.${fnName || 'unknown'} is not implemented (missing _${fnName}Start)`);
+                            editor.debug(`[ASYNC ERROR] ${error.message}`);
+                            throw error;
+                        };
+                    }
                     return function(...args) {
                         const callbackId = startFn.apply(this, args);
                         const resultPromise = new Promise((resolve, reject) => {
-                            globalThis._pendingCallbacks.set(callbackId, { resolve, reject });
+                            const timeoutId = setTimeout(() => {
+                                globalThis._pendingCallbacks.delete(callbackId);
+                                const error = new Error(`editor.${fnName || 'unknown'} timed out after ${ASYNC_TIMEOUT_MS}ms (callbackId=${callbackId})`);
+                                editor.debug(`[ASYNC TIMEOUT] ${error.message}`);
+                                reject(error);
+                            }, ASYNC_TIMEOUT_MS);
+                            globalThis._pendingCallbacks.set(callbackId, {
+                                resolve: (value) => { clearTimeout(timeoutId); resolve(value); },
+                                reject: (err) => { clearTimeout(timeoutId); reject(err); }
+                            });
                         });
                         return {
                             get result() { return resultPromise; },
@@ -1069,12 +1148,13 @@ impl QuickJsBackend {
                 };
 
                 // Apply wrappers to async functions on _editorCore
-                _editorCore.spawnProcess = _wrapAsyncThenable(_editorCore._spawnProcessStart);
-                _editorCore.delay = _wrapAsync(_editorCore._delayStart);
-                _editorCore.createVirtualBufferInSplit = _wrapAsyncThenable(_editorCore._createVirtualBufferInSplitStart);
-                _editorCore.sendLspRequest = _wrapAsync(_editorCore._sendLspRequestStart);
-                _editorCore.spawnBackgroundProcess = _wrapAsyncThenable(_editorCore._spawnBackgroundProcessStart);
-                _editorCore.getBufferText = _wrapAsync(_editorCore._getBufferTextStart);
+                _editorCore.spawnProcess = _wrapAsyncThenable(_editorCore._spawnProcessStart, "spawnProcess");
+                _editorCore.delay = _wrapAsync(_editorCore._delayStart, "delay");
+                _editorCore.createVirtualBuffer = _wrapAsync(_editorCore._createVirtualBufferStart, "createVirtualBuffer");
+                _editorCore.createVirtualBufferInSplit = _wrapAsyncThenable(_editorCore._createVirtualBufferInSplitStart, "createVirtualBufferInSplit");
+                _editorCore.sendLspRequest = _wrapAsync(_editorCore._sendLspRequestStart, "sendLspRequest");
+                _editorCore.spawnBackgroundProcess = _wrapAsyncThenable(_editorCore._spawnBackgroundProcessStart, "spawnBackgroundProcess");
+                _editorCore.getBufferText = _wrapAsync(_editorCore._getBufferTextStart, "getBufferText");
             "#.as_bytes())?;
 
             Ok::<_, rquickjs::Error>(())
