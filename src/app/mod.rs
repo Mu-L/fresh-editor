@@ -421,6 +421,10 @@ pub struct Editor {
     /// Maps panel ID (e.g., "diagnostics") to buffer ID
     panel_ids: HashMap<String, BufferId>,
 
+    /// Background process abort handles for cancellation
+    /// Maps process_id to abort handle
+    background_process_handles: HashMap<u64, tokio::task::AbortHandle>,
+
     /// Prompt histories keyed by prompt type name (e.g., "search", "replace", "goto_line", "plugin:custom_name")
     /// This provides a generic history system that works for all prompt types including plugin prompts.
     prompt_histories: HashMap<String, crate::input::input_history::InputHistory>,
@@ -1002,6 +1006,7 @@ impl Editor {
             plugin_manager,
             seen_byte_ranges: HashMap::new(),
             panel_ids: HashMap::new(),
+            background_process_handles: HashMap::new(),
             prompt_histories: {
                 // Load prompt histories from disk if available
                 let mut histories = HashMap::new();
@@ -3345,6 +3350,39 @@ impl Editor {
                 } => {
                     self.handle_plugin_process_output(process_id, stdout, stderr, exit_code);
                 }
+                AsyncMessage::PluginDelayComplete { callback_id } => {
+                    self.plugin_manager.resolve_callback(callback_id, "null".to_string());
+                }
+                AsyncMessage::PluginProcessStdout { process_id, data } => {
+                    // Run onProcessStdout hook for streaming output
+                    self.plugin_manager.run_hook(
+                        "onProcessStdout",
+                        crate::services::plugins::hooks::HookArgs::ProcessOutput {
+                            process_id,
+                            data,
+                        },
+                    );
+                }
+                AsyncMessage::PluginProcessStderr { process_id, data } => {
+                    // Run onProcessStderr hook for streaming output
+                    self.plugin_manager.run_hook(
+                        "onProcessStderr",
+                        crate::services::plugins::hooks::HookArgs::ProcessOutput {
+                            process_id,
+                            data,
+                        },
+                    );
+                }
+                AsyncMessage::PluginBackgroundProcessExit { process_id, callback_id, exit_code } => {
+                    // Clean up abort handle
+                    self.background_process_handles.remove(&process_id);
+                    // Resolve callback with exit info
+                    let result = serde_json::json!({
+                        "processId": process_id,
+                        "exitCode": exit_code
+                    });
+                    self.plugin_manager.resolve_callback(callback_id, result.to_string());
+                }
                 AsyncMessage::CustomNotification {
                     language,
                     method,
@@ -4014,38 +4052,181 @@ impl Editor {
                 cwd,
                 callback_id,
             } => {
-                // Spawn process asynchronously and resolve callback when done
-                let effective_cwd = cwd.unwrap_or_else(|| {
-                    std::env::current_dir()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| ".".to_string())
-                });
+                // Spawn process asynchronously via tokio
+                if let (Some(runtime), Some(bridge)) = (&self.tokio_runtime, &self.async_bridge) {
+                    let effective_cwd = cwd.unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| ".".to_string())
+                    });
+                    let sender = bridge.sender();
+                    runtime.spawn(async move {
+                        let output = tokio::process::Command::new(&command)
+                            .args(&args)
+                            .current_dir(&effective_cwd)
+                            .output()
+                            .await;
 
-                match std::process::Command::new(&command)
-                    .args(&args)
-                    .current_dir(&effective_cwd)
-                    .output()
-                {
-                    Ok(output) => {
-                        let result = serde_json::json!({
-                            "stdout": String::from_utf8_lossy(&output.stdout),
-                            "stderr": String::from_utf8_lossy(&output.stderr),
-                            "exitCode": output.status.code().unwrap_or(-1)
-                        });
-                        self.plugin_manager.resolve_callback(callback_id, result.to_string());
-                    }
-                    Err(e) => {
-                        self.plugin_manager.reject_callback(callback_id, e.to_string());
+                        match output {
+                            Ok(output) => {
+                                let _ = sender.send(AsyncMessage::PluginProcessOutput {
+                                    process_id: callback_id,
+                                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                                    exit_code: output.status.code().unwrap_or(-1),
+                                });
+                            }
+                            Err(e) => {
+                                let _ = sender.send(AsyncMessage::PluginProcessOutput {
+                                    process_id: callback_id,
+                                    stdout: String::new(),
+                                    stderr: e.to_string(),
+                                    exit_code: -1,
+                                });
+                            }
+                        }
+                    });
+                } else {
+                    // Fallback to blocking if no runtime available
+                    let effective_cwd = cwd.unwrap_or_else(|| ".".to_string());
+                    match std::process::Command::new(&command)
+                        .args(&args)
+                        .current_dir(&effective_cwd)
+                        .output()
+                    {
+                        Ok(output) => {
+                            let result = serde_json::json!({
+                                "stdout": String::from_utf8_lossy(&output.stdout),
+                                "stderr": String::from_utf8_lossy(&output.stderr),
+                                "exitCode": output.status.code().unwrap_or(-1)
+                            });
+                            self.plugin_manager.resolve_callback(callback_id, result.to_string());
+                        }
+                        Err(e) => {
+                            self.plugin_manager.reject_callback(callback_id, e.to_string());
+                        }
                     }
                 }
             }
 
             PluginCommand::Delay { callback_id, duration_ms } => {
-                // For delay, we resolve immediately with null/undefined
-                // True async delay would require spawning a thread/timer
-                // For now, do a blocking sleep (acceptable for short delays)
-                std::thread::sleep(std::time::Duration::from_millis(duration_ms));
-                self.plugin_manager.resolve_callback(callback_id, "null".to_string());
+                // Spawn async delay via tokio
+                if let (Some(runtime), Some(bridge)) = (&self.tokio_runtime, &self.async_bridge) {
+                    let sender = bridge.sender();
+                    runtime.spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(duration_ms)).await;
+                        let _ = sender.send(AsyncMessage::PluginDelayComplete { callback_id });
+                    });
+                } else {
+                    // Fallback to blocking if no runtime available
+                    std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+                    self.plugin_manager.resolve_callback(callback_id, "null".to_string());
+                }
+            }
+
+            PluginCommand::SpawnBackgroundProcess {
+                process_id,
+                command,
+                args,
+                cwd,
+                callback_id,
+            } => {
+                // Spawn background process with streaming output via tokio
+                if let (Some(runtime), Some(bridge)) = (&self.tokio_runtime, &self.async_bridge) {
+                    use tokio::io::{AsyncBufReadExt, BufReader};
+                    use tokio::process::Command as TokioCommand;
+
+                    let effective_cwd = cwd.unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| ".".to_string())
+                    });
+
+                    let sender = bridge.sender();
+                    let sender_stdout = sender.clone();
+                    let sender_stderr = sender.clone();
+
+                    let handle = runtime.spawn(async move {
+                        let mut child = match TokioCommand::new(&command)
+                            .args(&args)
+                            .current_dir(&effective_cwd)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                        {
+                            Ok(child) => child,
+                            Err(e) => {
+                                let _ = sender.send(AsyncMessage::PluginBackgroundProcessExit {
+                                    process_id,
+                                    callback_id,
+                                    exit_code: -1,
+                                });
+                                tracing::error!("Failed to spawn background process: {}", e);
+                                return;
+                            }
+                        };
+
+                        // Stream stdout
+                        let stdout = child.stdout.take();
+                        let stderr = child.stderr.take();
+                        let pid = process_id;
+
+                        // Spawn stdout reader
+                        if let Some(stdout) = stdout {
+                            let sender = sender_stdout;
+                            tokio::spawn(async move {
+                                let reader = BufReader::new(stdout);
+                                let mut lines = reader.lines();
+                                while let Ok(Some(line)) = lines.next_line().await {
+                                    let _ = sender.send(AsyncMessage::PluginProcessStdout {
+                                        process_id: pid,
+                                        data: line + "\n",
+                                    });
+                                }
+                            });
+                        }
+
+                        // Spawn stderr reader
+                        if let Some(stderr) = stderr {
+                            let sender = sender_stderr;
+                            tokio::spawn(async move {
+                                let reader = BufReader::new(stderr);
+                                let mut lines = reader.lines();
+                                while let Ok(Some(line)) = lines.next_line().await {
+                                    let _ = sender.send(AsyncMessage::PluginProcessStderr {
+                                        process_id: pid,
+                                        data: line + "\n",
+                                    });
+                                }
+                            });
+                        }
+
+                        // Wait for process to complete
+                        let exit_code = match child.wait().await {
+                            Ok(status) => status.code().unwrap_or(-1),
+                            Err(_) => -1,
+                        };
+
+                        let _ = sender.send(AsyncMessage::PluginBackgroundProcessExit {
+                            process_id,
+                            callback_id,
+                            exit_code,
+                        });
+                    });
+
+                    // Store abort handle for potential kill
+                    self.background_process_handles.insert(process_id, handle.abort_handle());
+                } else {
+                    // No runtime - reject immediately
+                    self.plugin_manager.reject_callback(callback_id, "Async runtime not available".to_string());
+                }
+            }
+
+            PluginCommand::KillBackgroundProcess { process_id } => {
+                if let Some(handle) = self.background_process_handles.remove(&process_id) {
+                    handle.abort();
+                    tracing::debug!("Killed background process {}", process_id);
+                }
             }
 
             // ==================== Virtual Buffer Commands (complex, kept inline) ====================

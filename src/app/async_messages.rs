@@ -784,10 +784,14 @@ impl Editor {
         result: Result<Value, String>,
     ) {
         tracing::debug!("Received plugin LSP response (request_id={})", request_id);
-        self.send_plugin_response(crate::services::plugins::api::PluginResponse::LspRequest {
-            request_id,
-            result,
-        });
+        match result {
+            Ok(value) => {
+                self.plugin_manager.resolve_callback(request_id, value.to_string());
+            }
+            Err(err) => {
+                self.plugin_manager.reject_callback(request_id, err);
+            }
+        }
     }
 
     /// Handle generic plugin response (e.g., GetBufferText result)
@@ -952,6 +956,13 @@ impl Editor {
             stdout.len(),
             stderr.len()
         );
+        // Resolve the plugin callback with the process output
+        let result = serde_json::json!({
+            "stdout": stdout,
+            "stderr": stderr,
+            "exitCode": exit_code
+        });
+        self.plugin_manager.resolve_callback(process_id, result.to_string());
     }
 
     /// Process TypeScript plugin commands

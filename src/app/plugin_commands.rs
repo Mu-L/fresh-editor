@@ -1118,10 +1118,7 @@ impl Editor {
             Some("LSP manager not initialized".to_string())
         };
         if let Some(err_msg) = error {
-            self.send_plugin_response(PluginResponse::LspRequest {
-                request_id,
-                result: Err(err_msg),
-            });
+            self.plugin_manager.reject_callback(request_id, err_msg);
         }
     }
 

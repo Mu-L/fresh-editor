@@ -749,6 +749,59 @@ impl QuickJsBackend {
                 id
             })?)?;
 
+            // LSP request - sendLspRequest(language, method, params?) -> Promise<result>
+            let request_id = Rc::clone(&next_request_id);
+            let cmd_sender = command_sender.clone();
+            editor.set("_sendLspRequestStart", Function::new(ctx.clone(), move |ctx: rquickjs::Ctx, language: String, method: String, params: Option<Object>| -> rquickjs::Result<u64> {
+                let id = {
+                    let mut id_ref = request_id.borrow_mut();
+                    let id = *id_ref;
+                    *id_ref += 1;
+                    id
+                };
+                // Convert params object to serde_json::Value
+                let params_json: Option<serde_json::Value> = params.map(|obj| {
+                    let val = obj.into_value();
+                    js_to_json(&ctx, val)
+                });
+                let _ = cmd_sender.send(PluginCommand::SendLspRequest {
+                    request_id: id,
+                    language,
+                    method,
+                    params: params_json,
+                });
+                Ok(id)
+            })?)?;
+
+            // Background process - spawnBackgroundProcess(command, args, cwd?, opts?) -> Promise<{processId, exitCode}>
+            // Returns immediately with processId, resolves when process exits
+            let request_id = Rc::clone(&next_request_id);
+            let cmd_sender = command_sender.clone();
+            editor.set("_spawnBackgroundProcessStart", Function::new(ctx.clone(), move |command: String, args: Vec<String>, cwd: Option<String>| -> u64 {
+                let callback_id = {
+                    let mut id_ref = request_id.borrow_mut();
+                    let id = *id_ref;
+                    *id_ref += 1;
+                    id
+                };
+                // Use callback_id as process_id for simplicity
+                let process_id = callback_id;
+                let _ = cmd_sender.send(PluginCommand::SpawnBackgroundProcess {
+                    process_id,
+                    command,
+                    args,
+                    cwd,
+                    callback_id,
+                });
+                callback_id
+            })?)?;
+
+            // Kill background process
+            let cmd_sender = command_sender.clone();
+            editor.set("killBackgroundProcess", Function::new(ctx.clone(), move |process_id: u64| -> bool {
+                cmd_sender.send(PluginCommand::KillBackgroundProcess { process_id }).is_ok()
+            })?)?;
+
             // === Refresh ===
             let cmd_sender = command_sender.clone();
             editor.set("refreshLines", Function::new(ctx.clone(), move |buffer_id: u32| -> bool {
@@ -854,6 +907,8 @@ impl QuickJsBackend {
                 editor.spawnProcess = _wrapAsyncThenable(editor._spawnProcessStart);
                 editor.delay = _wrapAsync(editor._delayStart);
                 editor.createVirtualBufferInSplit = _wrapAsyncThenable(editor._createVirtualBufferInSplitStart);
+                editor.sendLspRequest = _wrapAsync(editor._sendLspRequestStart);
+                editor.spawnBackgroundProcess = _wrapAsyncThenable(editor._spawnBackgroundProcessStart);
             "#.as_bytes())?;
 
             Ok::<_, rquickjs::Error>(())
