@@ -998,6 +998,7 @@ pub struct SpawnResult {
 #[cfg_attr(feature = "plugins", ts(export))]
 pub struct BackgroundProcessResult {
     /// Unique process ID for later reference
+    #[cfg_attr(feature = "plugins", ts(type = "number"))]
     pub process_id: u64,
 }
 

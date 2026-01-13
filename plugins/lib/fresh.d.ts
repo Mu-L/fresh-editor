@@ -31,7 +31,7 @@ type BackgroundProcessResult = {
 	/**
 	* Unique process ID for later reference
 	*/
-	process_id: bigint;
+	process_id: number;
 };
 type SpawnResult = {
 	/**
