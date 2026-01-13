@@ -32,7 +32,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["plugins", "runtime", "embed-plugins"]
-plugins = ["dep:rquickjs", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_parser", "dep:oxc_transformer", "dep:oxc_codegen", "dep:oxc_span", "dep:oxc_semantic"]
+plugins = ["dep:rquickjs", "dep:oxc_allocator", "dep:oxc_ast", "dep:oxc_parser", "dep:oxc_transformer", "dep:oxc_codegen", "dep:oxc_span", "dep:oxc_semantic", "dep:fresh-plugin-api-macros"]
 # Embed plugins into the binary as a fallback when no disk plugins are found
 embed-plugins = ["plugins", "dep:include_dir", "dep:dirs", "dep:trash"]
 # Feature for optional development binaries (generate_schema, event_debug)
@@ -131,6 +131,8 @@ oxc_transformer = { version = "0.108", optional = true }
 oxc_codegen = { version = "0.108", optional = true }
 oxc_span = { version = "0.108", optional = true }
 oxc_semantic = { version = "0.108", optional = true }
+# Plugin API proc macros for type-safe bindings
+fresh-plugin-api-macros = { path = "crates/fresh-plugin-api-macros", optional = true }
 tree-sitter-python = { version = "0.25.0", optional = true }
 tree-sitter-javascript = { version = "0.25.0", optional = true }
 tree-sitter-typescript = { version = "0.23.2", optional = true }

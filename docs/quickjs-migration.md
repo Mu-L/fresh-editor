@@ -191,70 +191,98 @@ oxc_semantic = "0.102"
 4. **Synchronous API** - Plugin API is synchronous even though QuickJS supports async
    - Future consideration for async plugin APIs
 
-## Future: Type-Safe API Generation
+## Type-Safe API Generation
 
-Currently the plugin API is manually defined in multiple places (Rust bindings, TypeScript .d.ts, tests), leading to inconsistencies. A future improvement would be a single authoritative schema that auto-generates all artifacts.
+The plugin API is defined in a Rust trait (`EditorApi`) with a proc macro crate for future code generation. This provides compile-time type safety - the Rust compiler catches API mismatches.
 
-### Option 1: Rust Proc Macro
+### Architecture
+
+```
+src/services/plugins/
+├── api_trait.rs           # EditorApi trait + API_METHODS constant
+├── backend/
+│   └── quickjs_backend.rs # Implements EditorApi
+└── ...
+
+crates/
+└── fresh-plugin-api-macros/  # Proc macro crate (for future binding generation)
+    ├── Cargo.toml
+    └── src/lib.rs
+```
+
+### EditorApi Trait
+
+The `EditorApi` trait in `api_trait.rs` defines all sync methods:
 
 ```rust
-#[plugin_api]
 pub trait EditorApi {
-    #[api(sync)]
-    fn getCursorPosition(&self) -> CursorPosition;
+    // Buffer queries
+    fn get_active_buffer_id(&self) -> u32;
+    fn get_buffer_path(&self, buffer_id: u32) -> String;
+    fn list_buffers_json(&self) -> String;
 
-    #[api(async)]
-    fn readFile(&self, path: String) -> String;
+    // File system
+    fn file_exists(&self, path: &str) -> bool;
+    fn read_dir_json(&self, path: &str) -> String;
+
+    // Path operations
+    fn path_join(&self, parts: &[String]) -> String;
+    // ... etc
 }
 ```
 
-**Pros**: Compile-time type safety, Rust-native
-**Cons**: Complex macro implementation, TS generation needs extra tooling (ts-rs)
+### API Method Registry
 
-### Option 2: Schema File (TOML) + build.rs
+The `API_METHODS` constant documents all JS-exposed methods:
 
-```toml
-[[api]]
-name = "getCursorPosition"
-returns = "CursorPosition"
-sync = true
-
-[[api]]
-name = "insertAtCursor"
-params = [{ name = "text", type = "String" }]
-sync = true
-
-[[types]]
-name = "CursorPosition"
-fields = [
-  { name = "line", type = "usize", ts = "number" },
-  { name = "column", type = "usize", ts = "number" }
-]
+```rust
+pub const API_METHODS: &[(&str, ApiMethodKind)] = &[
+    ("getActiveBufferId", ApiMethodKind::Sync),
+    ("listBuffers", ApiMethodKind::Sync),
+    ("spawnProcess", ApiMethodKind::AsyncThenable),
+    ("delay", ApiMethodKind::AsyncSimple),
+    // ... ~80 methods total
+];
 ```
 
-**Generates**:
-- `generated_bindings.rs` - QuickJS registration code
-- `fresh.d.ts` - TypeScript definitions
-- `api_tests.rs` - Test for each API call
+### Method Naming Conventions
 
-**Pros**: Simple, language-agnostic, fast iteration
-**Cons**: Not compile-time checked, schema can drift from implementation
+| Pattern | Rust Method | JS Method | Description |
+|---------|-------------|-----------|-------------|
+| Sync | `get_active_buffer_id` | `getActiveBufferId` | Returns immediately |
+| Sync (JSON) | `list_buffers_json` | `listBuffers` | JS wrapper parses JSON |
+| Async Simple | `_delayStart` | `delay` | JS wrapper returns Promise |
+| Async Thenable | `_spawnProcessStart` | `spawnProcess` | JS wrapper returns cancellable |
 
-### Option 3: TypeScript as Source of Truth
+### Adding New API Methods
 
-```typescript
-interface EditorApi {
-  getCursorPosition(): CursorPosition;
-  readFile(path: string): Promise<string>;
-}
-```
+1. Add to `API_METHODS` constant in `api_trait.rs`
+2. If sync: Add to `EditorApi` trait
+3. Implement in `QuickJsBackend`
+4. Add JS binding in `setup_global_api()`
+5. Add JS wrapper if needed (JSON parsing, async)
+6. Update `plugins/lib/fresh.d.ts`
 
-**Pros**: Natural for plugin authors, familiar syntax
-**Cons**: Need TS parser in build, Rust type mapping complex
+The compiler will error if:
+- Trait method signature doesn't match implementation
+- Required method is missing from QuickJsBackend
 
-### Recommendation
+### Proc Macro (Future Enhancement)
 
-**Option 1 (proc macro)** is preferred for long-term maintainability and compile-time type safety. The Rust type system will catch API mismatches at compile time, and ts-rs can generate TypeScript definitions from the same types. While more complex to implement initially, it provides stronger guarantees and better IDE support.
+The `fresh-plugin-api-macros` crate contains a `#[plugin_api]` proc macro that can auto-generate:
+- QuickJS binding registration code
+- JS wrapper functions for async methods
+- TypeScript definitions
+
+Currently the trait is used for documentation and compile-time checking.
+Future work can enable full code generation.
+
+### Benefits
+
+1. **Compile-time safety**: Rust compiler catches signature mismatches
+2. **Single source of truth**: `API_METHODS` documents all exposed methods
+3. **Discoverable**: IDE autocomplete works for trait methods
+4. **Testable**: Can verify all methods are registered
 
 ## References
 

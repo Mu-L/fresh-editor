@@ -149,12 +149,20 @@ Background processes now stream output via hooks:
 - `onProcessStderr` hook fires with `{process_id, data}` for each line of stderr
 - Process exit resolves the callback with `{processId, exitCode}`
 
-### TypeScript Definition Generation
+### Type-Safe API (Implemented)
 
-For better developer experience, consider auto-generating `.d.ts` files:
-- **Option 1**: `ts-rs` crate - derive macros for Rust types
-- **Option 2**: Spec-based generation - define API in YAML, generate both Rust and TypeScript
-- **Option 3**: Custom proc-macros with metadata extraction
+The plugin API now uses a trait-based approach for compile-time type safety:
+
+**Files:**
+- `src/services/plugins/api_trait.rs` - `EditorApi` trait + `API_METHODS` registry
+- `crates/fresh-plugin-api-macros/` - Proc macro crate (for future code generation)
+
+**Benefits:**
+- Compiler catches signature mismatches between trait and implementation
+- `API_METHODS` constant documents all ~80 exposed methods
+- Future: proc macro can auto-generate JS bindings
+
+See `docs/quickjs-migration.md` for full details.
 
 ---
 
@@ -164,15 +172,17 @@ For better developer experience, consider auto-generating `.d.ts` files:
 |------|--------|
 | `Cargo.toml` | ✓ Updated |
 | `src/services/plugins/mod.rs` | ✓ Updated |
+| `src/services/plugins/api_trait.rs` | ✓ Created (type-safe API trait) |
 | `src/services/plugins/transpile.rs` | ✓ Created |
 | `src/services/plugins/backend/mod.rs` | ✓ Created |
-| `src/services/plugins/backend/quickjs_backend.rs` | ✓ Created (~900 lines) |
+| `src/services/plugins/backend/quickjs_backend.rs` | ✓ Created (~1200 lines) |
 | `src/services/plugins/thread.rs` | ✓ Updated |
 | `src/services/plugins/manager.rs` | ✓ Updated |
 | `src/services/plugins/api.rs` | ✓ Updated |
 | `src/app/mod.rs` | ✓ Updated (handlers use resolve_callback) |
 | `src/lib.rs` | ✓ Updated (removed v8_init) |
 | `tests/common/harness.rs` | ✓ Updated (removed V8 init) |
+| `crates/fresh-plugin-api-macros/` | ✓ Created (proc macro crate) |
 | `src/services/plugins/runtime.rs` | ✓ Deleted |
 | `src/v8_init.rs` | ✓ Deleted |
 

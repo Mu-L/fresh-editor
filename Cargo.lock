@@ -896,6 +896,7 @@ dependencies = [
  "crossterm 0.29.0",
  "ctor",
  "dirs",
+ "fresh-plugin-api-macros",
  "ignore",
  "include_dir",
  "insta",
@@ -957,6 +958,15 @@ dependencies = [
  "url",
  "vt100",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "fresh-plugin-api-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
