@@ -123,7 +123,7 @@ libc = { version = "0.2", optional = true }
 libloading = { version = "0.9", optional = true }
 nix = { version = "0.30", features = ["signal", "pthread", "resource", "poll", "fs"], optional = true }
 # QuickJS JavaScript runtime with oxc for TypeScript transpilation
-rquickjs = { version = "0.9", features = ["bindgen", "futures", "macro"], optional = true }
+rquickjs = { version = "0.11", features = ["bindgen", "futures", "macro"], optional = true }
 oxc_allocator = { version = "0.108", optional = true }
 oxc_parser = { version = "0.108", optional = true }
 oxc_transformer = { version = "0.108", optional = true }

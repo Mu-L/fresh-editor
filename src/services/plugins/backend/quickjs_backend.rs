@@ -66,6 +66,43 @@ fn js_to_json(ctx: &rquickjs::Ctx<'_>, val: Value<'_>) -> serde_json::Value {
     }
 }
 
+/// Format a JavaScript error with full details including stack trace
+fn format_js_error(ctx: &rquickjs::Ctx<'_>, err: rquickjs::Error, source_name: &str) -> anyhow::Error {
+    // Check if this is an exception that we can catch for more details
+    if err.is_exception() {
+        // Try to catch the exception to get the full error object
+        if let Some(exc) = ctx.catch() {
+            // Try to get error message and stack from the exception object
+            if let Some(exc_obj) = exc.as_object() {
+                let message: String = exc_obj.get("message").unwrap_or_else(|_| "Unknown error".to_string());
+                let stack: String = exc_obj.get("stack").unwrap_or_default();
+                let name: String = exc_obj.get("name").unwrap_or_else(|_| "Error".to_string());
+
+                if !stack.is_empty() {
+                    return anyhow::anyhow!(
+                        "JS error in {}: {}: {}\nStack trace:\n{}",
+                        source_name, name, message, stack
+                    );
+                } else {
+                    return anyhow::anyhow!(
+                        "JS error in {}: {}: {}",
+                        source_name, name, message
+                    );
+                }
+            } else {
+                // Exception is not an object, try to convert to string
+                let exc_str: String = exc.as_string()
+                    .and_then(|s| s.to_string().ok())
+                    .unwrap_or_else(|| format!("{:?}", exc));
+                return anyhow::anyhow!("JS error in {}: {}", source_name, exc_str);
+            }
+        }
+    }
+
+    // Fall back to the basic error message
+    anyhow::anyhow!("JS error in {}: {}", source_name, err)
+}
+
 /// Parse a TextPropertyEntry from a JS Object
 fn parse_text_property_entry(ctx: &rquickjs::Ctx<'_>, obj: &Object<'_>) -> Option<TextPropertyEntry> {
     let text: String = obj.get("text").ok()?;
@@ -966,7 +1003,7 @@ impl QuickJsBackend {
 
         self.context.with(|ctx| {
             ctx.eval::<(), _>(wrapped.as_bytes())
-                .map_err(|e| anyhow!("JS error in {}: {}", source_name, e))
+                .map_err(|e| format_js_error(&ctx, e, source_name))
         })
     }
 

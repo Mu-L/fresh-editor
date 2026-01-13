@@ -52,6 +52,19 @@ The migration from deno to QuickJS + oxc is complete with full API implementatio
   - `clearLineIndicators(bufferId, namespace)`
 - Added helper functions for JS ↔ JSON conversion (`js_to_json`, `parse_text_property_entry`)
 
+### Phase 7: Non-Blocking Async ✓
+- Converted all blocking operations to use tokio async runtime:
+  - `delay(ms)` - uses `tokio::time::sleep`
+  - `spawnProcess()` - uses `tokio::process::Command`
+  - `sendLspRequest()` - async with callback resolution
+- Added background process support:
+  - `spawnBackgroundProcess(command, args, cwd)` - returns immediately, streams output
+  - `killBackgroundProcess(processId)` - abort via `AbortHandle`
+- Added streaming output hooks:
+  - `onProcessStdout` / `onProcessStderr` hooks with `{process_id, data}`
+  - `ProcessOutput` HookArgs variant for plugin notification
+- Updated response handlers to use `resolve_callback` for QuickJS compatibility
+
 ---
 
 ## Architecture: Async Pattern
@@ -119,14 +132,22 @@ The migration from deno to QuickJS + oxc is complete with full API implementatio
 ### High Priority (Plugin Compatibility)
 
 1. **Test with actual plugins** - Load bundled plugins and verify they work
-2. **LSP integration** - `sendLspRequest()` needs async implementation
-3. **Background process spawning** - `spawnBackgroundProcess()` stub
 
-### Low Priority (Nice to Have)
+### Completed Async Operations ✓
 
-4. **Non-blocking delay** - Current delay blocks UI thread
-5. **Non-blocking process spawn** - Current spawn blocks UI thread
-6. **Process streaming** - Stream stdout/stderr instead of waiting for completion
+All async operations are now non-blocking via tokio:
+- `sendLspRequest(language, method, params)` - async LSP requests with callback resolution
+- `spawnBackgroundProcess(command, args, cwd)` - long-running processes with streaming output
+- `delay(ms)` - non-blocking via tokio::time::sleep
+- `spawnProcess(command, args, cwd)` - non-blocking via tokio::process::Command
+- `killBackgroundProcess(processId)` - abort running background processes
+
+### Process Streaming ✓
+
+Background processes now stream output via hooks:
+- `onProcessStdout` hook fires with `{process_id, data}` for each line of stdout
+- `onProcessStderr` hook fires with `{process_id, data}` for each line of stderr
+- Process exit resolves the callback with `{processId, exitCode}`
 
 ### TypeScript Definition Generation
 
