@@ -306,6 +306,10 @@ pub trait EditorApi {
     #[api(js_name = "_setLineIndicatorInternal")]
     fn set_line_indicator_internal(&self, json: String) -> bool;
 
+    /// Set a line indicator in the gutter
+    fn set_line_indicator(&self, buffer_id: u32, line: u32, namespace: String,
+                          symbol: String, r: u8, g: u8, b: u8, priority: i32) -> bool;
+
     /// Clear line indicators in a namespace
     fn clear_line_indicators(&self, buffer_id: u32, namespace: String) -> bool;
 
@@ -638,19 +642,18 @@ mod tests {
             // Sync readFile/writeFile have different names
             ("readFileSync", "readFile"),
             ("writeFileSync", "writeFile"),
-            // setLineIndicatorInternal uses different pattern
-            ("_setLineIndicatorInternal", "setLineIndicator"),
         ]
         .into_iter()
         .collect();
 
         // Methods that are implemented as JS wrappers only (not direct bindings)
         let js_wrapper_methods: std::collections::HashSet<&str> = [
-            "listBuffers",   // Wraps _listBuffersJson with JSON.parse
-            "readDir",       // Wraps _readDirJson with JSON.parse
+            "listBuffers",        // Wraps _listBuffersJson with JSON.parse
+            "readDir",            // Wraps _readDirJson with JSON.parse
             "getTextPropertiesAtCursor", // Wraps _getTextPropertiesAtCursorJson
-            "deleteTheme",   // Wraps _deleteThemeSync in Promise
-            "addOverlay",    // Wraps _addOverlayInternal
+            "deleteTheme",        // Wraps _deleteThemeSync in Promise
+            "addOverlay",         // Wraps _addOverlayInternal
+            "setLineIndicator",   // Wraps _setLineIndicatorInternal
         ]
         .into_iter()
         .collect();

@@ -411,6 +411,11 @@ interface EditorAPI {
   _setLineIndicatorInternal(json: string): boolean;
 
   /**
+   * Set a line indicator in the gutter
+   */
+  setLineIndicator(bufferId: number, line: number, namespace: string, symbol: string, r: number, g: number, b: number, priority: number): boolean;
+
+  /**
    * Clear line indicators in a namespace
    */
   clearLineIndicators(bufferId: number, namespace: string): boolean;

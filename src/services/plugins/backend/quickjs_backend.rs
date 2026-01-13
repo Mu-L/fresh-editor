@@ -1441,26 +1441,31 @@ impl QuickJsBackend {
             })?)?;
 
             // === Line indicators ===
-            // setLineIndicator(opts: {bufferId, line, namespace, symbol, color: [r,g,b], priority?})
+            // _setLineIndicatorInternal(json: string) - internal, use setLineIndicator wrapper
             let cmd_sender = command_sender.clone();
-            editor.set("setLineIndicator", Function::new(ctx.clone(), move |opts: Object| -> rquickjs::Result<bool> {
-                let buffer_id: u32 = opts.get("bufferId")?;
-                let line: u32 = opts.get("line")?;
-                let namespace: String = opts.get("namespace")?;
-                let symbol: String = opts.get("symbol")?;
-                let color: Vec<u8> = opts.get("color")?;
-                let priority: i32 = opts.get("priority").unwrap_or(0);
-
-                let (r, g, b) = if color.len() >= 3 { (color[0], color[1], color[2]) } else { (255, 255, 255) };
-
-                Ok(cmd_sender.send(PluginCommand::SetLineIndicator {
-                    buffer_id: BufferId(buffer_id as usize),
-                    line: line as usize,
-                    namespace,
-                    symbol,
-                    color: (r, g, b),
-                    priority,
-                }).is_ok())
+            editor.set("_setLineIndicatorInternal", Function::new(ctx.clone(), move |json: String| -> bool {
+                #[derive(serde::Deserialize)]
+                struct Args {
+                    buffer_id: u32,
+                    line: u32,
+                    namespace: String,
+                    symbol: String,
+                    r: u8,
+                    g: u8,
+                    b: u8,
+                    priority: i32,
+                }
+                let Ok(args) = serde_json::from_str::<Args>(&json) else {
+                    return false;
+                };
+                cmd_sender.send(PluginCommand::SetLineIndicator {
+                    buffer_id: BufferId(args.buffer_id as usize),
+                    line: args.line as usize,
+                    namespace: args.namespace,
+                    symbol: args.symbol,
+                    color: (args.r, args.g, args.b),
+                    priority: args.priority,
+                }).is_ok()
             })?)?;
 
             // clearLineIndicators(bufferId, namespace)
@@ -2066,6 +2071,20 @@ impl QuickJsBackend {
                             reject(new Error("Failed to delete theme: " + name));
                         }
                     });
+                };
+
+                // Wrapper for setLineIndicator - accepts positional args, converts to JSON
+                _editorCore.setLineIndicator = function(bufferId, line, namespace, symbol, r, g, b, priority) {
+                    return _editorCore._setLineIndicatorInternal(JSON.stringify({
+                        buffer_id: bufferId,
+                        line: line,
+                        namespace: namespace,
+                        symbol: symbol,
+                        r: r,
+                        g: g,
+                        b: b,
+                        priority: priority || 0
+                    }));
                 };
             "#.as_bytes())?;
 
