@@ -518,7 +518,7 @@ interface EditorAPI {
   /**
    * Join path segments
    */
-  pathJoin(parts: string[]): string;
+  pathJoin(...parts: string[]): string;
 
   /**
    * Get directory name

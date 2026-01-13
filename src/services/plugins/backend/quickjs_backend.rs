@@ -729,10 +729,10 @@ impl JsEditorApi {
 
     // === Path Operations ===
 
-    /// Join path components
-    pub fn path_join(&self, parts: Vec<String>) -> String {
+    /// Join path components (variadic - accepts multiple string arguments)
+    pub fn path_join(&self, parts: rquickjs::function::Rest<String>) -> String {
         let mut path = PathBuf::new();
-        for part in parts {
+        for part in parts.0 {
             if Path::new(&part).is_absolute() {
                 path = PathBuf::from(part);
             } else {
@@ -2615,7 +2615,7 @@ mod tests {
             globalThis._extname = editor.pathExtname("/foo/bar/baz.txt");
             globalThis._isAbsolute = editor.pathIsAbsolute("/foo/bar");
             globalThis._isRelative = editor.pathIsAbsolute("foo/bar");
-            globalThis._joined = editor.pathJoin(["/foo", "bar", "baz"]);
+            globalThis._joined = editor.pathJoin("/foo", "bar", "baz");
         "#,
                 "test.js",
             )
