@@ -8,7 +8,7 @@ use crate::input::commands::{Command, CommandSource};
 use crate::input::keybindings::Action;
 use crate::model::event::{BufferId, SplitId};
 use crate::primitives::text_property::TextPropertyEntry;
-use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand, PluginResponse};
+use crate::services::plugins::api::{CursorInfo, EditorStateSnapshot, PluginCommand, PluginResponse};
 use crate::services::plugins::transpile::{bundle_module, has_es_imports, transpile_typescript};
 use crate::view::overlay::OverlayNamespace;
 use anyhow::{anyhow, Result};
@@ -1251,6 +1251,16 @@ impl QuickJsBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    /// Helper to create a backend with a command receiver for testing
+    fn create_test_backend() -> (QuickJsBackend, mpsc::Receiver<PluginCommand>) {
+        let (tx, rx) = mpsc::channel();
+        let state_snapshot = Arc::new(RwLock::new(EditorStateSnapshot::new()));
+        let dir_context = DirectoryContext::for_testing(Path::new("/tmp"));
+        let backend = QuickJsBackend::with_state(state_snapshot, tx, dir_context).unwrap();
+        (backend, rx)
+    }
 
     #[test]
     fn test_quickjs_backend_creation() {
@@ -1280,5 +1290,499 @@ mod tests {
 
         // Now has handlers
         assert!(backend.has_handlers("test_event"));
+    }
+
+    // ==================== API Tests ====================
+
+    #[test]
+    fn test_api_set_status() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.setStatus("Hello from test");
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetStatus { message } => {
+                assert_eq!(message, "Hello from test");
+            }
+            _ => panic!("Expected SetStatus command, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_register_command() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.myTestHandler = function() { };
+            editor.registerCommand("Test Command", "A test command", "myTestHandler", null);
+        "#, "test_plugin.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::RegisterCommand { command } => {
+                assert_eq!(command.name, "Test Command");
+                assert_eq!(command.description, "A test command");
+                // Check that source contains the plugin name (derived from filename)
+                match command.source {
+                    CommandSource::Plugin(name) => {
+                        assert_eq!(name, "test_plugin");
+                    }
+                    _ => panic!("Expected Plugin source"),
+                }
+            }
+            _ => panic!("Expected RegisterCommand, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_define_mode() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.defineMode("test-mode", null, [
+                ["a", "action_a"],
+                ["b", "action_b"]
+            ]);
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::DefineMode { name, parent, bindings, read_only } => {
+                assert_eq!(name, "test-mode");
+                assert!(parent.is_none());
+                assert_eq!(bindings.len(), 2);
+                assert_eq!(bindings[0], ("a".to_string(), "action_a".to_string()));
+                assert_eq!(bindings[1], ("b".to_string(), "action_b".to_string()));
+                assert!(!read_only);
+            }
+            _ => panic!("Expected DefineMode, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_set_editor_mode() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.setEditorMode("vi-normal");
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetEditorMode { mode } => {
+                assert_eq!(mode, Some("vi-normal".to_string()));
+            }
+            _ => panic!("Expected SetEditorMode, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_clear_editor_mode() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.setEditorMode(null);
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetEditorMode { mode } => {
+                assert!(mode.is_none());
+            }
+            _ => panic!("Expected SetEditorMode with None, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_insert_at_cursor() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.insertAtCursor("Hello, World!");
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::InsertAtCursor { text } => {
+                assert_eq!(text, "Hello, World!");
+            }
+            _ => panic!("Expected InsertAtCursor, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_set_context() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.setContext("myContext", true);
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetContext { name, active } => {
+                assert_eq!(name, "myContext");
+                assert!(active);
+            }
+            _ => panic!("Expected SetContext, got {:?}", cmd),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_action_sync_function() {
+        let (mut backend, rx) = create_test_backend();
+
+        // Define a sync function and register it
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.my_sync_action = function() {
+                editor.setStatus("sync action executed");
+            };
+        "#, "test.js").unwrap();
+
+        // Drain any setup commands
+        while rx.try_recv().is_ok() {}
+
+        // Execute the action
+        backend.execute_action("my_sync_action").await.unwrap();
+
+        // Check the command was sent
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetStatus { message } => {
+                assert_eq!(message, "sync action executed");
+            }
+            _ => panic!("Expected SetStatus from action, got {:?}", cmd),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_action_async_function() {
+        let (mut backend, rx) = create_test_backend();
+
+        // Define an async function
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.my_async_action = async function() {
+                await Promise.resolve();
+                editor.setStatus("async action executed");
+            };
+        "#, "test.js").unwrap();
+
+        // Drain any setup commands
+        while rx.try_recv().is_ok() {}
+
+        // Execute the action
+        backend.execute_action("my_async_action").await.unwrap();
+
+        // Check the command was sent (async should complete)
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetStatus { message } => {
+                assert_eq!(message, "async action executed");
+            }
+            _ => panic!("Expected SetStatus from async action, got {:?}", cmd),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_action_with_registered_handler() {
+        let (mut backend, rx) = create_test_backend();
+
+        // Register an action with a different handler name
+        backend.registered_actions.borrow_mut().insert(
+            "my_action".to_string(),
+            "actual_handler_function".to_string()
+        );
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.actual_handler_function = function() {
+                editor.setStatus("handler executed");
+            };
+        "#, "test.js").unwrap();
+
+        // Drain any setup commands
+        while rx.try_recv().is_ok() {}
+
+        // Execute the action by name (should resolve to handler)
+        backend.execute_action("my_action").await.unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetStatus { message } => {
+                assert_eq!(message, "handler executed");
+            }
+            _ => panic!("Expected SetStatus, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_on_event_registration() {
+        let (mut backend, _rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.myEventHandler = function() { };
+            editor.on("bufferSave", "myEventHandler");
+        "#, "test.js").unwrap();
+
+        assert!(backend.has_handlers("bufferSave"));
+    }
+
+    #[test]
+    fn test_api_off_event_unregistration() {
+        let (mut backend, _rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.myEventHandler = function() { };
+            editor.on("bufferSave", "myEventHandler");
+            editor.off("bufferSave", "myEventHandler");
+        "#, "test.js").unwrap();
+
+        // Handler should be removed
+        assert!(!backend.has_handlers("bufferSave"));
+    }
+
+    #[tokio::test]
+    async fn test_emit_event() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis.onSaveHandler = function(data) {
+                editor.setStatus("saved: " + JSON.stringify(data));
+            };
+            editor.on("bufferSave", "onSaveHandler");
+        "#, "test.js").unwrap();
+
+        // Drain setup commands
+        while rx.try_recv().is_ok() {}
+
+        // Emit the event
+        backend.emit("bufferSave", r#"{"path": "/test.txt"}"#).await.unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetStatus { message } => {
+                assert!(message.contains("/test.txt"));
+            }
+            _ => panic!("Expected SetStatus from event handler, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_copy_to_clipboard() {
+        let (mut backend, rx) = create_test_backend();
+
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.copyToClipboard("clipboard text");
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetClipboard { text } => {
+                assert_eq!(text, "clipboard text");
+            }
+            _ => panic!("Expected SetClipboard, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_open_file() {
+        let (mut backend, rx) = create_test_backend();
+
+        // openFile takes (path, line?, column?)
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.openFile("/path/to/file.txt", null, null);
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::OpenFileAtLocation { path, line, column } => {
+                assert_eq!(path.to_str().unwrap(), "/path/to/file.txt");
+                assert!(line.is_none());
+                assert!(column.is_none());
+            }
+            _ => panic!("Expected OpenFileAtLocation, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_delete_range() {
+        let (mut backend, rx) = create_test_backend();
+
+        // deleteRange takes (buffer_id, start, end)
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.deleteRange(0, 10, 20);
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::DeleteRange { range, .. } => {
+                assert_eq!(range.start, 10);
+                assert_eq!(range.end, 20);
+            }
+            _ => panic!("Expected DeleteRange, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_insert_text() {
+        let (mut backend, rx) = create_test_backend();
+
+        // insertText takes (buffer_id, position, text)
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.insertText(0, 5, "inserted");
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::InsertText { position, text, .. } => {
+                assert_eq!(position, 5);
+                assert_eq!(text, "inserted");
+            }
+            _ => panic!("Expected InsertText, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_set_buffer_cursor() {
+        let (mut backend, rx) = create_test_backend();
+
+        // setBufferCursor takes (buffer_id, position)
+        backend.execute_js(r#"
+            const editor = getEditor();
+            editor.setBufferCursor(0, 100);
+        "#, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetBufferCursor { position, .. } => {
+                assert_eq!(position, 100);
+            }
+            _ => panic!("Expected SetBufferCursor, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_api_get_cursor_position_from_state() {
+        let (tx, _rx) = mpsc::channel();
+        let state_snapshot = Arc::new(RwLock::new(EditorStateSnapshot::new()));
+
+        // Set up cursor position in state
+        {
+            let mut state = state_snapshot.write().unwrap();
+            state.primary_cursor = Some(CursorInfo {
+                position: 42,
+                selection: None,
+            });
+        }
+
+        let dir_context = DirectoryContext::for_testing(Path::new("/tmp"));
+        let mut backend = QuickJsBackend::with_state(state_snapshot, tx, dir_context).unwrap();
+
+        // Execute JS that reads and stores cursor position
+        backend.execute_js(r#"
+            const editor = getEditor();
+            const pos = editor.getCursorPosition();
+            globalThis._testResult = pos;
+        "#, "test.js").unwrap();
+
+        // Verify by reading back - getCursorPosition returns byte offset as u32
+        backend.context.with(|ctx| {
+            let global = ctx.globals();
+            let result: u32 = global.get("_testResult").unwrap();
+            assert_eq!(result, 42);
+        });
+    }
+
+    #[test]
+    fn test_api_path_functions() {
+        let (mut backend, _rx) = create_test_backend();
+
+        // pathJoin takes an array of path parts
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis._dirname = editor.pathDirname("/foo/bar/baz.txt");
+            globalThis._basename = editor.pathBasename("/foo/bar/baz.txt");
+            globalThis._extname = editor.pathExtname("/foo/bar/baz.txt");
+            globalThis._isAbsolute = editor.pathIsAbsolute("/foo/bar");
+            globalThis._isRelative = editor.pathIsAbsolute("foo/bar");
+            globalThis._joined = editor.pathJoin(["/foo", "bar", "baz"]);
+        "#, "test.js").unwrap();
+
+        backend.context.with(|ctx| {
+            let global = ctx.globals();
+            assert_eq!(global.get::<_, String>("_dirname").unwrap(), "/foo/bar");
+            assert_eq!(global.get::<_, String>("_basename").unwrap(), "baz.txt");
+            assert_eq!(global.get::<_, String>("_extname").unwrap(), ".txt");
+            assert!(global.get::<_, bool>("_isAbsolute").unwrap());
+            assert!(!global.get::<_, bool>("_isRelative").unwrap());
+            assert_eq!(global.get::<_, String>("_joined").unwrap(), "/foo/bar/baz");
+        });
+    }
+
+    #[test]
+    fn test_typescript_transpilation() {
+        use crate::services::plugins::transpile::transpile_typescript;
+
+        let (mut backend, rx) = create_test_backend();
+
+        // TypeScript code with type annotations
+        let ts_code = r#"
+            const editor = getEditor();
+            function greet(name: string): string {
+                return "Hello, " + name;
+            }
+            editor.setStatus(greet("TypeScript"));
+        "#;
+
+        // Transpile to JavaScript first
+        let js_code = transpile_typescript(ts_code, "test.ts").unwrap();
+
+        // Execute the transpiled JavaScript
+        backend.execute_js(&js_code, "test.js").unwrap();
+
+        let cmd = rx.try_recv().unwrap();
+        match cmd {
+            PluginCommand::SetStatus { message } => {
+                assert_eq!(message, "Hello, TypeScript");
+            }
+            _ => panic!("Expected SetStatus, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_plugin_translation() {
+        let (mut backend, _rx) = create_test_backend();
+
+        // The t() function should work (returns key if translation not found)
+        backend.execute_js(r#"
+            const editor = getEditor();
+            globalThis._translated = editor.t("test.key");
+        "#, "test.js").unwrap();
+
+        backend.context.with(|ctx| {
+            let global = ctx.globals();
+            // Without actual translations, it returns the key
+            let result: String = global.get("_translated").unwrap();
+            assert_eq!(result, "test.key");
+        });
     }
 }
