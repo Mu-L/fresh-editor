@@ -135,21 +135,6 @@ pub fn bundle_module(entry_path: &Path) -> Result<String> {
     // First pass: collect all modules in dependency order
     collect_modules(entry_path, &mut visited, &mut modules, &mut path_to_var)?;
 
-    // DEBUG: Print module info and generated code
-    if std::env::var("FRESH_DEBUG_BUNDLE").is_ok() {
-        eprintln!("[bundle] Entry: {}", entry_path.display());
-        for module in &modules {
-            eprintln!("[bundle] Module: {} (var: {})", module.path.display(), module.var_name);
-            eprintln!("  imports: {:?}", module.imports.iter().map(|i| (&i.local_name, &i.source_path)).collect::<Vec<_>>());
-            eprintln!("  exports: {:?}", module.exports.iter().map(|e| &e.exported_name).collect::<Vec<_>>());
-            eprintln!("  reexports: {:?}", module.reexports.iter().map(|r| (&r.exported_name, &r.source_path)).collect::<Vec<_>>());
-        }
-        eprintln!("[bundle] path_to_var mapping:");
-        for (path, var) in &path_to_var {
-            eprintln!("  {} -> {}", path.display(), var);
-        }
-    }
-
     // Second pass: generate scoped output
     let mut output = String::new();
 
