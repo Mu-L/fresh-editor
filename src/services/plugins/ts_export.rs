@@ -3,6 +3,10 @@
 //! This module collects all API types with `#[derive(TS)]` and generates
 //! TypeScript declarations that are combined with the proc macro output.
 //! The generated TypeScript is validated and formatted using oxc.
+//!
+//! Types are automatically collected based on `JSEDITORAPI_REFERENCED_TYPES`
+//! from the proc macro, so when you add a new type to method signatures,
+//! it will automatically be included if it has `#[derive(TS)]`.
 
 use oxc_allocator::Allocator;
 use oxc_codegen::Codegen;
@@ -11,37 +15,77 @@ use oxc_span::SourceType;
 use ts_rs::TS;
 
 use crate::services::plugins::api::{
-    ActionPopupAction, ActionSpec, BufferInfo, BufferSavedDiff, CompositeHunk,
-    CompositeLayoutConfig, CompositePaneStyle, CompositeSourceConfig, CursorInfo, LayoutHints,
-    TsHighlightSpan, ViewTokenStyle, ViewTokenWire, ViewTokenWireKind, ViewportInfo,
+    ActionPopupAction, ActionSpec, BackgroundProcessResult, BufferInfo, BufferSavedDiff,
+    CompositeHunk, CompositeLayoutConfig, CompositePaneStyle, CompositeSourceConfig, CursorInfo,
+    LayoutHints, SpawnResult, TsHighlightSpan, ViewTokenStyle, ViewTokenWire, ViewTokenWireKind,
+    ViewportInfo,
 };
 
-/// Collect all ts-rs type declarations into a single string
+/// Get the TypeScript declaration for a type by name
+///
+/// Returns None if the type is not known (not registered in this mapping).
+/// Add new types here when they're added to api.rs with `#[derive(TS)]`.
+fn get_type_decl(type_name: &str) -> Option<String> {
+    // Map TypeScript type names to their ts-rs declarations
+    // The type name should match either the Rust struct name or the ts(rename = "...") value
+    match type_name {
+        // Core types
+        "BufferInfo" => Some(BufferInfo::decl()),
+        "CursorInfo" => Some(CursorInfo::decl()),
+        "ViewportInfo" => Some(ViewportInfo::decl()),
+        "ActionSpec" => Some(ActionSpec::decl()),
+        "BufferSavedDiff" => Some(BufferSavedDiff::decl()),
+        "LayoutHints" => Some(LayoutHints::decl()),
+
+        // Process types
+        "SpawnResult" => Some(SpawnResult::decl()),
+        "BackgroundProcessResult" => Some(BackgroundProcessResult::decl()),
+
+        // Composite buffer types (ts-rs renames these with Ts prefix)
+        "TsCompositeLayoutConfig" | "CompositeLayoutConfig" => Some(CompositeLayoutConfig::decl()),
+        "TsCompositeSourceConfig" | "CompositeSourceConfig" => Some(CompositeSourceConfig::decl()),
+        "TsCompositePaneStyle" | "CompositePaneStyle" => Some(CompositePaneStyle::decl()),
+        "TsCompositeHunk" | "CompositeHunk" => Some(CompositeHunk::decl()),
+
+        // View transform types
+        "ViewTokenWireKind" => Some(ViewTokenWireKind::decl()),
+        "ViewTokenStyle" => Some(ViewTokenStyle::decl()),
+        "ViewTokenWire" => Some(ViewTokenWire::decl()),
+
+        // UI types (ts-rs renames these with Ts prefix)
+        "TsActionPopupAction" | "ActionPopupAction" => Some(ActionPopupAction::decl()),
+        "TsHighlightSpan" => Some(TsHighlightSpan::decl()),
+
+        _ => None,
+    }
+}
+
+/// Collect TypeScript type declarations based on referenced types from proc macro
+///
+/// Uses `JSEDITORAPI_REFERENCED_TYPES` to determine which types to include.
+/// Falls back to including all known types if the constant isn't available.
 pub fn collect_ts_types() -> String {
+    use crate::services::plugins::backend::quickjs_backend::JSEDITORAPI_REFERENCED_TYPES;
+
     let mut types = Vec::new();
+    let mut included = std::collections::HashSet::new();
 
-    // Core types used in EditorAPI
-    types.push(BufferInfo::decl());
-    types.push(CursorInfo::decl());
-    types.push(ViewportInfo::decl());
-    types.push(ActionSpec::decl());
-    types.push(BufferSavedDiff::decl());
-    types.push(LayoutHints::decl());
-
-    // Composite buffer types
-    types.push(CompositeLayoutConfig::decl());
-    types.push(CompositeSourceConfig::decl());
-    types.push(CompositePaneStyle::decl());
-    types.push(CompositeHunk::decl());
-
-    // View transform types
-    types.push(ViewTokenWireKind::decl());
-    types.push(ViewTokenStyle::decl());
-    types.push(ViewTokenWire::decl());
-
-    // UI types
-    types.push(ActionPopupAction::decl());
-    types.push(TsHighlightSpan::decl());
+    // Collect types referenced by the API
+    for type_name in JSEDITORAPI_REFERENCED_TYPES {
+        if included.contains(*type_name) {
+            continue;
+        }
+        if let Some(decl) = get_type_decl(type_name) {
+            types.push(decl);
+            included.insert(*type_name);
+        } else {
+            // Log warning for unknown types (these need to be added to get_type_decl)
+            eprintln!(
+                "Warning: Type '{}' is referenced in API but not registered in get_type_decl()",
+                type_name
+            );
+        }
+    }
 
     types.join("\n\n")
 }

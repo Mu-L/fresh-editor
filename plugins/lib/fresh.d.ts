@@ -27,211 +27,25 @@ interface ProcessHandle<T> extends PromiseLike<T> {
 type BufferId = number;
 /** Split identifier */
 type SplitId = number;
-type BufferInfo = {
+type BackgroundProcessResult = {
 	/**
-	* Buffer ID
+	* Unique process ID for later reference
 	*/
-	id: number;
-	/**
-	* File path (if any)
-	*/
-	path: string;
-	/**
-	* Whether the buffer has been modified
-	*/
-	modified: boolean;
-	/**
-	* Length of buffer in bytes
-	*/
-	length: number;
+	process_id: bigint;
 };
-type CursorInfo = {
+type SpawnResult = {
 	/**
-	* Byte position of the cursor
+	* Complete stdout as string
 	*/
-	position: number;
+	stdout: string;
 	/**
-	* Selection range (if any)
+	* Complete stderr as string
 	*/
-	selection: {
-		start: number;
-		end: number;
-	} | null;
-};
-type ViewportInfo = {
+	stderr: string;
 	/**
-	* Byte position of the first visible line
+	* Process exit code (0 usually means success, -1 if killed)
 	*/
-	top_byte: number;
-	/**
-	* Left column offset (horizontal scroll)
-	*/
-	left_column: number;
-	/**
-	* Viewport width
-	*/
-	width: number;
-	/**
-	* Viewport height
-	*/
-	height: number;
-};
-type ActionSpec = {
-	/**
-	* Action name (e.g., "move_word_right", "delete_line")
-	*/
-	action: string;
-	/**
-	* Number of times to repeat the action (default 1)
-	*/
-	count: number;
-};
-type BufferSavedDiff = {
-	equal: boolean;
-	byte_ranges: Array<{
-		start: number;
-		end: number;
-	}>;
-	line_ranges: Array<{
-		start: number;
-		end: number;
-	}> | null;
-};
-type LayoutHints = {
-	/**
-	* Optional compose width for centering/wrapping
-	*/
-	compose_width: number | null;
-	/**
-	* Optional column guides for aligned tables
-	*/
-	column_guides: Array<number> | null;
-};
-type TsCompositeLayoutConfig = {
-	/**
-	* Layout type: "side-by-side", "stacked", or "unified"
-	*/
-	type: string;
-	/**
-	* Width ratios for side-by-side (e.g., [0.5, 0.5])
-	*/
-	ratios: Array<number> | null;
-	/**
-	* Show separator between panes
-	*/
-	show_separator: boolean;
-	/**
-	* Spacing for stacked layout
-	*/
-	spacing: number | null;
-};
-type TsCompositeSourceConfig = {
-	/**
-	* Buffer ID of the source buffer
-	*/
-	buffer_id: number;
-	/**
-	* Label for this pane (e.g., "OLD", "NEW")
-	*/
-	label: string;
-	/**
-	* Whether this pane is editable
-	*/
-	editable: boolean;
-	/**
-	* Style configuration
-	*/
-	style: TsCompositePaneStyle | null;
-};
-type TsCompositePaneStyle = {
-	/**
-	* Background color for added lines (RGB)
-	*/
-	add_bg: [number, number, number] | null;
-	/**
-	* Background color for removed lines (RGB)
-	*/
-	remove_bg: [number, number, number] | null;
-	/**
-	* Background color for modified lines (RGB)
-	*/
-	modify_bg: [number, number, number] | null;
-	/**
-	* Gutter style: "line-numbers", "diff-markers", "both", or "none"
-	*/
-	gutter_style: string | null;
-};
-type TsCompositeHunk = {
-	/**
-	* Starting line in old buffer (0-indexed)
-	*/
-	old_start: number;
-	/**
-	* Number of lines in old buffer
-	*/
-	old_count: number;
-	/**
-	* Starting line in new buffer (0-indexed)
-	*/
-	new_start: number;
-	/**
-	* Number of lines in new buffer
-	*/
-	new_count: number;
-};
-type ViewTokenWireKind = {
-	"Text": string;
-} | "Newline" | "Space" | "Break" | {
-	"BinaryByte": number;
-};
-type ViewTokenStyle = {
-	/**
-	* Foreground color as RGB tuple
-	*/
-	fg: [number, number, number] | null;
-	/**
-	* Background color as RGB tuple
-	*/
-	bg: [number, number, number] | null;
-	/**
-	* Whether to render in bold
-	*/
-	bold: boolean;
-	/**
-	* Whether to render in italic
-	*/
-	italic: boolean;
-};
-type ViewTokenWire = {
-	/**
-	* Source byte offset in the buffer. None for injected content (annotations).
-	*/
-	source_offset: number | null;
-	/**
-	* The token content
-	*/
-	kind: ViewTokenWireKind;
-	/**
-	* Optional styling for injected content (only used when source_offset is None)
-	*/
-	style: ViewTokenStyle | null;
-};
-type TsActionPopupAction = {
-	/**
-	* Unique action identifier (returned in ActionPopupResult)
-	*/
-	id: string;
-	/**
-	* Display text for the button (can include command hints)
-	*/
-	label: string;
-};
-type TsHighlightSpan = {
-	start: number;
-	end: number;
-	color: [number, number, number];
-	bold: boolean;
-	italic: boolean;
+	exit_code: number;
 };
 /**
 * Main editor API interface
