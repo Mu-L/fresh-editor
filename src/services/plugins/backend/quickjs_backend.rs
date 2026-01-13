@@ -161,9 +161,71 @@ fn format_js_error(ctx: &rquickjs::Ctx<'_>, err: rquickjs::Error, source_name: &
 }
 
 /// Log a JavaScript error with full details
+/// If panic_on_js_errors is enabled, this will panic to surface JS errors immediately
 fn log_js_error(ctx: &rquickjs::Ctx<'_>, err: rquickjs::Error, context: &str) {
     let error = format_js_error(ctx, err, context);
     tracing::error!("{}", error);
+
+    // When enabled, panic on JS errors to make them visible and fail fast
+    if should_panic_on_js_errors() {
+        panic!("JavaScript error in {}: {}", context, error);
+    }
+}
+
+/// Global flag to panic on JS errors (enabled during testing)
+static PANIC_ON_JS_ERRORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable panicking on JS errors (call this from test setup)
+pub fn set_panic_on_js_errors(enabled: bool) {
+    PANIC_ON_JS_ERRORS.store(enabled, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Check if panic on JS errors is enabled
+fn should_panic_on_js_errors() -> bool {
+    PANIC_ON_JS_ERRORS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Run all pending jobs and check for unhandled exceptions
+/// If panic_on_js_errors is enabled, this will panic on unhandled exceptions
+fn run_pending_jobs_checked(ctx: &rquickjs::Ctx<'_>, context: &str) -> usize {
+    let mut count = 0;
+    loop {
+        // Check for unhandled exception before running more jobs
+        let exc: rquickjs::Value = ctx.catch();
+        // Only treat it as an exception if it's actually an Error object
+        if exc.is_exception() {
+            let error_msg = if let Some(err) = exc.as_exception() {
+                format!("{}: {}", err.message().unwrap_or_default(), err.stack().unwrap_or_default())
+            } else {
+                format!("{:?}", exc)
+            };
+            tracing::error!("Unhandled JS exception during {}: {}", context, error_msg);
+            if should_panic_on_js_errors() {
+                panic!("Unhandled JS exception during {}: {}", context, error_msg);
+            }
+        }
+
+        if !ctx.execute_pending_job() {
+            break;
+        }
+        count += 1;
+    }
+
+    // Final check for exceptions after all jobs completed
+    let exc: rquickjs::Value = ctx.catch();
+    if exc.is_exception() {
+        let error_msg = if let Some(err) = exc.as_exception() {
+            format!("{}: {}", err.message().unwrap_or_default(), err.stack().unwrap_or_default())
+        } else {
+            format!("{:?}", exc)
+        };
+        tracing::error!("Unhandled JS exception after running jobs in {}: {}", context, error_msg);
+        if should_panic_on_js_errors() {
+            panic!("Unhandled JS exception after running jobs in {}: {}", context, error_msg);
+        }
+    }
+
+    count
 }
 
 /// Parse a TextPropertyEntry from a JS Object
@@ -245,6 +307,31 @@ impl QuickJsBackend {
         tracing::debug!("QuickJsBackend::new: creating QuickJS runtime");
 
         let runtime = Runtime::new().map_err(|e| anyhow!("Failed to create QuickJS runtime: {}", e))?;
+
+        // Set up promise rejection tracker to catch unhandled rejections
+        runtime.set_host_promise_rejection_tracker(Some(Box::new(
+            |_ctx, _promise, reason, is_handled| {
+                if !is_handled {
+                    // Format the rejection reason
+                    let error_msg = if let Some(exc) = reason.as_exception() {
+                        format!(
+                            "{}: {}",
+                            exc.message().unwrap_or_default(),
+                            exc.stack().unwrap_or_default()
+                        )
+                    } else {
+                        format!("{:?}", reason)
+                    };
+
+                    tracing::error!("Unhandled Promise rejection: {}", error_msg);
+
+                    if should_panic_on_js_errors() {
+                        panic!("Unhandled Promise rejection: {}", error_msg);
+                    }
+                }
+            },
+        )));
+
         let context = Context::full(&runtime).map_err(|e| anyhow!("Failed to create QuickJS context: {}", e))?;
 
         let event_handlers = Rc::new(RefCell::new(HashMap::new()));
@@ -815,27 +902,48 @@ impl QuickJsBackend {
             })?)?;
 
             // getTextPropertiesAtCursor(bufferId) - reads from state snapshot
+            // Returns an array of property objects at the cursor position
             let snapshot = Arc::clone(&state_snapshot);
-            editor.set("getTextPropertiesAtCursor", Function::new(ctx.clone(), move |buffer_id: u32| -> Option<String> {
-                let snap = snapshot.read().ok()?;
+            editor.set("getTextPropertiesAtCursor", Function::new(ctx.clone(), move |ctx: rquickjs::Ctx, buffer_id: u32| -> rquickjs::Result<rquickjs::Array> {
+                let result = rquickjs::Array::new(ctx.clone())?;
+
+                let snap = match snapshot.read() {
+                    Ok(s) => s,
+                    Err(_) => return Ok(result), // Return empty array on error
+                };
                 let buffer_id = BufferId(buffer_id as usize);
-                let cursor_pos = snap.buffer_cursor_positions.get(&buffer_id).copied()
+                let cursor_pos = match snap.buffer_cursor_positions.get(&buffer_id).copied()
                     .or_else(|| {
                         if snap.active_buffer_id == buffer_id {
                             snap.primary_cursor.as_ref().map(|c| c.position)
                         } else {
                             None
                         }
-                    })?;
+                    }) {
+                    Some(pos) => pos,
+                    None => return Ok(result), // Return empty array if no cursor
+                };
 
-                let properties = snap.buffer_text_properties.get(&buffer_id)?;
-                // Find property at cursor position
+                let properties = match snap.buffer_text_properties.get(&buffer_id) {
+                    Some(p) => p,
+                    None => return Ok(result), // Return empty array if no properties
+                };
+
+                // Find all properties at cursor position
+                let mut idx = 0u32;
                 for prop in properties {
                     if prop.start <= cursor_pos && cursor_pos < prop.end {
-                        return serde_json::to_string(&prop.properties).ok();
+                        // Convert properties HashMap to JS object
+                        let obj = rquickjs::Object::new(ctx.clone())?;
+                        for (key, value) in &prop.properties {
+                            let js_val = json_to_js(&ctx, value.clone())?;
+                            obj.set(key.as_str(), js_val)?;
+                        }
+                        result.set(idx, obj)?;
+                        idx += 1;
                     }
                 }
-                None
+                Ok(result)
             })?)?;
 
             // === Split operations ===
@@ -1281,20 +1389,32 @@ impl QuickJsBackend {
             }
 
             for handler_name in &handler_names {
+                // Call the handler and properly handle both sync and async errors
+                // Async handlers return Promises - we attach .catch() to surface rejections
                 let code = format!(
                     r#"
                     (function() {{
                         try {{
                             const data = JSON.parse({});
                             if (typeof globalThis.{} === 'function') {{
-                                globalThis.{}(data);
+                                const result = globalThis.{}(data);
+                                // If handler returns a Promise, catch rejections
+                                if (result && typeof result.then === 'function') {{
+                                    result.catch(function(e) {{
+                                        console.error('Handler {} async error:', e);
+                                        // Re-throw to make it an unhandled rejection for the runtime to catch
+                                        throw e;
+                                    }});
+                                }}
                             }}
                         }} catch (e) {{
-                            console.error('Handler {} error:', e);
+                            console.error('Handler {} sync error:', e);
+                            throw e;
                         }}
                     }})();
                     "#,
                     serde_json::to_string(event_data)?,
+                    handler_name,
                     handler_name,
                     handler_name,
                     handler_name
@@ -1304,6 +1424,8 @@ impl QuickJsBackend {
                     if let Err(e) = ctx.eval::<(), _>(code.as_bytes()) {
                         log_js_error(&ctx, e, &format!("handler {}", handler_name));
                     }
+                    // Run pending jobs to process any Promise continuations and catch errors
+                    run_pending_jobs_checked(&ctx, &format!("emit handler {}", handler_name));
                 });
             }
         }
@@ -1364,10 +1486,7 @@ impl QuickJsBackend {
             }
             tracing::info!("start_action: running pending microtasks");
             // Run any immediate microtasks
-            let mut count = 0;
-            while ctx.execute_pending_job() {
-                count += 1;
-            }
+            let count = run_pending_jobs_checked(&ctx, &format!("start_action {}", action_name));
             tracing::info!("start_action: executed {} pending jobs", count);
         });
 
@@ -1424,7 +1543,7 @@ impl QuickJsBackend {
                             if obj.get::<_, rquickjs::Function>("then").is_ok() {
                                 // Drive the runtime to process the promise
                                 // QuickJS processes promises synchronously when we call execute_pending_job
-                                while ctx.execute_pending_job() {}
+                                run_pending_jobs_checked(&ctx, &format!("execute_action {} promise", action_name));
                             }
                         }
                     }
@@ -1443,9 +1562,8 @@ impl QuickJsBackend {
         let mut had_work = false;
         self.context.with(|ctx| {
             // Run any pending microtasks (Promise continuations, etc.)
-            while ctx.execute_pending_job() {
-                had_work = true;
-            }
+            let count = run_pending_jobs_checked(&ctx, "poll_event_loop");
+            had_work = count > 0;
         });
         had_work
     }
@@ -1469,10 +1587,7 @@ impl QuickJsBackend {
                 log_js_error(&ctx, e, &format!("resolving callback {}", callback_id));
             }
             // IMPORTANT: Run pending jobs to process Promise continuations
-            let mut job_count = 0;
-            while ctx.execute_pending_job() {
-                job_count += 1;
-            }
+            let job_count = run_pending_jobs_checked(&ctx, &format!("resolve_callback {}", callback_id));
             tracing::info!("resolve_callback: executed {} pending jobs for callback_id={}", job_count, callback_id);
         });
     }
@@ -1489,7 +1604,7 @@ impl QuickJsBackend {
                 log_js_error(&ctx, e, &format!("rejecting callback {}", callback_id));
             }
             // IMPORTANT: Run pending jobs to process Promise continuations
-            while ctx.execute_pending_job() {}
+            run_pending_jobs_checked(&ctx, &format!("reject_callback {}", callback_id));
         });
     }
 }
@@ -2062,7 +2177,7 @@ mod tests {
 
         // Drive the Promise to completion
         backend.context.with(|ctx| {
-            while ctx.execute_pending_job() {}
+            run_pending_jobs_checked(&ctx, "test async getText");
         });
 
         // Verify the Promise resolved with the text

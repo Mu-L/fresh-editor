@@ -11,6 +11,9 @@ fn init_test_environment() {
 
     // Install signal handlers for debugging hangs (dumps JS + Rust stack traces on Ctrl+C)
     fresh::services::signal_handler::install_signal_handlers();
+
+    // Enable panicking on JS errors so plugin bugs surface immediately in tests
+    fresh::services::plugins::backend::set_panic_on_js_errors(true);
 }
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};

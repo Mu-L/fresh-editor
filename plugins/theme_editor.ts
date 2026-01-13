@@ -1744,13 +1744,19 @@ async function doOpenThemeEditor(): Promise<void> {
     editing_disabled: true,
   });
   editor.debug(`[theme_editor] doOpenThemeEditor: createVirtualBuffer returned bufferId=${bufferId}`);
+  editor.debug(`[theme_editor] doOpenThemeEditor: checking if bufferId !== null...`);
 
   if (bufferId !== null) {
+    editor.debug(`[theme_editor] doOpenThemeEditor: bufferId is not null, setting state...`);
     state.bufferId = bufferId;
     state.splitId = null;
 
+    editor.debug(`[theme_editor] doOpenThemeEditor: calling applyHighlighting...`);
     applyHighlighting();
+    editor.debug(`[theme_editor] doOpenThemeEditor: applyHighlighting completed`);
+    editor.debug(`[theme_editor] doOpenThemeEditor: calling setStatus...`);
     editor.setStatus(editor.t("status.ready"));
+    editor.debug(`[theme_editor] doOpenThemeEditor: completed successfully`);
   } else {
     editor.setStatus(editor.t("status.open_failed"));
   }
