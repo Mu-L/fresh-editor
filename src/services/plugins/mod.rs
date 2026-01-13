@@ -12,8 +12,6 @@ pub mod hooks;
 pub mod manager;
 
 #[cfg(feature = "plugins")]
-pub mod api_trait;
-#[cfg(feature = "plugins")]
 pub mod backend;
 #[cfg(feature = "plugins")]
 pub mod process;

@@ -17,6 +17,7 @@ use crate::services::plugins::transpile::{
 };
 use crate::view::overlay::OverlayNamespace;
 use anyhow::{anyhow, Result};
+use fresh_plugin_api_macros::{plugin_api, plugin_api_impl};
 use rquickjs::{Context, Function, Object, Runtime, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -399,6 +400,7 @@ pub struct JsEditorApi {
     next_request_id: Rc<RefCell<u64>>,
 }
 
+#[plugin_api_impl]
 #[rquickjs::methods(rename_all = "camelCase")]
 impl JsEditorApi {
     // === Buffer Queries ===
@@ -1138,7 +1140,8 @@ impl JsEditorApi {
 
     // === Virtual Buffers ===
 
-    /// Create a virtual buffer in current split (async, returns request_id)
+    /// Create a virtual buffer in current split (async, returns buffer ID)
+    #[plugin_api(async_promise, js_name = "createVirtualBuffer", ts_return = "number")]
     #[qjs(rename = "_createVirtualBufferStart")]
     pub fn create_virtual_buffer_start<'js>(
         &self,
@@ -1186,6 +1189,7 @@ impl JsEditorApi {
     }
 
     /// Create a virtual buffer in a new split (async, returns request_id)
+    #[plugin_api(async_promise, js_name = "createVirtualBufferInSplit", ts_return = "number")]
     #[qjs(rename = "_createVirtualBufferInSplitStart")]
     pub fn create_virtual_buffer_in_split_start<'js>(
         &self,
@@ -1271,6 +1275,7 @@ impl JsEditorApi {
     // === Async Operations ===
 
     /// Spawn a process (async, returns request_id)
+    #[plugin_api(async_thenable, js_name = "spawnProcess", ts_return = "SpawnResult")]
     #[qjs(rename = "_spawnProcessStart")]
     pub fn spawn_process_start(
         &self,
@@ -1294,6 +1299,7 @@ impl JsEditorApi {
     }
 
     /// Get buffer text range (async, returns request_id)
+    #[plugin_api(async_promise, js_name = "getBufferText", ts_return = "string")]
     #[qjs(rename = "_getBufferTextStart")]
     pub fn get_buffer_text_start(&self, buffer_id: u32, start: u32, end: u32) -> u64 {
         let id = {
@@ -1312,6 +1318,7 @@ impl JsEditorApi {
     }
 
     /// Delay/sleep (async, returns request_id)
+    #[plugin_api(async_promise, js_name = "delay", ts_return = "void")]
     #[qjs(rename = "_delayStart")]
     pub fn delay_start(&self, duration_ms: u64) -> u64 {
         let id = {
@@ -1328,6 +1335,7 @@ impl JsEditorApi {
     }
 
     /// Send LSP request (async, returns request_id)
+    #[plugin_api(async_promise, js_name = "sendLspRequest", ts_return = "unknown")]
     #[qjs(rename = "_sendLspRequestStart")]
     pub fn send_lsp_request_start<'js>(
         &self,
@@ -1357,6 +1365,7 @@ impl JsEditorApi {
     }
 
     /// Spawn a background process (async, returns request_id which is also process_id)
+    #[plugin_api(async_thenable, js_name = "spawnBackgroundProcess", ts_return = "BackgroundProcessResult")]
     #[qjs(rename = "_spawnBackgroundProcessStart")]
     pub fn spawn_background_process_start(
         &self,
@@ -3473,5 +3482,45 @@ mod tests {
             )
             .unwrap();
         // If we get here without panic, the test passes
+    }
+
+    // ==================== TypeScript Definitions Test ====================
+
+    #[test]
+    fn test_typescript_definitions_generated() {
+        // Check that the TypeScript definitions constant exists and has content
+        assert!(!JSEDITORAPI_TYPESCRIPT_DEFINITIONS.is_empty());
+        assert!(JSEDITORAPI_TYPESCRIPT_DEFINITIONS.contains("interface EditorAPI"));
+        assert!(JSEDITORAPI_TYPESCRIPT_DEFINITIONS.contains("declare function getEditor()"));
+        println!(
+            "Generated {} bytes of TypeScript definitions",
+            JSEDITORAPI_TYPESCRIPT_DEFINITIONS.len()
+        );
+    }
+
+    #[test]
+    fn test_js_methods_list() {
+        // Check that the JS methods list is generated
+        assert!(!JSEDITORAPI_JS_METHODS.is_empty());
+        println!("Generated {} API methods", JSEDITORAPI_JS_METHODS.len());
+        // Print first 20 methods
+        for (i, method) in JSEDITORAPI_JS_METHODS.iter().enumerate() {
+            if i < 20 {
+                println!("  - {}", method);
+            }
+        }
+        if JSEDITORAPI_JS_METHODS.len() > 20 {
+            println!("  ... and {} more", JSEDITORAPI_JS_METHODS.len() - 20);
+        }
+    }
+
+    /// Write TypeScript definitions to file (run with `cargo test write_dts -- --ignored`)
+    #[test]
+    #[ignore]
+    fn write_dts_file() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/plugins/lib/fresh.d.ts");
+        std::fs::write(path, JSEDITORAPI_TYPESCRIPT_DEFINITIONS)
+            .expect("Failed to write fresh.d.ts");
+        println!("Wrote TypeScript definitions to {}", path);
     }
 }
