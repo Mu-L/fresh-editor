@@ -19,6 +19,8 @@ pub mod process;
 pub mod thread;
 #[cfg(feature = "plugins")]
 pub mod transpile;
+#[cfg(feature = "plugins")]
+pub mod ts_export;
 
 #[cfg(feature = "embed-plugins")]
 pub mod embedded;

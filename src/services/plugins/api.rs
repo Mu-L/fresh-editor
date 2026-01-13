@@ -15,6 +15,9 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+#[cfg(feature = "plugins")]
+use ts_rs::TS;
+
 /// Response from the editor for async plugin operations
 #[derive(Debug, Clone)]
 pub enum PluginResponse {
@@ -48,15 +51,20 @@ pub enum PluginResponse {
 
 /// Information about a cursor in the editor
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct CursorInfo {
     /// Byte position of the cursor
     pub position: usize,
     /// Selection range (if any)
+    #[cfg_attr(feature = "plugins", ts(type = "{ start: number; end: number } | null"))]
     pub selection: Option<Range<usize>>,
 }
 
 /// Specification for an action to execute, with optional repeat count
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct ActionSpec {
     /// Action name (e.g., "move_word_right", "delete_line")
     pub action: String,
@@ -66,11 +74,15 @@ pub struct ActionSpec {
 
 /// Information about a buffer
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct BufferInfo {
     /// Buffer ID
+    #[cfg_attr(feature = "plugins", ts(type = "number"))]
     pub id: BufferId,
     /// File path (if any)
     #[serde(serialize_with = "serialize_path")]
+    #[cfg_attr(feature = "plugins", ts(type = "string"))]
     pub path: Option<PathBuf>,
     /// Whether the buffer has been modified
     pub modified: bool,
@@ -84,14 +96,20 @@ fn serialize_path<S: serde::Serializer>(path: &Option<PathBuf>, s: S) -> Result<
 
 /// Diff between current buffer content and last saved snapshot
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct BufferSavedDiff {
     pub equal: bool,
+    #[cfg_attr(feature = "plugins", ts(type = "Array<{ start: number; end: number }>"))]
     pub byte_ranges: Vec<Range<usize>>,
+    #[cfg_attr(feature = "plugins", ts(type = "Array<{ start: number; end: number }> | null"))]
     pub line_ranges: Option<Vec<Range<usize>>>,
 }
 
 /// Information about the viewport
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct ViewportInfo {
     /// Byte position of the first visible line
     pub top_byte: usize,
@@ -105,6 +123,8 @@ pub struct ViewportInfo {
 
 /// Layout hints supplied by plugins (e.g., Compose mode)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct LayoutHints {
     /// Optional compose width for centering/wrapping
     pub compose_width: Option<u16>,
@@ -118,9 +138,12 @@ pub struct LayoutHints {
 
 /// Layout configuration for composite buffers
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export, rename = "TsCompositeLayoutConfig"))]
 pub struct CompositeLayoutConfig {
     /// Layout type: "side-by-side", "stacked", or "unified"
     #[serde(rename = "type")]
+    #[cfg_attr(feature = "plugins", ts(rename = "type"))]
     pub layout_type: String,
     /// Width ratios for side-by-side (e.g., [0.5, 0.5])
     #[serde(default)]
@@ -139,6 +162,8 @@ fn default_true() -> bool {
 
 /// Source pane configuration for composite buffers
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export, rename = "TsCompositeSourceConfig"))]
 pub struct CompositeSourceConfig {
     /// Buffer ID of the source buffer
     pub buffer_id: usize,
@@ -154,15 +179,20 @@ pub struct CompositeSourceConfig {
 
 /// Style configuration for a composite pane
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export, rename = "TsCompositePaneStyle"))]
 pub struct CompositePaneStyle {
     /// Background color for added lines (RGB)
     #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(type = "[number, number, number] | null"))]
     pub add_bg: Option<(u8, u8, u8)>,
     /// Background color for removed lines (RGB)
     #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(type = "[number, number, number] | null"))]
     pub remove_bg: Option<(u8, u8, u8)>,
     /// Background color for modified lines (RGB)
     #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(type = "[number, number, number] | null"))]
     pub modify_bg: Option<(u8, u8, u8)>,
     /// Gutter style: "line-numbers", "diff-markers", "both", or "none"
     #[serde(default)]
@@ -171,6 +201,8 @@ pub struct CompositePaneStyle {
 
 /// Diff hunk for composite buffer alignment
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export, rename = "TsCompositeHunk"))]
 pub struct CompositeHunk {
     /// Starting line in old buffer (0-indexed)
     pub old_start: usize,
@@ -184,6 +216,8 @@ pub struct CompositeHunk {
 
 /// Wire-format view token kind (serialized for plugin transforms)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub enum ViewTokenWireKind {
     Text(String),
     Newline,
@@ -203,12 +237,16 @@ pub enum ViewTokenWireKind {
 /// mapping (source_offset: None), such as annotation headers in git blame.
 /// For tokens with source_offset: Some(_), syntax highlighting is applied instead.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct ViewTokenStyle {
     /// Foreground color as RGB tuple
     #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(type = "[number, number, number] | null"))]
     pub fg: Option<(u8, u8, u8)>,
     /// Background color as RGB tuple
     #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(type = "[number, number, number] | null"))]
     pub bg: Option<(u8, u8, u8)>,
     /// Whether to render in bold
     #[serde(default)]
@@ -220,6 +258,8 @@ pub struct ViewTokenStyle {
 
 /// Wire-format view token with optional source mapping and styling
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct ViewTokenWire {
     /// Source byte offset in the buffer. None for injected content (annotations).
     pub source_offset: Option<usize>,
@@ -917,6 +957,8 @@ pub struct ReviewHunk {
 
 /// Action button for action popups
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export, rename = "TsActionPopupAction"))]
 pub struct ActionPopupAction {
     /// Unique action identifier (returned in ActionPopupResult)
     pub id: String,
@@ -926,12 +968,37 @@ pub struct ActionPopupAction {
 
 /// Syntax highlight span for a buffer range
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
 pub struct TsHighlightSpan {
     pub start: u32,
     pub end: u32,
+    #[cfg_attr(feature = "plugins", ts(type = "[number, number, number]"))]
     pub color: (u8, u8, u8),
     pub bold: bool,
     pub italic: bool,
+}
+
+/// Result from spawning a process with spawnProcess
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
+pub struct SpawnResult {
+    /// Complete stdout as string
+    pub stdout: String,
+    /// Complete stderr as string
+    pub stderr: String,
+    /// Process exit code (0 usually means success, -1 if killed)
+    pub exit_code: i32,
+}
+
+/// Result from spawning a background process
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
+pub struct BackgroundProcessResult {
+    /// Unique process ID for later reference
+    pub process_id: u64,
 }
 
 /// Plugin API context - provides safe access to editor functionality

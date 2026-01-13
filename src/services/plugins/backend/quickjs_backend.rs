@@ -3487,14 +3487,25 @@ mod tests {
     // ==================== TypeScript Definitions Test ====================
 
     #[test]
-    fn test_typescript_definitions_generated() {
-        // Check that the TypeScript definitions constant exists and has content
-        assert!(!JSEDITORAPI_TYPESCRIPT_DEFINITIONS.is_empty());
-        assert!(JSEDITORAPI_TYPESCRIPT_DEFINITIONS.contains("interface EditorAPI"));
-        assert!(JSEDITORAPI_TYPESCRIPT_DEFINITIONS.contains("declare function getEditor()"));
+    fn test_typescript_preamble_generated() {
+        // Check that the TypeScript preamble constant exists and has content
+        assert!(!JSEDITORAPI_TS_PREAMBLE.is_empty());
+        assert!(JSEDITORAPI_TS_PREAMBLE.contains("declare function getEditor()"));
+        assert!(JSEDITORAPI_TS_PREAMBLE.contains("ProcessHandle"));
         println!(
-            "Generated {} bytes of TypeScript definitions",
-            JSEDITORAPI_TYPESCRIPT_DEFINITIONS.len()
+            "Generated {} bytes of TypeScript preamble",
+            JSEDITORAPI_TS_PREAMBLE.len()
+        );
+    }
+
+    #[test]
+    fn test_typescript_editor_api_generated() {
+        // Check that the EditorAPI interface is generated
+        assert!(!JSEDITORAPI_TS_EDITOR_API.is_empty());
+        assert!(JSEDITORAPI_TS_EDITOR_API.contains("interface EditorAPI"));
+        println!(
+            "Generated {} bytes of EditorAPI interface",
+            JSEDITORAPI_TS_EDITOR_API.len()
         );
     }
 
@@ -3512,15 +3523,5 @@ mod tests {
         if JSEDITORAPI_JS_METHODS.len() > 20 {
             println!("  ... and {} more", JSEDITORAPI_JS_METHODS.len() - 20);
         }
-    }
-
-    /// Write TypeScript definitions to file (run with `cargo test write_dts -- --ignored`)
-    #[test]
-    #[ignore]
-    fn write_dts_file() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/plugins/lib/fresh.d.ts");
-        std::fs::write(path, JSEDITORAPI_TYPESCRIPT_DEFINITIONS)
-            .expect("Failed to write fresh.d.ts");
-        println!("Wrote TypeScript definitions to {}", path);
     }
 }
