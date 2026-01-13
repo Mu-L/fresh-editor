@@ -213,7 +213,7 @@ impl PluginManager {
 
     /// List all loaded plugins.
     #[cfg(feature = "plugins")]
-    pub fn list_plugins(&self) -> Vec<super::runtime::TsPluginInfo> {
+    pub fn list_plugins(&self) -> Vec<super::backend::TsPluginInfo> {
         self.inner
             .as_ref()
             .map(|m| m.list_plugins())

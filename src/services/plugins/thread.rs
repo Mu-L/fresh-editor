@@ -1,19 +1,20 @@
 //! Plugin Thread: Dedicated thread for TypeScript plugin execution
 //!
 //! This module implements a dedicated thread architecture for plugin execution,
-//! solving the problem of creating new tokio runtimes for each hook call.
+//! using QuickJS as the JavaScript runtime with oxc for TypeScript transpilation.
 //!
 //! Architecture:
 //! - Main thread (UI) sends requests to plugin thread via channel
-//! - Plugin thread owns JsRuntime and persistent tokio runtime
+//! - Plugin thread owns QuickJS runtime and persistent tokio runtime
 //! - Results are sent back via the existing PluginCommand channel
 //! - Async operations complete naturally without runtime destruction
 
 use crate::config::PluginConfig;
 use crate::input::command_registry::CommandRegistry;
 use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand};
+use crate::services::plugins::backend::{QuickJsBackend};
+use crate::services::plugins::backend::quickjs_backend::{TsPluginInfo, PendingResponses};
 use crate::services::plugins::hooks::{hook_args_to_json, HookArgs};
-use crate::services::plugins::runtime::{TsPluginInfo, TypeScriptRuntime};
 use anyhow::{anyhow, Result};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -148,7 +149,7 @@ pub struct PluginThreadHandle {
     commands: Arc<RwLock<CommandRegistry>>,
 
     /// Pending response senders for async operations (shared with runtime)
-    pending_responses: crate::services::plugins::runtime::PendingResponses,
+    pending_responses: PendingResponses,
 
     /// Receiver for plugin commands (polled by editor directly)
     command_receiver: std::sync::mpsc::Receiver<PluginCommand>,
@@ -169,7 +170,7 @@ impl PluginThreadHandle {
         let state_snapshot = Arc::new(RwLock::new(EditorStateSnapshot::new()));
 
         // Create pending responses map (shared between handle and runtime)
-        let pending_responses: crate::services::plugins::runtime::PendingResponses =
+        let pending_responses: PendingResponses =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let thread_pending_responses = Arc::clone(&pending_responses);
 
@@ -199,20 +200,20 @@ impl PluginThreadHandle {
                 }
             };
 
-            // Create TypeScript runtime with state
-            tracing::debug!("Plugin thread: creating TypeScript runtime (V8 initialization)");
-            let runtime = match TypeScriptRuntime::with_state_and_responses(
+            // Create QuickJS runtime with state
+            tracing::debug!("Plugin thread: creating QuickJS runtime");
+            let runtime = match QuickJsBackend::with_state_and_responses(
                 Arc::clone(&thread_state_snapshot),
                 command_sender,
                 thread_pending_responses,
                 dir_context,
             ) {
                 Ok(rt) => {
-                    tracing::debug!("Plugin thread: TypeScript runtime created successfully");
+                    tracing::debug!("Plugin thread: QuickJS runtime created successfully");
                     rt
                 }
                 Err(e) => {
-                    tracing::error!("Failed to create TypeScript runtime: {}", e);
+                    tracing::error!("Failed to create QuickJS runtime: {}", e);
                     return;
                 }
             };
@@ -485,7 +486,7 @@ impl Drop for PluginThreadHandle {
 }
 
 fn respond_to_pending(
-    pending_responses: &crate::services::plugins::runtime::PendingResponses,
+    pending_responses: &PendingResponses,
     response: crate::services::plugins::api::PluginResponse,
 ) {
     let request_id = match &response {
@@ -517,7 +518,6 @@ fn respond_to_pending(
 mod plugin_thread_tests {
     use super::*;
     use crate::services::plugins::api::PluginResponse;
-    use crate::services::plugins::runtime::PendingResponses;
     use serde_json::json;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -581,7 +581,7 @@ mod plugin_thread_tests {
 /// polling. This allows long-running promises (like process spawns) to make progress
 /// even when no requests are coming in, preventing the UI from getting stuck.
 async fn plugin_thread_loop(
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     plugins: &mut HashMap<String, TsPluginInfo>,
     commands: &Arc<RwLock<CommandRegistry>>,
     mut request_receiver: tokio::sync::mpsc::UnboundedReceiver<PluginRequest>,
@@ -645,7 +645,7 @@ async fn plugin_thread_loop(
 async fn execute_action_with_hooks(
     action_name: &str,
     response: oneshot::Sender<Result<()>>,
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
 ) {
     tracing::trace!(
         "execute_action_with_hooks: starting action '{}'",
@@ -675,7 +675,7 @@ async fn execute_action_with_hooks(
     let _ = response.send(result);
 }
 
-/// Run a hook with Rc<RefCell<TypeScriptRuntime>>
+/// Run a hook with Rc<RefCell<QuickJsBackend>>
 ///
 /// # Safety (clippy::await_holding_refcell_ref)
 /// The RefCell borrow held across await is safe because:
@@ -684,7 +684,7 @@ async fn execute_action_with_hooks(
 /// - The runtime Rc<RefCell<>> is never shared with other concurrent tasks
 #[allow(clippy::await_holding_refcell_ref)]
 async fn run_hook_internal_rc(
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     hook_name: &str,
     args: &HookArgs,
 ) -> Result<()> {
@@ -712,7 +712,7 @@ async fn run_hook_internal_rc(
 /// Handle a single request in the plugin thread
 async fn handle_request(
     request: PluginRequest,
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     plugins: &mut HashMap<String, TsPluginInfo>,
     commands: &Arc<RwLock<CommandRegistry>>,
 ) -> bool {
@@ -816,7 +816,7 @@ async fn handle_request(
 /// - The runtime Rc<RefCell<>> is never shared with other concurrent tasks
 #[allow(clippy::await_holding_refcell_ref)]
 async fn load_plugin_internal(
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     plugins: &mut HashMap<String, TsPluginInfo>,
     path: &Path,
 ) -> Result<()> {
@@ -885,7 +885,7 @@ async fn load_plugin_internal(
 
 /// Load all plugins from a directory
 async fn load_plugins_from_dir_internal(
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     plugins: &mut HashMap<String, TsPluginInfo>,
     dir: &Path,
 ) -> Vec<String> {
@@ -940,7 +940,7 @@ async fn load_plugins_from_dir_internal(
 /// Returns (errors, discovered_plugins) where discovered_plugins contains all
 /// found plugin files with their configs (respecting enabled state from provided configs)
 async fn load_plugins_from_dir_with_config_internal(
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     plugins: &mut HashMap<String, TsPluginInfo>,
     dir: &Path,
     plugin_configs: &HashMap<String, PluginConfig>,
@@ -1056,7 +1056,7 @@ fn unload_plugin_internal(
 
 /// Reload a plugin
 async fn reload_plugin_internal(
-    runtime: Rc<RefCell<TypeScriptRuntime>>,
+    runtime: Rc<RefCell<QuickJsBackend>>,
     plugins: &mut HashMap<String, TsPluginInfo>,
     commands: &Arc<RwLock<CommandRegistry>>,
     name: &str,
