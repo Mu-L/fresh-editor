@@ -1062,10 +1062,15 @@ impl QuickJsBackend {
 
                 // Resolve a pending callback (called from Rust)
                 globalThis._resolveCallback = function(callbackId, result) {
+                    console.log('[JS] _resolveCallback called with callbackId=' + callbackId + ', pendingCallbacks.size=' + globalThis._pendingCallbacks.size);
                     const cb = globalThis._pendingCallbacks.get(callbackId);
                     if (cb) {
+                        console.log('[JS] _resolveCallback: found callback, calling resolve()');
                         globalThis._pendingCallbacks.delete(callbackId);
                         cb.resolve(result);
+                        console.log('[JS] _resolveCallback: resolve() called');
+                    } else {
+                        console.log('[JS] _resolveCallback: NO callback found for id=' + callbackId);
                     }
                 };
 
@@ -1077,9 +1082,6 @@ impl QuickJsBackend {
                         cb.reject(new Error(error));
                     }
                 };
-
-                // Async operation timeout in ms (30 seconds)
-                const ASYNC_TIMEOUT_MS = 30000;
 
                 // Generic async wrapper decorator
                 // Wraps a function that returns a callbackId into a promise-returning function
@@ -1096,16 +1098,9 @@ impl QuickJsBackend {
                     return function(...args) {
                         const callbackId = startFn.apply(this, args);
                         return new Promise((resolve, reject) => {
-                            const timeoutId = setTimeout(() => {
-                                globalThis._pendingCallbacks.delete(callbackId);
-                                const error = new Error(`editor.${fnName || 'unknown'} timed out after ${ASYNC_TIMEOUT_MS}ms (callbackId=${callbackId})`);
-                                editor.debug(`[ASYNC TIMEOUT] ${error.message}`);
-                                reject(error);
-                            }, ASYNC_TIMEOUT_MS);
-                            globalThis._pendingCallbacks.set(callbackId, {
-                                resolve: (value) => { clearTimeout(timeoutId); resolve(value); },
-                                reject: (err) => { clearTimeout(timeoutId); reject(err); }
-                            });
+                            // NOTE: setTimeout not available in QuickJS - timeout disabled for now
+                            // TODO: Implement setTimeout polyfill using editor.delay() or similar
+                            globalThis._pendingCallbacks.set(callbackId, { resolve, reject });
                         });
                     };
                 };
@@ -1124,16 +1119,8 @@ impl QuickJsBackend {
                     return function(...args) {
                         const callbackId = startFn.apply(this, args);
                         const resultPromise = new Promise((resolve, reject) => {
-                            const timeoutId = setTimeout(() => {
-                                globalThis._pendingCallbacks.delete(callbackId);
-                                const error = new Error(`editor.${fnName || 'unknown'} timed out after ${ASYNC_TIMEOUT_MS}ms (callbackId=${callbackId})`);
-                                editor.debug(`[ASYNC TIMEOUT] ${error.message}`);
-                                reject(error);
-                            }, ASYNC_TIMEOUT_MS);
-                            globalThis._pendingCallbacks.set(callbackId, {
-                                resolve: (value) => { clearTimeout(timeoutId); resolve(value); },
-                                reject: (err) => { clearTimeout(timeoutId); reject(err); }
-                            });
+                            // NOTE: setTimeout not available in QuickJS - timeout disabled for now
+                            globalThis._pendingCallbacks.set(callbackId, { resolve, reject });
                         });
                         return {
                             get result() { return resultPromise; },
@@ -1470,17 +1457,23 @@ impl QuickJsBackend {
 
     /// Resolve a pending async callback with a result (called from Rust when async op completes)
     pub fn resolve_callback(&mut self, callback_id: u64, result_json: &str) {
+        tracing::debug!("resolve_callback: starting for callback_id={}", callback_id);
         let code = format!(
             "globalThis._resolveCallback({}, {});",
             callback_id,
             result_json
         );
         self.context.with(|ctx| {
+            tracing::debug!("resolve_callback: evaluating JS code: {}", code);
             if let Err(e) = ctx.eval::<(), _>(code.as_bytes()) {
                 log_js_error(&ctx, e, &format!("resolving callback {}", callback_id));
             }
             // IMPORTANT: Run pending jobs to process Promise continuations
-            while ctx.execute_pending_job() {}
+            let mut job_count = 0;
+            while ctx.execute_pending_job() {
+                job_count += 1;
+            }
+            tracing::info!("resolve_callback: executed {} pending jobs for callback_id={}", job_count, callback_id);
         });
     }
 

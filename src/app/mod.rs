@@ -4315,11 +4315,9 @@ impl Editor {
                                 req_id,
                                 buffer_id
                             );
-                            let result = serde_json::json!({
-                                "bufferId": buffer_id.0,
-                                "splitId": null
-                            });
-                            self.plugin_manager.resolve_callback(req_id, result.to_string());
+                            // createVirtualBuffer returns just the buffer ID (number), not an object
+                            let result = buffer_id.0.to_string();
+                            self.plugin_manager.resolve_callback(req_id, result);
                             tracing::info!("CreateVirtualBufferWithContent: resolve_callback sent for request_id={}", req_id);
                         }
                     }
