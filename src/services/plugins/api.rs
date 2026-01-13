@@ -388,10 +388,7 @@ pub enum PluginCommand {
     },
 
     /// Delay/sleep for a duration (async, resolves callback when done)
-    Delay {
-        callback_id: u64,
-        duration_ms: u64,
-    },
+    Delay { callback_id: u64, duration_ms: u64 },
 
     /// Spawn a long-running background process
     /// Unlike SpawnProcess, this returns immediately with a process handle
@@ -410,9 +407,7 @@ pub enum PluginCommand {
     },
 
     /// Kill a background process by ID
-    KillBackgroundProcess {
-        process_id: u64,
-    },
+    KillBackgroundProcess { process_id: u64 },
 
     /// Set layout hints for a buffer/viewport
     SetLayoutHints {

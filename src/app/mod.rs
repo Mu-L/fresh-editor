@@ -3367,7 +3367,8 @@ impl Editor {
                     self.handle_plugin_process_output(process_id, stdout, stderr, exit_code);
                 }
                 AsyncMessage::PluginDelayComplete { callback_id } => {
-                    self.plugin_manager.resolve_callback(callback_id, "null".to_string());
+                    self.plugin_manager
+                        .resolve_callback(callback_id, "null".to_string());
                 }
                 AsyncMessage::PluginProcessStdout { process_id, data } => {
                     // Run onProcessStdout hook for streaming output
@@ -3389,7 +3390,11 @@ impl Editor {
                         },
                     );
                 }
-                AsyncMessage::PluginBackgroundProcessExit { process_id, callback_id, exit_code } => {
+                AsyncMessage::PluginBackgroundProcessExit {
+                    process_id,
+                    callback_id,
+                    exit_code,
+                } => {
                     // Clean up abort handle
                     self.background_process_handles.remove(&process_id);
                     // Resolve callback with exit info
@@ -3397,7 +3402,8 @@ impl Editor {
                         "processId": process_id,
                         "exitCode": exit_code
                     });
-                    self.plugin_manager.resolve_callback(callback_id, result.to_string());
+                    self.plugin_manager
+                        .resolve_callback(callback_id, result.to_string());
                 }
                 AsyncMessage::CustomNotification {
                     language,
@@ -4116,16 +4122,21 @@ impl Editor {
                                 "stderr": String::from_utf8_lossy(&output.stderr),
                                 "exitCode": output.status.code().unwrap_or(-1)
                             });
-                            self.plugin_manager.resolve_callback(callback_id, result.to_string());
+                            self.plugin_manager
+                                .resolve_callback(callback_id, result.to_string());
                         }
                         Err(e) => {
-                            self.plugin_manager.reject_callback(callback_id, e.to_string());
+                            self.plugin_manager
+                                .reject_callback(callback_id, e.to_string());
                         }
                     }
                 }
             }
 
-            PluginCommand::Delay { callback_id, duration_ms } => {
+            PluginCommand::Delay {
+                callback_id,
+                duration_ms,
+            } => {
                 // Spawn async delay via tokio
                 if let (Some(runtime), Some(bridge)) = (&self.tokio_runtime, &self.async_bridge) {
                     let sender = bridge.sender();
@@ -4136,7 +4147,8 @@ impl Editor {
                 } else {
                     // Fallback to blocking if no runtime available
                     std::thread::sleep(std::time::Duration::from_millis(duration_ms));
-                    self.plugin_manager.resolve_callback(callback_id, "null".to_string());
+                    self.plugin_manager
+                        .resolve_callback(callback_id, "null".to_string());
                 }
             }
 
@@ -4231,10 +4243,12 @@ impl Editor {
                     });
 
                     // Store abort handle for potential kill
-                    self.background_process_handles.insert(process_id, handle.abort_handle());
+                    self.background_process_handles
+                        .insert(process_id, handle.abort_handle());
                 } else {
                     // No runtime - reject immediately
-                    self.plugin_manager.reject_callback(callback_id, "Async runtime not available".to_string());
+                    self.plugin_manager
+                        .reject_callback(callback_id, "Async runtime not available".to_string());
                 }
             }
 
@@ -4373,7 +4387,8 @@ impl Editor {
                                     "bufferId": existing_buffer_id.0,
                                     "splitId": splits.first().map(|s| s.0)
                                 });
-                                self.plugin_manager.resolve_callback(req_id, result.to_string());
+                                self.plugin_manager
+                                    .resolve_callback(req_id, result.to_string());
                             }
                             return Ok(());
                         } else {
@@ -4472,7 +4487,8 @@ impl Editor {
                         "bufferId": buffer_id.0,
                         "splitId": created_split_id.map(|s| s.0)
                     });
-                    self.plugin_manager.resolve_callback(req_id, result.to_string());
+                    self.plugin_manager
+                        .resolve_callback(req_id, result.to_string());
                 }
             }
             PluginCommand::SetVirtualBufferContent { buffer_id, entries } => {
@@ -4563,7 +4579,8 @@ impl Editor {
                         "bufferId": buffer_id.0,
                         "splitId": split_id.0
                     });
-                    self.plugin_manager.resolve_callback(req_id, result.to_string());
+                    self.plugin_manager
+                        .resolve_callback(req_id, result.to_string());
                 }
             }
 

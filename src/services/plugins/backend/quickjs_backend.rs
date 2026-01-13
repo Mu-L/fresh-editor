@@ -8,10 +8,13 @@ use crate::input::commands::{Command, CommandSource};
 use crate::input::keybindings::Action;
 use crate::model::event::{BufferId, SplitId};
 use crate::primitives::text_property::TextPropertyEntry;
-use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand, PluginResponse};
 #[cfg(test)]
 use crate::services::plugins::api::CursorInfo;
-use crate::services::plugins::transpile::{bundle_module, has_es_imports, has_es_module_syntax, strip_imports_and_exports, transpile_typescript};
+use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand, PluginResponse};
+use crate::services::plugins::transpile::{
+    bundle_module, has_es_imports, has_es_module_syntax, strip_imports_and_exports,
+    transpile_typescript,
+};
 use crate::view::overlay::OverlayNamespace;
 use anyhow::{anyhow, Result};
 use rquickjs::{Context, Function, Object, Runtime, Value};
@@ -26,23 +29,28 @@ fn js_to_json(ctx: &rquickjs::Ctx<'_>, val: Value<'_>) -> serde_json::Value {
     use rquickjs::Type;
     match val.type_of() {
         Type::Null | Type::Undefined | Type::Uninitialized => serde_json::Value::Null,
-        Type::Bool => val.as_bool().map(serde_json::Value::Bool).unwrap_or(serde_json::Value::Null),
-        Type::Int => val.as_int().map(|n| serde_json::Value::Number(n.into())).unwrap_or(serde_json::Value::Null),
-        Type::Float => {
-            val.as_float()
-                .and_then(|f| serde_json::Number::from_f64(f))
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
-        Type::String => {
-            val.as_string()
-                .and_then(|s| s.to_string().ok())
-                .map(serde_json::Value::String)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        Type::Bool => val
+            .as_bool()
+            .map(serde_json::Value::Bool)
+            .unwrap_or(serde_json::Value::Null),
+        Type::Int => val
+            .as_int()
+            .map(|n| serde_json::Value::Number(n.into()))
+            .unwrap_or(serde_json::Value::Null),
+        Type::Float => val
+            .as_float()
+            .and_then(|f| serde_json::Number::from_f64(f))
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Type::String => val
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
         Type::Array => {
             if let Some(arr) = val.as_array() {
-                let items: Vec<serde_json::Value> = arr.iter()
+                let items: Vec<serde_json::Value> = arr
+                    .iter()
                     .filter_map(|item| item.ok())
                     .map(|item| js_to_json(ctx, item))
                     .collect();
@@ -69,7 +77,10 @@ fn js_to_json(ctx: &rquickjs::Ctx<'_>, val: Value<'_>) -> serde_json::Value {
 }
 
 /// Convert a serde_json::Value to a QuickJS Value
-fn json_to_js<'js>(ctx: &rquickjs::Ctx<'js>, val: serde_json::Value) -> rquickjs::Result<Value<'js>> {
+fn json_to_js<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    val: serde_json::Value,
+) -> rquickjs::Result<Value<'js>> {
     match val {
         serde_json::Value::Null => Ok(Value::new_null(ctx.clone())),
         serde_json::Value::Bool(b) => Ok(Value::new_bool(ctx.clone(), b)),
@@ -113,7 +124,10 @@ fn get_text_properties_at_cursor_json(
         Err(_) => return empty,
     };
     let buffer_id_typed = BufferId(buffer_id as usize);
-    let cursor_pos = match snap.buffer_cursor_positions.get(&buffer_id_typed).copied()
+    let cursor_pos = match snap
+        .buffer_cursor_positions
+        .get(&buffer_id_typed)
+        .copied()
         .or_else(|| {
             if snap.active_buffer_id == buffer_id_typed {
                 snap.primary_cursor.as_ref().map(|c| c.position)
@@ -131,11 +145,17 @@ fn get_text_properties_at_cursor_json(
     };
 
     // Find all properties at cursor position
-    let result: Vec<_> = properties.iter()
+    let result: Vec<_> = properties
+        .iter()
         .filter(|prop| prop.start <= cursor_pos && cursor_pos < prop.end)
-        .map(|prop| serde_json::Value::Object(
-            prop.properties.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-        ))
+        .map(|prop| {
+            serde_json::Value::Object(
+                prop.properties
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            )
+        })
         .collect();
 
     serde_json::to_string(&result).unwrap_or(empty)
@@ -150,7 +170,8 @@ fn js_value_to_string(ctx: &rquickjs::Ctx<'_>, val: &Value<'_>) -> String {
         Type::Bool => val.as_bool().map(|b| b.to_string()).unwrap_or_default(),
         Type::Int => val.as_int().map(|n| n.to_string()).unwrap_or_default(),
         Type::Float => val.as_float().map(|f| f.to_string()).unwrap_or_default(),
-        Type::String => val.as_string()
+        Type::String => val
+            .as_string()
             .and_then(|s| s.to_string().ok())
             .unwrap_or_default(),
         Type::Object | Type::Exception => {
@@ -183,11 +204,10 @@ fn js_value_to_string(ctx: &rquickjs::Ctx<'_>, val: &Value<'_>) -> String {
             let json = js_to_json(ctx, val.clone());
             serde_json::to_string(&json).unwrap_or_else(|_| "[array]".to_string())
         }
-        Type::Function | Type::Constructor => {
-            "[function]".to_string()
-        }
+        Type::Function | Type::Constructor => "[function]".to_string(),
         Type::Symbol => "[symbol]".to_string(),
-        Type::BigInt => val.as_big_int()
+        Type::BigInt => val
+            .as_big_int()
             .and_then(|b| b.clone().to_i64().ok())
             .map(|n| n.to_string())
             .unwrap_or_else(|| "[bigint]".to_string()),
@@ -196,7 +216,11 @@ fn js_value_to_string(ctx: &rquickjs::Ctx<'_>, val: &Value<'_>) -> String {
 }
 
 /// Format a JavaScript error with full details including stack trace
-fn format_js_error(ctx: &rquickjs::Ctx<'_>, err: rquickjs::Error, source_name: &str) -> anyhow::Error {
+fn format_js_error(
+    ctx: &rquickjs::Ctx<'_>,
+    err: rquickjs::Error,
+    source_name: &str,
+) -> anyhow::Error {
     // Check if this is an exception that we can catch for more details
     if err.is_exception() {
         // Try to catch the exception to get the full error object
@@ -204,24 +228,29 @@ fn format_js_error(ctx: &rquickjs::Ctx<'_>, err: rquickjs::Error, source_name: &
         if !exc.is_undefined() && !exc.is_null() {
             // Try to get error message and stack from the exception object
             if let Some(exc_obj) = exc.as_object() {
-                let message: String = exc_obj.get::<_, String>("message").unwrap_or_else(|_| "Unknown error".to_string());
+                let message: String = exc_obj
+                    .get::<_, String>("message")
+                    .unwrap_or_else(|_| "Unknown error".to_string());
                 let stack: String = exc_obj.get::<_, String>("stack").unwrap_or_default();
-                let name: String = exc_obj.get::<_, String>("name").unwrap_or_else(|_| "Error".to_string());
+                let name: String = exc_obj
+                    .get::<_, String>("name")
+                    .unwrap_or_else(|_| "Error".to_string());
 
                 if !stack.is_empty() {
                     return anyhow::anyhow!(
                         "JS error in {}: {}: {}\nStack trace:\n{}",
-                        source_name, name, message, stack
+                        source_name,
+                        name,
+                        message,
+                        stack
                     );
                 } else {
-                    return anyhow::anyhow!(
-                        "JS error in {}: {}: {}",
-                        source_name, name, message
-                    );
+                    return anyhow::anyhow!("JS error in {}: {}: {}", source_name, name, message);
                 }
             } else {
                 // Exception is not an object, try to convert to string
-                let exc_str: String = exc.as_string()
+                let exc_str: String = exc
+                    .as_string()
                     .and_then(|s: &rquickjs::String| s.to_string().ok())
                     .unwrap_or_else(|| format!("{:?}", exc));
                 return anyhow::anyhow!("JS error in {}: {}", source_name, exc_str);
@@ -246,7 +275,8 @@ fn log_js_error(ctx: &rquickjs::Ctx<'_>, err: rquickjs::Error, context: &str) {
 }
 
 /// Global flag to panic on JS errors (enabled during testing)
-static PANIC_ON_JS_ERRORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PANIC_ON_JS_ERRORS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Enable panicking on JS errors (call this from test setup)
 pub fn set_panic_on_js_errors(enabled: bool) {
@@ -268,7 +298,11 @@ fn run_pending_jobs_checked(ctx: &rquickjs::Ctx<'_>, context: &str) -> usize {
         // Only treat it as an exception if it's actually an Error object
         if exc.is_exception() {
             let error_msg = if let Some(err) = exc.as_exception() {
-                format!("{}: {}", err.message().unwrap_or_default(), err.stack().unwrap_or_default())
+                format!(
+                    "{}: {}",
+                    err.message().unwrap_or_default(),
+                    err.stack().unwrap_or_default()
+                )
             } else {
                 format!("{:?}", exc)
             };
@@ -288,13 +322,24 @@ fn run_pending_jobs_checked(ctx: &rquickjs::Ctx<'_>, context: &str) -> usize {
     let exc: rquickjs::Value = ctx.catch();
     if exc.is_exception() {
         let error_msg = if let Some(err) = exc.as_exception() {
-            format!("{}: {}", err.message().unwrap_or_default(), err.stack().unwrap_or_default())
+            format!(
+                "{}: {}",
+                err.message().unwrap_or_default(),
+                err.stack().unwrap_or_default()
+            )
         } else {
             format!("{:?}", exc)
         };
-        tracing::error!("Unhandled JS exception after running jobs in {}: {}", context, error_msg);
+        tracing::error!(
+            "Unhandled JS exception after running jobs in {}: {}",
+            context,
+            error_msg
+        );
         if should_panic_on_js_errors() {
-            panic!("Unhandled JS exception after running jobs in {}: {}", context, error_msg);
+            panic!(
+                "Unhandled JS exception after running jobs in {}: {}",
+                context, error_msg
+            );
         }
     }
 
@@ -302,9 +347,13 @@ fn run_pending_jobs_checked(ctx: &rquickjs::Ctx<'_>, context: &str) -> usize {
 }
 
 /// Parse a TextPropertyEntry from a JS Object
-fn parse_text_property_entry(ctx: &rquickjs::Ctx<'_>, obj: &Object<'_>) -> Option<TextPropertyEntry> {
+fn parse_text_property_entry(
+    ctx: &rquickjs::Ctx<'_>,
+    obj: &Object<'_>,
+) -> Option<TextPropertyEntry> {
     let text: String = obj.get("text").ok()?;
-    let properties: HashMap<String, serde_json::Value> = obj.get::<_, Object>("properties")
+    let properties: HashMap<String, serde_json::Value> = obj
+        .get::<_, Object>("properties")
         .ok()
         .map(|props_obj| {
             let mut map = HashMap::new();
@@ -367,7 +416,12 @@ impl QuickJsBackend {
         dir_context: DirectoryContext,
     ) -> Result<Self> {
         let pending_responses: PendingResponses = Arc::new(std::sync::Mutex::new(HashMap::new()));
-        Self::with_state_and_responses(state_snapshot, command_sender, pending_responses, dir_context)
+        Self::with_state_and_responses(
+            state_snapshot,
+            command_sender,
+            pending_responses,
+            dir_context,
+        )
     }
 
     /// Create a new QuickJS backend with editor state and shared pending responses
@@ -379,7 +433,8 @@ impl QuickJsBackend {
     ) -> Result<Self> {
         tracing::debug!("QuickJsBackend::new: creating QuickJS runtime");
 
-        let runtime = Runtime::new().map_err(|e| anyhow!("Failed to create QuickJS runtime: {}", e))?;
+        let runtime =
+            Runtime::new().map_err(|e| anyhow!("Failed to create QuickJS runtime: {}", e))?;
 
         // Set up promise rejection tracker to catch unhandled rejections
         runtime.set_host_promise_rejection_tracker(Some(Box::new(
@@ -405,7 +460,8 @@ impl QuickJsBackend {
             },
         )));
 
-        let context = Context::full(&runtime).map_err(|e| anyhow!("Failed to create QuickJS context: {}", e))?;
+        let context = Context::full(&runtime)
+            .map_err(|e| anyhow!("Failed to create QuickJS context: {}", e))?;
 
         let event_handlers = Rc::new(RefCell::new(HashMap::new()));
         let registered_actions = Rc::new(RefCell::new(HashMap::new()));
@@ -1427,12 +1483,17 @@ impl QuickJsBackend {
     }
 
     /// Load and execute a TypeScript/JavaScript plugin from a file path
-    pub async fn load_module_with_source(&mut self, path: &str, _plugin_source: &str) -> Result<()> {
+    pub async fn load_module_with_source(
+        &mut self,
+        path: &str,
+        _plugin_source: &str,
+    ) -> Result<()> {
         let path_buf = PathBuf::from(path);
         let source = std::fs::read_to_string(&path_buf)
             .map_err(|e| anyhow!("Failed to read plugin {}: {}", path, e))?;
 
-        let filename = path_buf.file_name()
+        let filename = path_buf
+            .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("plugin.ts");
 
@@ -1446,7 +1507,8 @@ impl QuickJsBackend {
                 Err(e) => {
                     tracing::warn!(
                         "Plugin {} uses ES imports but bundling failed: {}. Skipping.",
-                        path, e
+                        path,
+                        e
                     );
                     return Ok(()); // Skip plugins with unresolvable imports
                 }
@@ -1481,11 +1543,16 @@ impl QuickJsBackend {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown");
 
-        tracing::debug!("execute_js: starting for plugin '{}' from '{}'", plugin_name, source_name);
+        tracing::debug!(
+            "execute_js: starting for plugin '{}' from '{}'",
+            plugin_name,
+            source_name
+        );
 
         // Define getEditor() for this plugin - returns an editor object with plugin name in closures
         let escaped_name = plugin_name.replace('\\', "\\\\").replace('"', "\\\"");
-        let define_get_editor = format!(r#"
+        let define_get_editor = format!(
+            r#"
             globalThis.getEditor = function() {{
                 const core = globalThis._editorCore;
                 const pluginName = "{}";
@@ -1514,26 +1581,33 @@ impl QuickJsBackend {
                     getL10n() {{ return {{ t: (k, a) => this.t(k, a) }}; }},
                 }};
             }};
-        "#, escaped_name);
+        "#,
+            escaped_name
+        );
 
         // Wrap plugin code in IIFE for scope isolation
-        let wrapped = format!(
-            "(function() {{\n{}\n}})();",
-            code
-        );
+        let wrapped = format!("(function() {{\n{}\n}})();", code);
 
         self.context.with(|ctx| {
             // Define getEditor for this plugin
             ctx.eval::<(), _>(define_get_editor.as_bytes())
                 .map_err(|e| format_js_error(&ctx, e, source_name))?;
 
-            tracing::debug!("execute_js: getEditor defined, now executing plugin code for '{}'", plugin_name);
+            tracing::debug!(
+                "execute_js: getEditor defined, now executing plugin code for '{}'",
+                plugin_name
+            );
 
             // Execute the plugin code
-            let result = ctx.eval::<(), _>(wrapped.as_bytes())
+            let result = ctx
+                .eval::<(), _>(wrapped.as_bytes())
                 .map_err(|e| format_js_error(&ctx, e, source_name));
 
-            tracing::debug!("execute_js: plugin code execution finished for '{}', result: {:?}", plugin_name, result.is_ok());
+            tracing::debug!(
+                "execute_js: plugin code execution finished for '{}', result: {:?}",
+                plugin_name,
+                result.is_ok()
+            );
 
             result
         })
@@ -1541,12 +1615,14 @@ impl QuickJsBackend {
 
     /// Emit an event to all registered handlers
     pub async fn emit(&mut self, event_name: &str, event_data: &str) -> Result<bool> {
-        tracing::debug!("emit: event '{}' with {} bytes of data", event_name, event_data.len());
+        tracing::debug!(
+            "emit: event '{}' with {} bytes of data",
+            event_name,
+            event_data.len()
+        );
 
         // Track execution state for signal handler debugging
-        crate::services::signal_handler::set_js_execution_state(
-            format!("hook '{}'", event_name)
-        );
+        crate::services::signal_handler::set_js_execution_state(format!("hook '{}'", event_name));
 
         let handlers = self.event_handlers.borrow().get(event_name).cloned();
 
@@ -1619,11 +1695,16 @@ impl QuickJsBackend {
         let function_name = handler_name.unwrap_or_else(|| action_name.to_string());
 
         // Track execution state for signal handler debugging
-        crate::services::signal_handler::set_js_execution_state(
-            format!("action '{}' (fn: {})", action_name, function_name)
-        );
+        crate::services::signal_handler::set_js_execution_state(format!(
+            "action '{}' (fn: {})",
+            action_name, function_name
+        ));
 
-        tracing::info!("start_action: BEGIN '{}' -> function '{}'", action_name, function_name);
+        tracing::info!(
+            "start_action: BEGIN '{}' -> function '{}'",
+            action_name,
+            function_name
+        );
 
         // Just call the function - don't try to await or drive Promises
         let code = format!(
@@ -1674,7 +1755,11 @@ impl QuickJsBackend {
         // (defineMode bindings use global function names directly)
         let function_name = handler_name.unwrap_or_else(|| action_name.to_string());
 
-        tracing::debug!("execute_action: '{}' -> function '{}'", action_name, function_name);
+        tracing::debug!(
+            "execute_action: '{}' -> function '{}'",
+            action_name,
+            function_name
+        );
 
         // Call the function and await if it returns a Promise
         // We use a global _executeActionResult to pass the result back
@@ -1711,7 +1796,10 @@ impl QuickJsBackend {
                             if obj.get::<_, rquickjs::Function>("then").is_ok() {
                                 // Drive the runtime to process the promise
                                 // QuickJS processes promises synchronously when we call execute_pending_job
-                                run_pending_jobs_checked(&ctx, &format!("execute_action {} promise", action_name));
+                                run_pending_jobs_checked(
+                                    &ctx,
+                                    &format!("execute_action {} promise", action_name),
+                                );
                             }
                         }
                     }
@@ -1738,7 +1826,9 @@ impl QuickJsBackend {
 
     /// Send a status message to the editor
     pub fn send_status(&self, message: String) {
-        let _ = self.command_sender.send(PluginCommand::SetStatus { message });
+        let _ = self
+            .command_sender
+            .send(PluginCommand::SetStatus { message });
     }
 
     /// Resolve a pending async callback with a result (called from Rust when async op completes)
@@ -1746,8 +1836,7 @@ impl QuickJsBackend {
         tracing::debug!("resolve_callback: starting for callback_id={}", callback_id);
         let code = format!(
             "globalThis._resolveCallback({}, {});",
-            callback_id,
-            result_json
+            callback_id, result_json
         );
         self.context.with(|ctx| {
             tracing::debug!("resolve_callback: evaluating JS code: {}", code);
@@ -1755,8 +1844,13 @@ impl QuickJsBackend {
                 log_js_error(&ctx, e, &format!("resolving callback {}", callback_id));
             }
             // IMPORTANT: Run pending jobs to process Promise continuations
-            let job_count = run_pending_jobs_checked(&ctx, &format!("resolve_callback {}", callback_id));
-            tracing::info!("resolve_callback: executed {} pending jobs for callback_id={}", job_count, callback_id);
+            let job_count =
+                run_pending_jobs_checked(&ctx, &format!("resolve_callback {}", callback_id));
+            tracing::info!(
+                "resolve_callback: executed {} pending jobs for callback_id={}",
+                job_count,
+                callback_id
+            );
         });
     }
 
@@ -1780,8 +1874,8 @@ impl QuickJsBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc;
     use crate::services::plugins::api::BufferInfo;
+    use std::sync::mpsc;
 
     /// Helper to create a backend with a command receiver for testing
     fn create_test_backend() -> (QuickJsBackend, mpsc::Receiver<PluginCommand>) {
@@ -1813,7 +1907,9 @@ mod tests {
         assert!(!backend.has_handlers("test_event"));
 
         // Register a handler
-        backend.event_handlers.borrow_mut()
+        backend
+            .event_handlers
+            .borrow_mut()
             .entry("test_event".to_string())
             .or_default()
             .push("testHandler".to_string());
@@ -1828,10 +1924,15 @@ mod tests {
     fn test_api_set_status() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setStatus("Hello from test");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -1846,11 +1947,16 @@ mod tests {
     fn test_api_register_command() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.myTestHandler = function() { };
             editor.registerCommand("Test Command", "A test command", "myTestHandler", null);
-        "#, "test_plugin.js").unwrap();
+        "#,
+                "test_plugin.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -1873,17 +1979,27 @@ mod tests {
     fn test_api_define_mode() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.defineMode("test-mode", null, [
                 ["a", "action_a"],
                 ["b", "action_b"]
             ]);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::DefineMode { name, parent, bindings, read_only } => {
+            PluginCommand::DefineMode {
+                name,
+                parent,
+                bindings,
+                read_only,
+            } => {
                 assert_eq!(name, "test-mode");
                 assert!(parent.is_none());
                 assert_eq!(bindings.len(), 2);
@@ -1899,10 +2015,15 @@ mod tests {
     fn test_api_set_editor_mode() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setEditorMode("vi-normal");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -1917,10 +2038,15 @@ mod tests {
     fn test_api_clear_editor_mode() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setEditorMode(null);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -1935,10 +2061,15 @@ mod tests {
     fn test_api_insert_at_cursor() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.insertAtCursor("Hello, World!");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -1953,10 +2084,15 @@ mod tests {
     fn test_api_set_context() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setContext("myContext", true);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -1973,12 +2109,17 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // Define a sync function and register it
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.my_sync_action = function() {
                 editor.setStatus("sync action executed");
             };
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Drain any setup commands
         while rx.try_recv().is_ok() {}
@@ -2001,13 +2142,18 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // Define an async function
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.my_async_action = async function() {
                 await Promise.resolve();
                 editor.setStatus("async action executed");
             };
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Drain any setup commands
         while rx.try_recv().is_ok() {}
@@ -2032,15 +2178,20 @@ mod tests {
         // Register an action with a different handler name
         backend.registered_actions.borrow_mut().insert(
             "my_action".to_string(),
-            "actual_handler_function".to_string()
+            "actual_handler_function".to_string(),
         );
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.actual_handler_function = function() {
                 editor.setStatus("handler executed");
             };
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Drain any setup commands
         while rx.try_recv().is_ok() {}
@@ -2061,11 +2212,16 @@ mod tests {
     fn test_api_on_event_registration() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.myEventHandler = function() { };
             editor.on("bufferSave", "myEventHandler");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         assert!(backend.has_handlers("bufferSave"));
     }
@@ -2074,12 +2230,17 @@ mod tests {
     fn test_api_off_event_unregistration() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.myEventHandler = function() { };
             editor.on("bufferSave", "myEventHandler");
             editor.off("bufferSave", "myEventHandler");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Handler should be removed
         assert!(!backend.has_handlers("bufferSave"));
@@ -2089,19 +2250,27 @@ mod tests {
     async fn test_emit_event() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis.onSaveHandler = function(data) {
                 editor.setStatus("saved: " + JSON.stringify(data));
             };
             editor.on("bufferSave", "onSaveHandler");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Drain setup commands
         while rx.try_recv().is_ok() {}
 
         // Emit the event
-        backend.emit("bufferSave", r#"{"path": "/test.txt"}"#).await.unwrap();
+        backend
+            .emit("bufferSave", r#"{"path": "/test.txt"}"#)
+            .await
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2116,10 +2285,15 @@ mod tests {
     fn test_api_copy_to_clipboard() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.copyToClipboard("clipboard text");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2135,10 +2309,15 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // openFile takes (path, line?, column?)
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.openFile("/path/to/file.txt", null, null);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2156,10 +2335,15 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // deleteRange takes (buffer_id, start, end)
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.deleteRange(0, 10, 20);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2176,10 +2360,15 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // insertText takes (buffer_id, position, text)
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.insertText(0, 5, "inserted");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2196,10 +2385,15 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // setBufferCursor takes (buffer_id, position)
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setBufferCursor(0, 100);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2228,11 +2422,16 @@ mod tests {
         let mut backend = QuickJsBackend::with_state(state_snapshot, tx, dir_context).unwrap();
 
         // Execute JS that reads and stores cursor position
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             const pos = editor.getCursorPosition();
             globalThis._testResult = pos;
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Verify by reading back - getCursorPosition returns byte offset as u32
         backend.context.with(|ctx| {
@@ -2247,7 +2446,9 @@ mod tests {
         let (mut backend, _rx) = create_test_backend();
 
         // pathJoin takes an array of path parts
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._dirname = editor.pathDirname("/foo/bar/baz.txt");
             globalThis._basename = editor.pathBasename("/foo/bar/baz.txt");
@@ -2255,7 +2456,10 @@ mod tests {
             globalThis._isAbsolute = editor.pathIsAbsolute("/foo/bar");
             globalThis._isRelative = editor.pathIsAbsolute("foo/bar");
             globalThis._joined = editor.pathJoin(["/foo", "bar", "baz"]);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2303,16 +2507,26 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // Call getBufferText - this returns a Promise and sends the command
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             // Store the promise for later
             globalThis._textPromise = editor.getBufferText(0, 10, 20);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Verify the GetBufferText command was sent
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::GetBufferText { buffer_id, start, end, request_id } => {
+            PluginCommand::GetBufferText {
+                buffer_id,
+                start,
+                end,
+                request_id,
+            } => {
                 assert_eq!(buffer_id.0, 0);
                 assert_eq!(start, 10);
                 assert_eq!(end, 20);
@@ -2327,13 +2541,18 @@ mod tests {
         let (mut backend, rx) = create_test_backend();
 
         // Call getBufferText and set up a handler for when it resolves
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._resolvedText = null;
             editor.getBufferText(0, 0, 100).then(text => {
                 globalThis._resolvedText = text;
             });
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         // Get the request_id from the command
         let request_id = match rx.try_recv().unwrap() {
@@ -2362,10 +2581,15 @@ mod tests {
         let (mut backend, _rx) = create_test_backend();
 
         // The t() function should work (returns key if translation not found)
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._translated = editor.t("test.key");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2381,14 +2605,26 @@ mod tests {
     fn test_api_set_line_indicator() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setLineIndicator(1, 5, "test-ns", "●", 255, 0, 0, 10);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::SetLineIndicator { buffer_id, line, namespace, symbol, color, priority } => {
+            PluginCommand::SetLineIndicator {
+                buffer_id,
+                line,
+                namespace,
+                symbol,
+                color,
+                priority,
+            } => {
                 assert_eq!(buffer_id.0, 1);
                 assert_eq!(line, 5);
                 assert_eq!(namespace, "test-ns");
@@ -2404,14 +2640,22 @@ mod tests {
     fn test_api_clear_line_indicators() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.clearLineIndicators(1, "test-ns");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::ClearLineIndicators { buffer_id, namespace } => {
+            PluginCommand::ClearLineIndicators {
+                buffer_id,
+                namespace,
+            } => {
                 assert_eq!(buffer_id.0, 1);
                 assert_eq!(namespace, "test-ns");
             }
@@ -2425,7 +2669,9 @@ mod tests {
     fn test_api_create_virtual_buffer_sends_command() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.createVirtualBuffer({
                 name: "*Test Buffer*",
@@ -2439,11 +2685,23 @@ mod tests {
                 showCursors: true,
                 editingDisabled: true
             });
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::CreateVirtualBufferWithContent { name, mode, read_only, entries, show_line_numbers, show_cursors, editing_disabled, .. } => {
+            PluginCommand::CreateVirtualBufferWithContent {
+                name,
+                mode,
+                read_only,
+                entries,
+                show_line_numbers,
+                show_cursors,
+                editing_disabled,
+                ..
+            } => {
                 assert_eq!(name, "*Test Buffer*");
                 assert_eq!(mode, "test-mode");
                 assert!(read_only);
@@ -2461,12 +2719,17 @@ mod tests {
     fn test_api_set_virtual_buffer_content() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setVirtualBufferContent(5, [
                 { text: "New content\n", properties: { type: "updated" } }
             ]);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2492,7 +2755,17 @@ mod tests {
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::AddOverlay { buffer_id, namespace, range, color, bg_color, underline, bold, italic, extend_to_line_end } => {
+            PluginCommand::AddOverlay {
+                buffer_id,
+                namespace,
+                range,
+                color,
+                bg_color,
+                underline,
+                bold,
+                italic,
+                extend_to_line_end,
+            } => {
                 assert_eq!(buffer_id.0, 1);
                 assert!(namespace.is_some());
                 assert_eq!(namespace.unwrap().as_str(), "highlight");
@@ -2512,14 +2785,22 @@ mod tests {
     fn test_api_clear_namespace() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.clearNamespace(1, "highlight");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::ClearNamespace { buffer_id, namespace } => {
+            PluginCommand::ClearNamespace {
+                buffer_id,
+                namespace,
+            } => {
                 assert_eq!(buffer_id.0, 1);
                 assert_eq!(namespace.as_str(), "highlight");
             }
@@ -2533,10 +2814,15 @@ mod tests {
     fn test_api_get_theme_schema() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._schema = editor.getThemeSchema();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2551,10 +2837,15 @@ mod tests {
     fn test_api_get_builtin_themes() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._themes = editor.getBuiltinThemes();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2569,10 +2860,15 @@ mod tests {
     fn test_api_apply_theme() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.applyTheme("dark");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2589,10 +2885,15 @@ mod tests {
     fn test_api_close_buffer() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.closeBuffer(3);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2607,10 +2908,15 @@ mod tests {
     fn test_api_focus_split() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.focusSplit(2);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2629,29 +2935,40 @@ mod tests {
         // Add some buffers to state
         {
             let mut state = state_snapshot.write().unwrap();
-            state.buffers.insert(BufferId(0), BufferInfo {
-                id: BufferId(0),
-                path: Some(PathBuf::from("/test1.txt")),
-                modified: false,
-                length: 100,
-            });
-            state.buffers.insert(BufferId(1), BufferInfo {
-                id: BufferId(1),
-                path: Some(PathBuf::from("/test2.txt")),
-                modified: true,
-                length: 200,
-            });
+            state.buffers.insert(
+                BufferId(0),
+                BufferInfo {
+                    id: BufferId(0),
+                    path: Some(PathBuf::from("/test1.txt")),
+                    modified: false,
+                    length: 100,
+                },
+            );
+            state.buffers.insert(
+                BufferId(1),
+                BufferInfo {
+                    id: BufferId(1),
+                    path: Some(PathBuf::from("/test2.txt")),
+                    modified: true,
+                    length: 200,
+                },
+            );
         }
 
         let dir_context = DirectoryContext::for_testing(Path::new("/tmp"));
         let mut backend = QuickJsBackend::with_state(state_snapshot, tx, dir_context).unwrap();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             const buffers = editor.listBuffers();
             globalThis._isArray = Array.isArray(buffers);
             globalThis._length = buffers.length;
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2668,10 +2985,15 @@ mod tests {
     fn test_api_start_prompt() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.startPrompt("Enter value:", "test-prompt");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2687,14 +3009,23 @@ mod tests {
     fn test_api_start_prompt_with_initial() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.startPromptWithInitial("Enter value:", "test-prompt", "default");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
-            PluginCommand::StartPromptWithInitial { label, prompt_type, initial_value } => {
+            PluginCommand::StartPromptWithInitial {
+                label,
+                prompt_type,
+                initial_value,
+            } => {
                 assert_eq!(label, "Enter value:");
                 assert_eq!(prompt_type, "test-prompt");
                 assert_eq!(initial_value, "default");
@@ -2707,13 +3038,18 @@ mod tests {
     fn test_api_set_prompt_suggestions() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.setPromptSuggestions([
                 { text: "Option 1", value: "opt1" },
                 { text: "Option 2", value: "opt2" }
             ]);
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2741,10 +3077,15 @@ mod tests {
         let dir_context = DirectoryContext::for_testing(Path::new("/tmp"));
         let mut backend = QuickJsBackend::with_state(state_snapshot, tx, dir_context).unwrap();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._activeId = editor.getActiveBufferId();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2766,10 +3107,15 @@ mod tests {
         let dir_context = DirectoryContext::for_testing(Path::new("/tmp"));
         let mut backend = QuickJsBackend::with_state(state_snapshot, tx, dir_context).unwrap();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._splitId = editor.getActiveSplitId();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2784,11 +3130,16 @@ mod tests {
     fn test_api_file_exists() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             // Test with a path that definitely exists
             globalThis._exists = editor.fileExists("/");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2801,10 +3152,15 @@ mod tests {
     fn test_api_get_cwd() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._cwd = editor.getCwd();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2821,10 +3177,15 @@ mod tests {
         // Set a test environment variable
         std::env::set_var("TEST_PLUGIN_VAR", "test_value");
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._envVal = editor.getEnv("TEST_PLUGIN_VAR");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2839,10 +3200,15 @@ mod tests {
     fn test_api_get_config() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._config = editor.getConfig();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2857,10 +3223,15 @@ mod tests {
     fn test_api_get_themes_dir() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             globalThis._themesDir = editor.getThemesDir();
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2876,12 +3247,17 @@ mod tests {
     fn test_api_read_dir() {
         let (mut backend, _rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             const entries = editor.readDir("/tmp");
             globalThis._isArray = Array.isArray(entries);
             globalThis._length = entries.length;
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         backend.context.with(|ctx| {
             let global = ctx.globals();
@@ -2900,10 +3276,15 @@ mod tests {
     fn test_api_execute_action() {
         let (mut backend, rx) = create_test_backend();
 
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.executeAction("move_cursor_up");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
 
         let cmd = rx.try_recv().unwrap();
         match cmd {
@@ -2921,11 +3302,16 @@ mod tests {
         let (mut backend, _rx) = create_test_backend();
 
         // debug() should not panic and should work with any input
-        backend.execute_js(r#"
+        backend
+            .execute_js(
+                r#"
             const editor = getEditor();
             editor.debug("Test debug message");
             editor.debug("Another message with special chars: <>&\"'");
-        "#, "test.js").unwrap();
+        "#,
+                "test.js",
+            )
+            .unwrap();
         // If we get here without panic, the test passes
     }
 }

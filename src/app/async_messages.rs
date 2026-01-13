@@ -786,7 +786,8 @@ impl Editor {
         tracing::debug!("Received plugin LSP response (request_id={})", request_id);
         match result {
             Ok(value) => {
-                self.plugin_manager.resolve_callback(request_id, value.to_string());
+                self.plugin_manager
+                    .resolve_callback(request_id, value.to_string());
             }
             Err(err) => {
                 self.plugin_manager.reject_callback(request_id, err);
@@ -962,7 +963,8 @@ impl Editor {
             "stderr": stderr,
             "exitCode": exit_code
         });
-        self.plugin_manager.resolve_callback(process_id, result.to_string());
+        self.plugin_manager
+            .resolve_callback(process_id, result.to_string());
     }
 
     /// Process TypeScript plugin commands

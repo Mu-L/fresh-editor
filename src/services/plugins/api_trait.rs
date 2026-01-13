@@ -57,7 +57,7 @@ pub use super::api::{BufferInfo, CursorInfo, ViewportInfo};
 // The Plugin API Trait
 // ============================================================================
 
-use fresh_plugin_api_macros::{plugin_api, api};
+use fresh_plugin_api_macros::{api, plugin_api};
 
 /// The Editor API trait - all methods available to TypeScript plugins
 ///
@@ -274,8 +274,18 @@ pub trait EditorApi {
     // ========================================================================
 
     /// Add virtual text at a position
-    fn add_virtual_text(&self, buffer_id: u32, virtual_text_id: String, position: u32,
-                        text: String, r: u8, g: u8, b: u8, before: bool, use_bg: bool) -> bool;
+    fn add_virtual_text(
+        &self,
+        buffer_id: u32,
+        virtual_text_id: String,
+        position: u32,
+        text: String,
+        r: u8,
+        g: u8,
+        b: u8,
+        before: bool,
+        use_bg: bool,
+    ) -> bool;
 
     /// Remove virtual text by ID
     fn remove_virtual_text(&self, buffer_id: u32, virtual_text_id: String) -> bool;
@@ -294,9 +304,21 @@ pub trait EditorApi {
     // ========================================================================
 
     /// Add a virtual line
-    fn add_virtual_line(&self, buffer_id: u32, position: u32, text: String,
-                        fg_r: u8, fg_g: u8, fg_b: u8, bg_r: i32, bg_g: i32, bg_b: i32,
-                        above: bool, namespace: String, priority: i32) -> bool;
+    fn add_virtual_line(
+        &self,
+        buffer_id: u32,
+        position: u32,
+        text: String,
+        fg_r: u8,
+        fg_g: u8,
+        fg_b: u8,
+        bg_r: i32,
+        bg_g: i32,
+        bg_b: i32,
+        above: bool,
+        namespace: String,
+        priority: i32,
+    ) -> bool;
 
     // ========================================================================
     // Line Indicators
@@ -307,8 +329,17 @@ pub trait EditorApi {
     fn set_line_indicator_internal(&self, json: String) -> bool;
 
     /// Set a line indicator in the gutter
-    fn set_line_indicator(&self, buffer_id: u32, line: u32, namespace: String,
-                          symbol: String, r: u8, g: u8, b: u8, priority: i32) -> bool;
+    fn set_line_indicator(
+        &self,
+        buffer_id: u32,
+        line: u32,
+        namespace: String,
+        symbol: String,
+        r: u8,
+        g: u8,
+        b: u8,
+        priority: i32,
+    ) -> bool;
 
     /// Clear line indicators in a namespace
     fn clear_line_indicators(&self, buffer_id: u32, namespace: String) -> bool;
@@ -341,7 +372,12 @@ pub trait EditorApi {
     fn start_prompt(&self, label: String, prompt_type: String) -> bool;
 
     /// Start a prompt with initial value
-    fn start_prompt_with_initial(&self, label: String, prompt_type: String, initial_value: String) -> bool;
+    fn start_prompt_with_initial(
+        &self,
+        label: String,
+        prompt_type: String,
+        initial_value: String,
+    ) -> bool;
 
     /// Set suggestions for the current prompt (takes JSON)
     fn set_prompt_suggestions(&self, suggestions_json: String) -> bool;
@@ -352,9 +388,14 @@ pub trait EditorApi {
 
     /// Register a custom command (internal)
     #[api(js_name = "_registerCommandInternal")]
-    fn register_command_internal(&self, plugin_name: String, name: String,
-                                  description: String, handler_name: String,
-                                  context: Option<String>) -> bool;
+    fn register_command_internal(
+        &self,
+        plugin_name: String,
+        name: String,
+        description: String,
+        handler_name: String,
+        context: Option<String>,
+    ) -> bool;
 
     /// Unregister a command
     fn unregister_command(&self, name: String) -> bool;
@@ -479,9 +520,15 @@ pub trait EditorApi {
     // ========================================================================
 
     /// Submit a view transform (takes JSON)
-    fn submit_view_transform(&self, buffer_id: u32, split_id: Option<u32>,
-                             start: u32, end: u32, tokens_json: String,
-                             layout_hints_json: Option<String>) -> bool;
+    fn submit_view_transform(
+        &self,
+        buffer_id: u32,
+        split_id: Option<u32>,
+        start: u32,
+        end: u32,
+        tokens_json: String,
+        layout_hints_json: Option<String>,
+    ) -> bool;
 
     /// Clear view transform
     fn clear_view_transform(&self, buffer_id: u32, split_id: Option<u32>) -> bool;
@@ -494,7 +541,13 @@ pub trait EditorApi {
     fn delay(&self, callback_id: u64, duration_ms: u64) -> Promise<()>;
 
     /// Get text from a buffer range
-    fn get_buffer_text(&self, callback_id: u64, buffer_id: u32, start: u32, end: u32) -> Promise<String>;
+    fn get_buffer_text(
+        &self,
+        callback_id: u64,
+        buffer_id: u32,
+        start: u32,
+        end: u32,
+    ) -> Promise<String>;
 
     /// Read file contents (async)
     fn read_file(&self, callback_id: u64, path: String) -> Promise<String>;
@@ -506,10 +559,22 @@ pub trait EditorApi {
     fn delete_theme(&self, callback_id: u64, name: String) -> Promise<()>;
 
     /// Send an LSP request
-    fn send_lsp_request(&self, callback_id: u64, language: String, method: String, params_json: Option<String>) -> Promise<String>;
+    fn send_lsp_request(
+        &self,
+        callback_id: u64,
+        language: String,
+        method: String,
+        params_json: Option<String>,
+    ) -> Promise<String>;
 
     /// Get syntax highlights for a range
-    fn get_highlights(&self, callback_id: u64, buffer_id: u32, start: u32, end: u32) -> Promise<String>;
+    fn get_highlights(
+        &self,
+        callback_id: u64,
+        buffer_id: u32,
+        start: u32,
+        end: u32,
+    ) -> Promise<String>;
 
     /// Kill a background process
     fn kill_process(&self, callback_id: u64, process_id: u64) -> Promise<bool>;
@@ -525,10 +590,18 @@ pub trait EditorApi {
     fn create_virtual_buffer(&self, callback_id: u64, options_json: String) -> Promise<u32>;
 
     /// Create a virtual buffer in a new split (takes JSON options)
-    fn create_virtual_buffer_in_split(&self, callback_id: u64, options_json: String) -> Promise<String>;
+    fn create_virtual_buffer_in_split(
+        &self,
+        callback_id: u64,
+        options_json: String,
+    ) -> Promise<String>;
 
     /// Create a virtual buffer in an existing split (takes JSON options)
-    fn create_virtual_buffer_in_existing_split(&self, callback_id: u64, options_json: String) -> Promise<u32>;
+    fn create_virtual_buffer_in_existing_split(
+        &self,
+        callback_id: u64,
+        options_json: String,
+    ) -> Promise<u32>;
 
     /// Set virtual buffer content (takes JSON entries)
     fn set_virtual_buffer_content(&self, buffer_id: u32, entries_json: String) -> bool;
@@ -551,10 +624,22 @@ pub trait EditorApi {
     // ========================================================================
 
     /// Spawn a process (cancellable)
-    fn spawn_process(&self, callback_id: u64, command: String, args: Vec<String>, cwd: Option<String>) -> Thenable<String>;
+    fn spawn_process(
+        &self,
+        callback_id: u64,
+        command: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+    ) -> Thenable<String>;
 
     /// Spawn a background process (cancellable)
-    fn spawn_background_process(&self, callback_id: u64, command: String, args: Vec<String>, cwd: Option<String>) -> Thenable<String>;
+    fn spawn_background_process(
+        &self,
+        callback_id: u64,
+        command: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+    ) -> Thenable<String>;
 }
 
 // ============================================================================
@@ -571,7 +656,10 @@ mod tests {
         // Just verify the constant exists and has content
         assert!(!EDITORAPI_TYPESCRIPT_DEFINITIONS.is_empty());
         assert!(EDITORAPI_TYPESCRIPT_DEFINITIONS.contains("interface EditorAPI"));
-        println!("Generated {} bytes of TypeScript definitions", EDITORAPI_TYPESCRIPT_DEFINITIONS.len());
+        println!(
+            "Generated {} bytes of TypeScript definitions",
+            EDITORAPI_TYPESCRIPT_DEFINITIONS.len()
+        );
     }
 
     /// Test that JS method names list is generated
@@ -589,8 +677,7 @@ mod tests {
     #[ignore]
     fn write_dts_file() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/plugins/lib/fresh.d.ts");
-        std::fs::write(path, EDITORAPI_TYPESCRIPT_DEFINITIONS)
-            .expect("Failed to write fresh.d.ts");
+        std::fs::write(path, EDITORAPI_TYPESCRIPT_DEFINITIONS).expect("Failed to write fresh.d.ts");
         println!("Wrote TypeScript definitions to {}", path);
     }
 
@@ -627,8 +714,8 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/src/services/plugins/backend/quickjs_backend.rs"
         );
-        let backend_source = std::fs::read_to_string(backend_path)
-            .expect("Failed to read quickjs_backend.rs");
+        let backend_source =
+            std::fs::read_to_string(backend_path).expect("Failed to read quickjs_backend.rs");
 
         // Known method name mappings (trait JS name -> backend name or pattern)
         // TODO: Standardize these names to match the trait definitions
@@ -636,7 +723,10 @@ mod tests {
             // Methods with JSON suffix in backend
             ("listBuffers", "_listBuffersJson"),
             ("readDir", "_readDirJson"),
-            ("getTextPropertiesAtCursor", "_getTextPropertiesAtCursorJson"),
+            (
+                "getTextPropertiesAtCursor",
+                "_getTextPropertiesAtCursorJson",
+            ),
             // Methods with different naming
             ("deleteThemeSync", "_deleteThemeSync"),
             // Sync readFile/writeFile have different names
@@ -648,12 +738,12 @@ mod tests {
 
         // Methods that are implemented as JS wrappers only (not direct bindings)
         let js_wrapper_methods: std::collections::HashSet<&str> = [
-            "listBuffers",        // Wraps _listBuffersJson with JSON.parse
-            "readDir",            // Wraps _readDirJson with JSON.parse
+            "listBuffers",               // Wraps _listBuffersJson with JSON.parse
+            "readDir",                   // Wraps _readDirJson with JSON.parse
             "getTextPropertiesAtCursor", // Wraps _getTextPropertiesAtCursorJson
-            "deleteTheme",        // Wraps _deleteThemeSync in Promise
-            "addOverlay",         // Wraps _addOverlayInternal
-            "setLineIndicator",   // Wraps _setLineIndicatorInternal
+            "deleteTheme",               // Wraps _deleteThemeSync in Promise
+            "addOverlay",                // Wraps _addOverlayInternal
+            "setLineIndicator",          // Wraps _setLineIndicatorInternal
         ]
         .into_iter()
         .collect();
@@ -741,9 +831,13 @@ mod tests {
                 println!("  - {}", method);
             }
             println!("\n=== MAINTENANCE NOTE ===");
-            println!("If a method is intentionally not implemented, add it to 'not_implemented' set.");
+            println!(
+                "If a method is intentionally not implemented, add it to 'not_implemented' set."
+            );
             println!("If a method has a different name in backend, add it to 'name_mappings'.");
-            println!("If a method is implemented via JS wrapper, add it to 'js_wrapper_methods'.\n");
+            println!(
+                "If a method is implemented via JS wrapper, add it to 'js_wrapper_methods'.\n"
+            );
         }
 
         // This assertion will fail if there are missing methods

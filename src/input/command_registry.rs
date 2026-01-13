@@ -111,12 +111,16 @@ impl CommandRegistry {
         let plugin_count = plugin_commands.len();
 
         // Debug: check if vi_mode_toggle is in plugin commands
-        let target_action = crate::input::keybindings::Action::PluginAction("vi_mode_toggle".to_string());
+        let target_action =
+            crate::input::keybindings::Action::PluginAction("vi_mode_toggle".to_string());
         let has_target = plugin_commands.iter().any(|c| c.action == target_action);
         if has_target {
             tracing::debug!("get_all: vi_mode_toggle found via comparison!");
         } else if plugin_count > 0 {
-            tracing::debug!("get_all: {} plugin commands but vi_mode_toggle NOT found", plugin_count);
+            tracing::debug!(
+                "get_all: {} plugin commands but vi_mode_toggle NOT found",
+                plugin_count
+            );
         }
 
         all_commands.extend(plugin_commands.iter().cloned());

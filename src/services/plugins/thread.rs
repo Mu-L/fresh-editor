@@ -12,8 +12,8 @@
 use crate::config::PluginConfig;
 use crate::input::command_registry::CommandRegistry;
 use crate::services::plugins::api::{EditorStateSnapshot, PluginCommand};
-use crate::services::plugins::backend::{QuickJsBackend};
-use crate::services::plugins::backend::quickjs_backend::{TsPluginInfo, PendingResponses};
+use crate::services::plugins::backend::quickjs_backend::{PendingResponses, TsPluginInfo};
+use crate::services::plugins::backend::QuickJsBackend;
 use crate::services::plugins::hooks::{hook_args_to_json, HookArgs};
 use anyhow::{anyhow, Result};
 use std::cell::RefCell;
@@ -40,10 +40,7 @@ pub enum PluginRequest {
     },
 
     /// Reject an async callback with an error
-    RejectCallback {
-        callback_id: u64,
-        error: String,
-    },
+    RejectCallback { callback_id: u64, error: String },
 
     /// Load all plugins from a directory
     LoadPluginsFromDir {
@@ -505,10 +502,7 @@ impl PluginThreadHandle {
     /// Called by the app when async operations fail
     pub fn reject_callback(&self, callback_id: u64, error: String) {
         if let Some(sender) = self.request_sender.as_ref() {
-            let _ = sender.send(PluginRequest::RejectCallback {
-                callback_id,
-                error,
-            });
+            let _ = sender.send(PluginRequest::RejectCallback { callback_id, error });
         }
     }
 }
@@ -814,11 +808,23 @@ async fn handle_request(
             let _ = response.send(plugin_list);
         }
 
-        PluginRequest::ResolveCallback { callback_id, result_json } => {
-            tracing::info!("ResolveCallback: resolving callback_id={} with result_json={}", callback_id, result_json);
-            runtime.borrow_mut().resolve_callback(callback_id, &result_json);
+        PluginRequest::ResolveCallback {
+            callback_id,
+            result_json,
+        } => {
+            tracing::info!(
+                "ResolveCallback: resolving callback_id={} with result_json={}",
+                callback_id,
+                result_json
+            );
+            runtime
+                .borrow_mut()
+                .resolve_callback(callback_id, &result_json);
             // resolve_callback now runs execute_pending_job() internally
-            tracing::info!("ResolveCallback: done resolving callback_id={}", callback_id);
+            tracing::info!(
+                "ResolveCallback: done resolving callback_id={}",
+                callback_id
+            );
         }
 
         PluginRequest::RejectCallback { callback_id, error } => {

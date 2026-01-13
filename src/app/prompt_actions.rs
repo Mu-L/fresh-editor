@@ -200,7 +200,10 @@ impl Editor {
                         selected_index,
                     },
                 );
-                tracing::info!("prompt_confirmed: hook dispatched for prompt_type='{}'", custom_type);
+                tracing::info!(
+                    "prompt_confirmed: hook dispatched for prompt_type='{}'",
+                    custom_type
+                );
             }
             PromptType::ConfirmRevert => {
                 let input_lower = input.trim().to_lowercase();

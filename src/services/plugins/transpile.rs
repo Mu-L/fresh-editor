@@ -41,15 +41,15 @@ pub fn transpile_typescript(source: &str, filename: &str) -> Result<String> {
 
     // Transform (strip TypeScript types)
     let transform_options = TransformOptions::default();
-    let transformer_ret = Transformer::new(
-        &allocator,
-        Path::new(filename),
-        &transform_options,
-    )
-    .build_with_scoping(scoping, &mut program);
+    let transformer_ret = Transformer::new(&allocator, Path::new(filename), &transform_options)
+        .build_with_scoping(scoping, &mut program);
 
     if !transformer_ret.errors.is_empty() {
-        let errors: Vec<String> = transformer_ret.errors.iter().map(|e| e.to_string()).collect();
+        let errors: Vec<String> = transformer_ret
+            .errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect();
         return Err(anyhow!("Transform errors: {}", errors.join("; ")));
     }
 
@@ -130,7 +130,8 @@ struct ReexportBinding {
 pub fn bundle_module(entry_path: &Path) -> Result<String> {
     let mut modules: Vec<ModuleMetadata> = Vec::new();
     let mut visited = HashSet::new();
-    let mut path_to_var: std::collections::HashMap<PathBuf, String> = std::collections::HashMap::new();
+    let mut path_to_var: std::collections::HashMap<PathBuf, String> =
+        std::collections::HashMap::new();
 
     // First pass: collect all modules in dependency order
     collect_modules(entry_path, &mut visited, &mut modules, &mut path_to_var)?;
@@ -242,22 +243,32 @@ fn generate_scoped_module(
 
     // Generate import destructuring from dependencies
     for import in &module.imports {
-        if let Some(dep_var) = resolve_import_to_var(&import.source_path, &module.path, path_to_var) {
+        if let Some(dep_var) = resolve_import_to_var(&import.source_path, &module.path, path_to_var)
+        {
             if import.is_namespace {
                 // import * as X from "./y"
                 code.push_str(&format!("const {} = {};\n", import.local_name, dep_var));
             } else if let Some(ref imported_name) = import.imported_name {
                 // import { X } from "./y" or import { X as Y } from "./y"
                 if imported_name == "default" {
-                    code.push_str(&format!("const {} = {}.default;\n", import.local_name, dep_var));
+                    code.push_str(&format!(
+                        "const {} = {}.default;\n",
+                        import.local_name, dep_var
+                    ));
                 } else if &import.local_name == imported_name {
                     code.push_str(&format!("const {{{}}} = {};\n", import.local_name, dep_var));
                 } else {
-                    code.push_str(&format!("const {{{}: {}}} = {};\n", imported_name, import.local_name, dep_var));
+                    code.push_str(&format!(
+                        "const {{{}: {}}} = {};\n",
+                        imported_name, import.local_name, dep_var
+                    ));
                 }
             } else {
                 // import X from "./y" (default import)
-                code.push_str(&format!("const {} = {}.default;\n", import.local_name, dep_var));
+                code.push_str(&format!(
+                    "const {} = {}.default;\n",
+                    import.local_name, dep_var
+                ));
             }
         }
     }
@@ -283,7 +294,9 @@ fn generate_scoped_module(
 
         // Re-exports
         for reexport in &module.reexports {
-            if let Some(dep_var) = resolve_import_to_var(&reexport.source_path, &module.path, path_to_var) {
+            if let Some(dep_var) =
+                resolve_import_to_var(&reexport.source_path, &module.path, path_to_var)
+            {
                 match (&reexport.exported_name, &reexport.source_name) {
                     (Some(exported), Some(source)) => {
                         // export { X as Y } from "./z"
@@ -332,9 +345,13 @@ fn resolve_import_to_var(
 }
 
 /// Extract import/export bindings from source using AST
-fn extract_module_bindings(source: &str) -> (Vec<ImportBinding>, Vec<ExportBinding>, Vec<ReexportBinding>) {
+fn extract_module_bindings(
+    source: &str,
+) -> (Vec<ImportBinding>, Vec<ExportBinding>, Vec<ReexportBinding>) {
     let allocator = Allocator::default();
-    let source_type = SourceType::default().with_module(true).with_typescript(true);
+    let source_type = SourceType::default()
+        .with_module(true)
+        .with_typescript(true);
 
     let parser_ret = Parser::new(&allocator, source, source_type).parse();
     if !parser_ret.errors.is_empty() {
@@ -370,7 +387,9 @@ fn extract_module_bindings(source: &str) -> (Vec<ImportBinding>, Vec<ExportBindi
                                     is_namespace: false,
                                 });
                             }
-                            oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                            oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                                s,
+                            ) => {
                                 imports.push(ImportBinding {
                                     local_name: s.local.name.to_string(),
                                     imported_name: None,
@@ -463,18 +482,20 @@ fn extract_module_bindings(source: &str) -> (Vec<ImportBinding>, Vec<ExportBindi
 /// Get declared names from a declaration
 fn get_declaration_names(decl: &Declaration<'_>) -> Vec<String> {
     match decl {
-        Declaration::VariableDeclaration(var_decl) => {
-            var_decl.declarations.iter()
-                .filter_map(|d| {
-                    d.id.get_binding_identifier().map(|id| id.name.to_string())
-                })
-                .collect()
-        }
+        Declaration::VariableDeclaration(var_decl) => var_decl
+            .declarations
+            .iter()
+            .filter_map(|d| d.id.get_binding_identifier().map(|id| id.name.to_string()))
+            .collect(),
         Declaration::FunctionDeclaration(f) => {
-            f.id.as_ref().map(|id| vec![id.name.to_string()]).unwrap_or_default()
+            f.id.as_ref()
+                .map(|id| vec![id.name.to_string()])
+                .unwrap_or_default()
         }
         Declaration::ClassDeclaration(c) => {
-            c.id.as_ref().map(|id| vec![id.name.to_string()]).unwrap_or_default()
+            c.id.as_ref()
+                .map(|id| vec![id.name.to_string()])
+                .unwrap_or_default()
         }
         Declaration::TSEnumDeclaration(e) => {
             vec![e.id.name.to_string()]
@@ -513,7 +534,11 @@ fn resolve_import(import_path: &str, parent_dir: &Path) -> Result<PathBuf> {
         return Ok(index_js);
     }
 
-    Err(anyhow!("Cannot resolve import '{}' from {}", import_path, parent_dir.display()))
+    Err(anyhow!(
+        "Cannot resolve import '{}' from {}",
+        import_path,
+        parent_dir.display()
+    ))
 }
 
 /// Strip import statements and export keywords from source using AST transformation
@@ -521,7 +546,9 @@ fn resolve_import(import_path: &str, parent_dir: &Path) -> Result<PathBuf> {
 pub fn strip_imports_and_exports(source: &str) -> String {
     let allocator = Allocator::default();
     // Parse as module with TypeScript to accept import/export and TS syntax
-    let source_type = SourceType::default().with_module(true).with_typescript(true);
+    let source_type = SourceType::default()
+        .with_module(true)
+        .with_typescript(true);
 
     let parser_ret = Parser::new(&allocator, source, source_type).parse();
     if !parser_ret.errors.is_empty() {
@@ -543,14 +570,12 @@ pub fn strip_imports_and_exports(source: &str) -> String {
 /// - Removes ImportDeclaration statements
 /// - Converts ExportNamedDeclaration to its inner declaration
 /// - Handles ExportDefaultDeclaration, ExportAllDeclaration
-fn strip_module_syntax_ast<'a>(
-    allocator: &'a Allocator,
-    program: &mut oxc_ast::ast::Program<'a>,
-) {
+fn strip_module_syntax_ast<'a>(allocator: &'a Allocator, program: &mut oxc_ast::ast::Program<'a>) {
     use oxc_allocator::Vec as OxcVec;
 
     // Collect transformed statements
-    let mut new_body: OxcVec<'a, Statement<'a>> = OxcVec::with_capacity_in(program.body.len(), allocator);
+    let mut new_body: OxcVec<'a, Statement<'a>> =
+        OxcVec::with_capacity_in(program.body.len(), allocator);
 
     for stmt in program.body.drain(..) {
         match stmt {
@@ -693,8 +718,12 @@ mod tests {
 
         // Check imports
         assert_eq!(imports.len(), 3);
-        assert!(imports.iter().any(|i| i.source_path == "./lib/utils" && i.local_name == "foo"));
-        assert!(imports.iter().any(|i| i.source_path == "../shared/bar" && i.local_name == "bar"));
+        assert!(imports
+            .iter()
+            .any(|i| i.source_path == "./lib/utils" && i.local_name == "foo"));
+        assert!(imports
+            .iter()
+            .any(|i| i.source_path == "../shared/bar" && i.local_name == "bar"));
         assert!(imports.iter().any(|i| i.source_path == "external-package"));
 
         // Check direct exports
@@ -703,8 +732,13 @@ mod tests {
 
         // Check re-exports
         assert_eq!(reexports.len(), 2);
-        assert!(reexports.iter().any(|r| r.source_path == "./panel-manager.ts"));
-        assert!(reexports.iter().any(|r| r.source_path == "./types.ts" && r.exported_name.is_none())); // export *
+        assert!(reexports
+            .iter()
+            .any(|r| r.source_path == "./panel-manager.ts"));
+        assert!(reexports
+            .iter()
+            .any(|r| r.source_path == "./types.ts" && r.exported_name.is_none()));
+        // export *
     }
 
     #[test]

@@ -177,16 +177,10 @@ pub enum AsyncMessage {
     },
 
     /// Background process stdout data
-    PluginProcessStdout {
-        process_id: u64,
-        data: String,
-    },
+    PluginProcessStdout { process_id: u64, data: String },
 
     /// Background process stderr data
-    PluginProcessStderr {
-        process_id: u64,
-        data: String,
-    },
+    PluginProcessStderr { process_id: u64, data: String },
 
     /// Background process exited
     PluginBackgroundProcessExit {
