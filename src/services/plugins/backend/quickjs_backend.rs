@@ -1220,7 +1220,7 @@ impl JsEditorApi {
         bg_r: i32,
         bg_g: i32,
         bg_b: i32,
-        extend_to_line_end: bool,
+        extend_to_line_end: rquickjs::function::Opt<bool>,
     ) -> bool {
         // -1 means use default color (white)
         let color = if r >= 0 && g >= 0 && b >= 0 {
@@ -1246,7 +1246,7 @@ impl JsEditorApi {
                 underline,
                 bold,
                 italic,
-                extend_to_line_end,
+                extend_to_line_end: extend_to_line_end.0.unwrap_or(false),
             })
             .is_ok()
     }
@@ -2050,7 +2050,7 @@ impl JsEditorApi {
         &self,
         command: String,
         args: Vec<String>,
-        cwd: Option<String>,
+        cwd: rquickjs::function::Opt<String>,
     ) -> u64 {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
@@ -2062,7 +2062,7 @@ impl JsEditorApi {
             callback_id: id,
             command,
             args,
-            cwd,
+            cwd: cwd.0,
         });
         id
     }
@@ -2157,7 +2157,7 @@ impl JsEditorApi {
         &self,
         command: String,
         args: Vec<String>,
-        cwd: Option<String>,
+        cwd: rquickjs::function::Opt<String>,
     ) -> u64 {
         let callback_id = {
             let mut id_ref = self.next_request_id.borrow_mut();
@@ -2171,7 +2171,7 @@ impl JsEditorApi {
             process_id,
             command,
             args,
-            cwd,
+            cwd: cwd.0,
             callback_id,
         });
         callback_id
@@ -2380,18 +2380,22 @@ impl QuickJsBackend {
 
                 // Generic async wrapper decorator
                 // Wraps a function that returns a callbackId into a promise-returning function
-                // Usage: editor.foo = _wrapAsync(editor._fooStart, "foo");
-                globalThis._wrapAsync = function(startFn, fnName) {
+                // Usage: editor.foo = _wrapAsync("_fooStart", "foo");
+                // NOTE: We pass the method name as a string and call via bracket notation
+                // to preserve rquickjs's automatic Ctx injection for methods
+                globalThis._wrapAsync = function(methodName, fnName) {
+                    const startFn = editor[methodName];
                     if (typeof startFn !== 'function') {
                         // Return a function that always throws - catches missing implementations
                         return function(...args) {
-                            const error = new Error(`editor.${fnName || 'unknown'} is not implemented (missing _${fnName}Start)`);
+                            const error = new Error(`editor.${fnName || 'unknown'} is not implemented (missing ${methodName})`);
                             editor.debug(`[ASYNC ERROR] ${error.message}`);
                             throw error;
                         };
                     }
                     return function(...args) {
-                        const callbackId = startFn.apply(this, args);
+                        // Call via bracket notation to preserve method binding and Ctx injection
+                        const callbackId = editor[methodName](...args);
                         return new Promise((resolve, reject) => {
                             // NOTE: setTimeout not available in QuickJS - timeout disabled for now
                             // TODO: Implement setTimeout polyfill using editor.delay() or similar
@@ -2402,17 +2406,19 @@ impl QuickJsBackend {
 
                 // Async wrapper that returns a thenable object (for APIs like spawnProcess)
                 // The returned object has .result promise and is itself thenable
-                globalThis._wrapAsyncThenable = function(startFn, fnName) {
+                globalThis._wrapAsyncThenable = function(methodName, fnName) {
+                    const startFn = editor[methodName];
                     if (typeof startFn !== 'function') {
                         // Return a function that always throws - catches missing implementations
                         return function(...args) {
-                            const error = new Error(`editor.${fnName || 'unknown'} is not implemented (missing _${fnName}Start)`);
+                            const error = new Error(`editor.${fnName || 'unknown'} is not implemented (missing ${methodName})`);
                             editor.debug(`[ASYNC ERROR] ${error.message}`);
                             throw error;
                         };
                     }
                     return function(...args) {
-                        const callbackId = startFn.apply(this, args);
+                        // Call via bracket notation to preserve method binding and Ctx injection
+                        const callbackId = editor[methodName](...args);
                         const resultPromise = new Promise((resolve, reject) => {
                             // NOTE: setTimeout not available in QuickJS - timeout disabled for now
                             globalThis._pendingCallbacks.set(callbackId, { resolve, reject });
@@ -2430,15 +2436,17 @@ impl QuickJsBackend {
                 };
 
                 // Apply wrappers to async functions on editor
-                editor.spawnProcess = _wrapAsyncThenable(editor._spawnProcessStart, "spawnProcess");
-                editor.delay = _wrapAsync(editor._delayStart, "delay");
-                editor.createVirtualBuffer = _wrapAsync(editor._createVirtualBufferStart, "createVirtualBuffer");
-                editor.createVirtualBufferInSplit = _wrapAsyncThenable(editor._createVirtualBufferInSplitStart, "createVirtualBufferInSplit");
-                editor.createVirtualBufferInExistingSplit = _wrapAsync(editor._createVirtualBufferInExistingSplitStart, "createVirtualBufferInExistingSplit");
-                editor.sendLspRequest = _wrapAsync(editor._sendLspRequestStart, "sendLspRequest");
-                editor.spawnBackgroundProcess = _wrapAsyncThenable(editor._spawnBackgroundProcessStart, "spawnBackgroundProcess");
-                editor.spawnProcessWait = _wrapAsync(editor._spawnProcessWaitStart, "spawnProcessWait");
-                editor.getBufferText = _wrapAsync(editor._getBufferTextStart, "getBufferText");
+                editor.spawnProcess = _wrapAsyncThenable("_spawnProcessStart", "spawnProcess");
+                editor.delay = _wrapAsync("_delayStart", "delay");
+                editor.createVirtualBuffer = _wrapAsync("_createVirtualBufferStart", "createVirtualBuffer");
+                editor.createVirtualBufferInSplit = _wrapAsync("_createVirtualBufferInSplitStart", "createVirtualBufferInSplit");
+                editor.createVirtualBufferInExistingSplit = _wrapAsync("_createVirtualBufferInExistingSplitStart", "createVirtualBufferInExistingSplit");
+                editor.sendLspRequest = _wrapAsync("_sendLspRequestStart", "sendLspRequest");
+                editor.spawnBackgroundProcess = _wrapAsyncThenable("_spawnBackgroundProcessStart", "spawnBackgroundProcess");
+                editor.spawnProcessWait = _wrapAsync("_spawnProcessWaitStart", "spawnProcessWait");
+                editor.getBufferText = _wrapAsync("_getBufferTextStart", "getBufferText");
+                editor.createCompositeBuffer = _wrapAsync("_createCompositeBufferStart", "createCompositeBuffer");
+                editor.getHighlights = _wrapAsync("_getHighlightsStart", "getHighlights");
 
                 // Wrapper for deleteTheme - wraps sync function in Promise
                 editor.deleteTheme = function(name) {
