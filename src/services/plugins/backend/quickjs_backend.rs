@@ -341,6 +341,13 @@ pub struct TsPluginInfo {
     pub enabled: bool,
 }
 
+/// Handler information for events and actions
+#[derive(Debug, Clone)]
+pub struct PluginHandler {
+    pub plugin_name: String,
+    pub handler_name: String,
+}
+
 /// JavaScript-exposed Editor API using rquickjs class system
 /// This allows proper lifetime handling for methods returning JS values
 #[derive(rquickjs::class::Trace, rquickjs::JsLifetime)]
@@ -351,18 +358,22 @@ pub struct JsEditorApi {
     #[qjs(skip_trace)]
     command_sender: mpsc::Sender<PluginCommand>,
     #[qjs(skip_trace)]
-    registered_actions: Rc<RefCell<HashMap<String, String>>>,
+    registered_actions: Rc<RefCell<HashMap<String, PluginHandler>>>,
     #[qjs(skip_trace)]
-    event_handlers: Rc<RefCell<HashMap<String, Vec<String>>>>,
+    event_handlers: Rc<RefCell<HashMap<String, Vec<PluginHandler>>>>,
     #[qjs(skip_trace)]
     dir_context: DirectoryContext,
     #[qjs(skip_trace)]
     next_request_id: Rc<RefCell<u64>>,
+    #[qjs(skip_trace)]
+    callback_contexts: Rc<RefCell<HashMap<u64, String>>>,
+    pub plugin_name: String,
 }
 
 #[plugin_api_impl]
 #[rquickjs::methods(rename_all = "camelCase")]
 impl JsEditorApi {
+
     // === Buffer Queries ===
 
     /// Get the active buffer ID (0 if none)
@@ -434,17 +445,7 @@ impl JsEditorApi {
 
     // === Command Registration ===
 
-    fn plugin_name<'js>(&self, ctx: &rquickjs::Ctx<'js>) {
-        // Get plugin name from global context
-        let globals = ctx.globals();
-        let plugin_name: String = globals
-            .get("__currentPluginName__")
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        plugin_name
-    }
-
-    /// Register a command - reads plugin name from __currentPluginName__ global
+    /// Register a command - reads plugin name from __pluginName__ global
     /// context is optional - can be omitted, null, undefined, or a string
     pub fn register_command<'js>(
         &self,
@@ -454,8 +455,8 @@ impl JsEditorApi {
         handler_name: String,
         context: rquickjs::function::Opt<rquickjs::Value<'js>>,
     ) -> rquickjs::Result<bool> {
-        let plugin_name = self.plugin_name(&ctx);
-
+        // Use stored plugin name instead of global lookup
+        let plugin_name = self.plugin_name.clone();
         // Extract context string - handle null, undefined, or missing
         let context_str: Option<String> = context.0.and_then(|v| {
             if v.is_null() || v.is_undefined() {
@@ -472,10 +473,14 @@ impl JsEditorApi {
             handler_name
         );
 
-        // Store action handler mapping
-        self.registered_actions
-            .borrow_mut()
-            .insert(handler_name.clone(), handler_name.clone());
+        // Store action handler mapping with its plugin name
+        self.registered_actions.borrow_mut().insert(
+            handler_name.clone(),
+            PluginHandler {
+                plugin_name: self.plugin_name.clone(),
+                handler_name: handler_name.clone(),
+            },
+        );
 
         // Register with editor
         let command = Command {
@@ -516,7 +521,7 @@ impl JsEditorApi {
 
     // === Translation ===
 
-    /// Translate a string - reads plugin name from __currentPluginName__ global
+    /// Translate a string - reads plugin name from __pluginName__ global
     /// Args is optional - can be omitted, undefined, null, or an object
     pub fn t<'js>(
         &self,
@@ -524,8 +529,8 @@ impl JsEditorApi {
         key: String,
         args: rquickjs::function::Rest<Value<'js>>,
     ) -> String {
-        let plugin_name: String = self.plugin_name(&ctx);
-
+        // Use stored plugin name instead of global lookup
+        let plugin_name = self.plugin_name.clone();
         // Convert args to HashMap - args.0 is a Vec of the rest arguments
         let args_map: HashMap<String, String> = if let Some(first_arg) = args.0.first() {
             if let Some(obj) = first_arg.as_object() {
@@ -778,19 +783,21 @@ impl JsEditorApi {
     // === Event Handling ===
 
     /// Subscribe to an editor event
-    pub fn on(&self, event_name: String, handler_name: String) {
+    pub fn on<'js>(&self, ctx: rquickjs::Ctx<'js>, event_name: String, handler_name: String) {
         self.event_handlers
             .borrow_mut()
             .entry(event_name)
             .or_default()
-            .push(handler_name);
+            .push(PluginHandler {
+                plugin_name: self.plugin_name.clone(),
+                handler_name,
+            });
     }
 
     /// Unsubscribe from an event
     pub fn off(&self, event_name: String, handler_name: String) {
-        let mut handlers = self.event_handlers.borrow_mut();
-        if let Some(list) = handlers.get_mut(&event_name) {
-            list.retain(|h| h != &handler_name);
+        if let Some(list) = self.event_handlers.borrow_mut().get_mut(&event_name) {
+            list.retain(|h| h.handler_name != handler_name);
         }
     }
 
@@ -1188,11 +1195,19 @@ impl JsEditorApi {
         ts_return = "TsHighlightSpan[]"
     )]
     #[qjs(rename = "_getHighlightsStart")]
-    pub fn get_highlights_start(&self, buffer_id: u32, start: u32, end: u32) -> u64 {
+    pub fn get_highlights_start<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        buffer_id: u32,
+        start: u32,
+        end: u32,
+    ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record plugin name for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
 
@@ -1202,7 +1217,7 @@ impl JsEditorApi {
             request_id: id,
         });
 
-        id
+        Ok(id)
     }
 
     // === Overlays ===
@@ -1890,6 +1905,9 @@ impl JsEditorApi {
             .get(&event_name)
             .cloned()
             .unwrap_or_default()
+            .into_iter()
+            .map(|h| h.handler_name)
+            .collect()
     }
 
     // === Virtual Buffers ===
@@ -1899,12 +1917,15 @@ impl JsEditorApi {
     #[qjs(rename = "_createVirtualBufferStart")]
     pub fn create_virtual_buffer_start(
         &self,
+        ctx: rquickjs::Ctx<'_>,
         opts: crate::services::plugins::api::CreateVirtualBufferOptions,
     ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
 
@@ -1948,12 +1969,15 @@ impl JsEditorApi {
     #[qjs(rename = "_createVirtualBufferInSplitStart")]
     pub fn create_virtual_buffer_in_split_start(
         &self,
+        ctx: rquickjs::Ctx<'_>,
         opts: crate::services::plugins::api::CreateVirtualBufferInSplitOptions,
     ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
 
@@ -1996,12 +2020,15 @@ impl JsEditorApi {
     #[qjs(rename = "_createVirtualBufferInExistingSplitStart")]
     pub fn create_virtual_buffer_in_existing_split_start(
         &self,
+        ctx: rquickjs::Ctx<'_>,
         opts: crate::services::plugins::api::CreateVirtualBufferInExistingSplitOptions,
     ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
 
@@ -2068,6 +2095,7 @@ impl JsEditorApi {
     #[qjs(rename = "_spawnProcessStart")]
     pub fn spawn_process_start(
         &self,
+        ctx: rquickjs::Ctx<'_>,
         command: String,
         args: Vec<String>,
         cwd: rquickjs::function::Opt<String>,
@@ -2076,6 +2104,8 @@ impl JsEditorApi {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
         // Use provided cwd, or fall back to snapshot's working_dir
@@ -2104,11 +2134,13 @@ impl JsEditorApi {
     /// Wait for a process to complete and get its result (async)
     #[plugin_api(async_promise, js_name = "spawnProcessWait", ts_return = "SpawnResult")]
     #[qjs(rename = "_spawnProcessWaitStart")]
-    pub fn spawn_process_wait_start(&self, process_id: u64) -> u64 {
+    pub fn spawn_process_wait_start(&self, ctx: rquickjs::Ctx<'_>, process_id: u64) -> u64 {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
         let _ = self.command_sender.send(PluginCommand::SpawnProcessWait {
@@ -2121,11 +2153,13 @@ impl JsEditorApi {
     /// Get buffer text range (async, returns request_id)
     #[plugin_api(async_promise, js_name = "getBufferText", ts_return = "string")]
     #[qjs(rename = "_getBufferTextStart")]
-    pub fn get_buffer_text_start(&self, buffer_id: u32, start: u32, end: u32) -> u64 {
+    pub fn get_buffer_text_start(&self, ctx: rquickjs::Ctx<'_>, buffer_id: u32, start: u32, end: u32) -> u64 {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
         let _ = self.command_sender.send(PluginCommand::GetBufferText {
@@ -2140,11 +2174,13 @@ impl JsEditorApi {
     /// Delay/sleep (async, returns request_id)
     #[plugin_api(async_promise, js_name = "delay", ts_return = "void")]
     #[qjs(rename = "_delayStart")]
-    pub fn delay_start(&self, duration_ms: u64) -> u64 {
+    pub fn delay_start(&self, ctx: rquickjs::Ctx<'_>, duration_ms: u64) -> u64 {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
         let _ = self.command_sender.send(PluginCommand::Delay {
@@ -2168,6 +2204,8 @@ impl JsEditorApi {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
         // Convert params object to serde_json::Value
@@ -2193,6 +2231,7 @@ impl JsEditorApi {
     #[qjs(rename = "_spawnBackgroundProcessStart")]
     pub fn spawn_background_process_start(
         &self,
+        ctx: rquickjs::Ctx<'_>,
         command: String,
         args: Vec<String>,
         cwd: rquickjs::function::Opt<String>,
@@ -2201,6 +2240,8 @@ impl JsEditorApi {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
         // Use id as process_id for simplicity
@@ -2244,11 +2285,14 @@ impl JsEditorApi {
 /// QuickJS-based JavaScript runtime for plugins
 pub struct QuickJsBackend {
     runtime: Runtime,
-    context: Context,
-    /// Event handlers: event_name -> list of handler function names
-    event_handlers: Rc<RefCell<HashMap<String, Vec<String>>>>,
-    /// Registered actions: action_name -> handler function name
-    registered_actions: Rc<RefCell<HashMap<String, String>>>,
+    /// Main context for shared/internal operations
+    main_context: Context,
+    /// Plugin-specific contexts: plugin_name -> Context
+    plugin_contexts: Rc<RefCell<HashMap<String, Context>>>,
+    /// Event handlers: event_name -> list of PluginHandler
+    event_handlers: Rc<RefCell<HashMap<String, Vec<PluginHandler>>>>,
+    /// Registered actions: action_name -> PluginHandler
+    registered_actions: Rc<RefCell<HashMap<String, PluginHandler>>>,
     /// Editor state snapshot (read-only access)
     state_snapshot: Arc<RwLock<EditorStateSnapshot>>,
     /// Command sender for write operations
@@ -2257,6 +2301,8 @@ pub struct QuickJsBackend {
     pending_responses: PendingResponses,
     /// Next request ID for async operations
     next_request_id: Rc<RefCell<u64>>,
+    /// Plugin name for each pending callback ID
+    callback_contexts: Rc<RefCell<HashMap<u64, String>>>,
     /// Directory context for system paths
     dir_context: DirectoryContext,
 }
@@ -2321,33 +2367,38 @@ impl QuickJsBackend {
             },
         )));
 
-        let context = Context::full(&runtime)
+        let main_context = Context::full(&runtime)
             .map_err(|e| anyhow!("Failed to create QuickJS context: {}", e))?;
 
+        let plugin_contexts = Rc::new(RefCell::new(HashMap::new()));
         let event_handlers = Rc::new(RefCell::new(HashMap::new()));
         let registered_actions = Rc::new(RefCell::new(HashMap::new()));
         let next_request_id = Rc::new(RefCell::new(1u64));
+        let callback_contexts = Rc::new(RefCell::new(HashMap::new()));
 
-        let mut backend = Self {
+        let backend = Self {
             runtime,
-            context,
+            main_context,
+            plugin_contexts,
             event_handlers,
             registered_actions,
             state_snapshot,
             command_sender,
             pending_responses,
             next_request_id,
+            callback_contexts,
             dir_context,
         };
 
-        backend.setup_global_api()?;
+        // Initialize main context (for internal utilities if needed)
+        backend.setup_context_api(&backend.main_context.clone(), "internal")?;
 
         tracing::debug!("QuickJsBackend::new: runtime created successfully");
         Ok(backend)
     }
 
-    /// Set up the global editor API in the JavaScript context
-    fn setup_global_api(&mut self) -> Result<()> {
+    /// Set up the editor API in a specific JavaScript context
+    fn setup_context_api(&self, context: &Context, plugin_name: &str) -> Result<()> {
         let state_snapshot = Arc::clone(&self.state_snapshot);
         let command_sender = self.command_sender.clone();
         let event_handlers = Rc::clone(&self.event_handlers);
@@ -2355,8 +2406,11 @@ impl QuickJsBackend {
         let next_request_id = Rc::clone(&self.next_request_id);
         let dir_context = self.dir_context.clone();
 
-        self.context.with(|ctx| {
+        context.with(|ctx| {
             let globals = ctx.globals();
+
+            // Set the plugin name global
+            globals.set("__pluginName__", plugin_name)?;
 
             // Create the editor object using JsEditorApi class
             // This provides proper lifetime handling for methods returning JS values
@@ -2367,6 +2421,8 @@ impl QuickJsBackend {
                 event_handlers: Rc::clone(&event_handlers),
                 dir_context: dir_context.clone(),
                 next_request_id: Rc::clone(&next_request_id),
+                callback_contexts: Rc::clone(&self.callback_contexts),
+                plugin_name: plugin_name.to_string(),
             };
             let editor = rquickjs::Class::<JsEditorApi>::instance(ctx.clone(), js_api)?;
 
@@ -2574,34 +2630,33 @@ impl QuickJsBackend {
             source_name
         );
 
-        // Define getEditor() for this plugin - returns the editor global with plugin context
-        let escaped_name = plugin_name.replace('\\', "\\\\").replace('"', "\\\"");
-        let define_get_editor = format!(
-            r#"
-            globalThis.getEditor = function() {{
-                return globalThis.editor;
-            }};
-        "#
-        );
+        // Get or create context for this plugin
+        let context = {
+            let mut contexts = self.plugin_contexts.borrow_mut();
+            if let Some(ctx) = contexts.get(plugin_name) {
+                ctx.clone()
+            } else {
+                let ctx = Context::full(&self.runtime)
+                    .map_err(|e| anyhow!("Failed to create QuickJS context for plugin {}: {}", plugin_name, e))?;
+                self.setup_context_api(&ctx, plugin_name)?;
+                contexts.insert(plugin_name.to_string(), ctx.clone());
+                ctx
+            }
+        };
 
         // Wrap plugin code in IIFE for scope isolation
+        // NOTE: __pluginName__ is now provided as a global constant
         let wrapped = format!(
             r#"
         (function() {{
-            // Set current plugin context for plugin-aware methods
-            const __currentPluginName__ = "{}";
             {}
         }})();"#,
-            escaped_name, code
+            code
         );
 
-        self.context.with(|ctx| {
-            // Define getEditor for this plugin
-            ctx.eval::<(), _>(define_get_editor.as_bytes())
-                .map_err(|e| format_js_error(&ctx, e, source_name))?;
-
+        context.with(|ctx| {
             tracing::debug!(
-                "execute_js: getEditor defined, now executing plugin code for '{}'",
+                "execute_js: executing plugin code for '{}'",
                 plugin_name
             );
 
@@ -2636,52 +2691,56 @@ impl QuickJsBackend {
 
         let handlers = self.event_handlers.borrow().get(event_name).cloned();
 
-        if let Some(handler_names) = handlers {
-            if handler_names.is_empty() {
+        if let Some(handler_pairs) = handlers {
+            if handler_pairs.is_empty() {
                 crate::services::signal_handler::clear_js_execution_state();
                 return Ok(true);
             }
 
-            for handler_name in &handler_names {
-                // Call the handler and properly handle both sync and async errors
-                // Async handlers return Promises - we attach .catch() to surface rejections
-                // Use bracket notation for handler names to support names with special characters like dashes
-                let code = format!(
-                    r#"
-                    (function() {{
-                        try {{
-                            const data = JSON.parse({});
-                            if (typeof globalThis["{}"] === 'function') {{
-                                const result = globalThis["{}"](data);
-                                // If handler returns a Promise, catch rejections
-                                if (result && typeof result.then === 'function') {{
-                                    result.catch(function(e) {{
-                                        console.error('Handler {} async error:', e);
-                                        // Re-throw to make it an unhandled rejection for the runtime to catch
-                                        throw e;
-                                    }});
+            let plugin_contexts = self.plugin_contexts.borrow();
+            for handler in handler_pairs {
+                let context_opt = plugin_contexts.get(&handler.plugin_name);
+                if let Some(context) = context_opt {
+                    let handler_name = &handler.handler_name;
+                    // Call the handler and properly handle both sync and async errors
+                    // Async handlers return Promises - we attach .catch() to surface rejections
+                    let code = format!(
+                        r#"
+                        (function() {{
+                            try {{
+                                const data = JSON.parse({});
+                                if (typeof globalThis["{}"] === 'function') {{
+                                    const result = globalThis["{}"](data);
+                                    // If handler returns a Promise, catch rejections
+                                    if (result && typeof result.then === 'function') {{
+                                        result.catch(function(e) {{
+                                            console.error('Handler {} async error:', e);
+                                            // Re-throw to make it an unhandled rejection for the runtime to catch
+                                            throw e;
+                                        }});
+                                    }}
                                 }}
+                            }} catch (e) {{
+                                console.error('Handler {} sync error:', e);
+                                throw e;
                             }}
-                        }} catch (e) {{
-                            console.error('Handler {} sync error:', e);
-                            throw e;
-                        }}
-                    }})();
-                    "#,
-                    serde_json::to_string(event_data)?,
-                    handler_name,
-                    handler_name,
-                    handler_name,
-                    handler_name
-                );
+                        }})();
+                        "#,
+                        serde_json::to_string(event_data)?,
+                        handler_name,
+                        handler_name,
+                        handler_name,
+                        handler_name
+                    );
 
-                self.context.with(|ctx| {
-                    if let Err(e) = ctx.eval::<(), _>(code.as_bytes()) {
-                        log_js_error(&ctx, e, &format!("handler {}", handler_name));
-                    }
-                    // Run pending jobs to process any Promise continuations and catch errors
-                    run_pending_jobs_checked(&ctx, &format!("emit handler {}", handler_name));
-                });
+                    context.with(|ctx| {
+                        if let Err(e) = ctx.eval::<(), _>(code.as_bytes()) {
+                            log_js_error(&ctx, e, &format!("handler {}", handler_name));
+                        }
+                        // Run pending jobs to process any Promise continuations and catch errors
+                        run_pending_jobs_checked(&ctx, &format!("emit handler {}", handler_name));
+                    });
+                }
             }
         }
 
@@ -2702,8 +2761,16 @@ impl QuickJsBackend {
     /// This is useful when the calling thread needs to continue processing
     /// ResolveCallback requests that the action may be waiting for.
     pub fn start_action(&mut self, action_name: &str) -> Result<()> {
-        let handler_name = self.registered_actions.borrow().get(action_name).cloned();
-        let function_name = handler_name.unwrap_or_else(|| action_name.to_string());
+        let pair = self.registered_actions.borrow().get(action_name).cloned();
+        let (plugin_name, function_name) = match pair {
+            Some(handler) => (handler.plugin_name, handler.handler_name),
+            None => ("main".to_string(), action_name.to_string()),
+        };
+
+        let plugin_contexts = self.plugin_contexts.borrow();
+        let context = plugin_contexts
+            .get(&plugin_name)
+            .unwrap_or(&self.main_context);
 
         // Track execution state for signal handler debugging
         crate::services::signal_handler::set_js_execution_state(format!(
@@ -2740,7 +2807,7 @@ impl QuickJsBackend {
         );
 
         tracing::info!("start_action: evaluating JS code");
-        self.context.with(|ctx| {
+        context.with(|ctx| {
             if let Err(e) = ctx.eval::<rquickjs::Value, _>(code.as_bytes()) {
                 log_js_error(&ctx, e, &format!("action {}", action_name));
             }
@@ -2761,10 +2828,16 @@ impl QuickJsBackend {
     /// Execute a registered action by name
     pub async fn execute_action(&mut self, action_name: &str) -> Result<()> {
         // First check if there's a registered command mapping
-        let handler_name = self.registered_actions.borrow().get(action_name).cloned();
-        // Use the registered handler name if found, otherwise try the action name directly
-        // (defineMode bindings use global function names directly)
-        let function_name = handler_name.unwrap_or_else(|| action_name.to_string());
+        let pair = self.registered_actions.borrow().get(action_name).cloned();
+        let (plugin_name, function_name) = match pair {
+            Some(handler) => (handler.plugin_name, handler.handler_name),
+            None => ("main".to_string(), action_name.to_string()),
+        };
+
+        let plugin_contexts = self.plugin_contexts.borrow();
+        let context = plugin_contexts
+            .get(&plugin_name)
+            .unwrap_or(&self.main_context);
 
         tracing::debug!(
             "execute_action: '{}' -> function '{}'",
@@ -2796,7 +2869,7 @@ impl QuickJsBackend {
             action = action_name
         );
 
-        self.context.with(|ctx| {
+        context.with(|ctx| {
             // Eval returns a Promise for the async IIFE, which we need to drive
             match ctx.eval::<rquickjs::Value, _>(code.as_bytes()) {
                 Ok(value) => {
@@ -2827,11 +2900,21 @@ impl QuickJsBackend {
     /// Poll the event loop once to run any pending microtasks
     pub fn poll_event_loop_once(&mut self) -> bool {
         let mut had_work = false;
-        self.context.with(|ctx| {
-            // Run any pending microtasks (Promise continuations, etc.)
-            let count = run_pending_jobs_checked(&ctx, "poll_event_loop");
-            had_work = count > 0;
+        
+        // Poll main context
+        self.main_context.with(|ctx| {
+            let count = run_pending_jobs_checked(&ctx, "poll_event_loop main");
+            if count > 0 { had_work = true; }
         });
+
+        // Poll all plugin contexts
+        let contexts = self.plugin_contexts.borrow().clone();
+        for (name, context) in contexts {
+            context.with(|ctx| {
+                let count = run_pending_jobs_checked(&ctx, &format!("poll_event_loop {}", name));
+                if count > 0 { had_work = true; }
+            });
+        }
         had_work
     }
 
@@ -2853,7 +2936,25 @@ impl QuickJsBackend {
     ) {
         let id = callback_id.as_u64();
         tracing::debug!("resolve_callback: starting for callback_id={}", id);
-        self.context.with(|ctx| {
+        
+        // Find the plugin name and then context for this callback
+        let plugin_name = {
+            let mut contexts = self.callback_contexts.borrow_mut();
+            contexts.remove(&id)
+        };
+
+        let Some(name) = plugin_name else {
+            tracing::warn!("resolve_callback: No plugin found for callback_id={}", id);
+            return;
+        };
+
+        let plugin_contexts = self.plugin_contexts.borrow();
+        let Some(context) = plugin_contexts.get(&name) else {
+            tracing::warn!("resolve_callback: Context lost for plugin {}", name);
+            return;
+        };
+
+        context.with(|ctx| {
             // Parse JSON string to serde_json::Value
             let json_value: serde_json::Value = match serde_json::from_str(result_json) {
                 Ok(v) => v,
@@ -2916,7 +3017,25 @@ impl QuickJsBackend {
         error: &str,
     ) {
         let id = callback_id.as_u64();
-        self.context.with(|ctx| {
+        
+        // Find the plugin name and then context for this callback
+        let plugin_name = {
+            let mut contexts = self.callback_contexts.borrow_mut();
+            contexts.remove(&id)
+        };
+
+        let Some(name) = plugin_name else {
+            tracing::warn!("reject_callback: No plugin found for callback_id={}", id);
+            return;
+        };
+
+        let plugin_contexts = self.plugin_contexts.borrow();
+        let Some(context) = plugin_contexts.get(&name) else {
+            tracing::warn!("reject_callback: Context lost for plugin {}", name);
+            return;
+        };
+
+        context.with(|ctx| {
             // Get _rejectCallback function from globalThis
             let globals = ctx.globals();
             let reject_fn: rquickjs::Function = match globals.get("_rejectCallback") {
