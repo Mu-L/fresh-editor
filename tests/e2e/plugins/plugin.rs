@@ -947,9 +947,9 @@ fn test_plugin_multiple_actions_no_deadlock() {
 const editor = getEditor();
 // Test plugin for multiple concurrent actions
 
-editor.registerCommand("Action A", "Set status to A", "action_a", "normal");
-editor.registerCommand("Action B", "Set status to B", "action_b", "normal");
-editor.registerCommand("Action C", "Set status to C", "action_c", "normal");
+editor.registerCommand("Action A", "Set status to A", "action_a", null);
+editor.registerCommand("Action B", "Set status to B", "action_b", null);
+editor.registerCommand("Action C", "Set status to C", "action_c", null);
 
 globalThis.action_a = function(): void {
     editor.setStatus("Status: A executed");
