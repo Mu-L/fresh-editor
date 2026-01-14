@@ -1620,6 +1620,18 @@ impl JsEditorApi {
             })
             .collect();
 
+        // Register commands associated with this mode so start_action can find them
+        // and execute them in the correct plugin context
+        {
+            let mut registered = self.registered_actions.borrow_mut();
+            for (_, cmd_name) in &bindings {
+                registered.insert(cmd_name.clone(), PluginHandler {
+                    plugin_name: self.plugin_name.clone(),
+                    handler_name: cmd_name.clone(),
+                });
+            }
+        }
+
         self.command_sender
             .send(PluginCommand::DefineMode {
                 name,
@@ -2649,15 +2661,11 @@ impl QuickJsBackend {
             }
         };
 
-        // Wrap plugin code in IIFE for scope isolation
-        // NOTE: __pluginName__ is now provided as a global constant
-        let wrapped = format!(
-            r#"
-        (function() {{
-            {}
-        }})();"#,
-            code
-        );
+        // Wrap plugin code in IIFE to prevent TDZ errors and scope pollution
+        // This is critical for plugins like vi_mode that declare `const editor = ...`
+        // which shadows the global `editor` causing TDZ if not wrapped.
+        let wrapped_code = format!("(function() {{ {} }})();", code);
+        let wrapped = wrapped_code.as_str();
 
         context.with(|ctx| {
             tracing::debug!(
