@@ -2034,15 +2034,22 @@ impl JsEditorApi {
             *id_ref += 1;
             id
         };
+        // Use provided cwd, or fall back to snapshot's working_dir
+        let effective_cwd = cwd.0.or_else(|| {
+            self.state_snapshot
+                .read()
+                .ok()
+                .map(|s| s.working_dir.to_string_lossy().to_string())
+        });
         tracing::info!(
             "spawn_process_start: command='{}', args={:?}, cwd={:?}, callback_id={}",
-            command, args, cwd.0, id
+            command, args, effective_cwd, id
         );
         let _ = self.command_sender.send(PluginCommand::SpawnProcess {
             callback_id: JsCallbackId::new(id),
             command,
             args,
-            cwd: cwd.0,
+            cwd: effective_cwd,
         });
         id
     }

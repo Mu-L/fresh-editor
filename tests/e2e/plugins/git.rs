@@ -305,6 +305,8 @@ fn test_git_grep_cancel() {
 /// Test git find file basic functionality
 #[test]
 fn test_git_find_file_shows_results() {
+    init_tracing_from_env();
+    fresh::services::signal_handler::install_signal_handlers();
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
     repo.setup_git_plugins();
