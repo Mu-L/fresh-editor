@@ -1055,6 +1055,212 @@ pub struct BackgroundProcessResult {
     pub exit_code: i32,
 }
 
+/// Entry for virtual buffer content with optional text properties (JS API version)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export, rename = "TextPropertyEntry"))]
+pub struct JsTextPropertyEntry {
+    /// Text content for this entry
+    pub text: String,
+    /// Optional properties attached to this text (e.g., file path, line number)
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional, type = "Record<string, unknown>"))]
+    pub properties: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Options for createVirtualBuffer
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
+pub struct CreateVirtualBufferOptions {
+    /// Buffer name (displayed in tabs/title)
+    pub name: String,
+    /// Mode for keybindings (e.g., "git-log", "search-results")
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub mode: Option<String>,
+    /// Whether buffer is read-only (default: false)
+    #[serde(default, rename = "readOnly")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "readOnly"))]
+    pub read_only: Option<bool>,
+    /// Show line numbers in gutter (default: false)
+    #[serde(default, rename = "showLineNumbers")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "showLineNumbers"))]
+    pub show_line_numbers: Option<bool>,
+    /// Show cursor (default: true)
+    #[serde(default, rename = "showCursors")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "showCursors"))]
+    pub show_cursors: Option<bool>,
+    /// Disable text editing (default: false)
+    #[serde(default, rename = "editingDisabled")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "editingDisabled"))]
+    pub editing_disabled: Option<bool>,
+    /// Hide from tab bar (default: false)
+    #[serde(default, rename = "hiddenFromTabs")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "hiddenFromTabs"))]
+    pub hidden_from_tabs: Option<bool>,
+    /// Initial content entries with optional properties
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub entries: Option<Vec<JsTextPropertyEntry>>,
+}
+
+/// Options for createVirtualBufferInSplit
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
+pub struct CreateVirtualBufferInSplitOptions {
+    /// Buffer name (displayed in tabs/title)
+    pub name: String,
+    /// Mode for keybindings (e.g., "git-log", "search-results")
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub mode: Option<String>,
+    /// Whether buffer is read-only (default: false)
+    #[serde(default, rename = "readOnly")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "readOnly"))]
+    pub read_only: Option<bool>,
+    /// Split ratio 0.0-1.0 (default: 0.5)
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub ratio: Option<f32>,
+    /// Split direction: "horizontal" or "vertical"
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub direction: Option<String>,
+    /// Panel ID to split from
+    #[serde(default, rename = "panelId")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "panelId"))]
+    pub panel_id: Option<String>,
+    /// Show line numbers in gutter (default: true)
+    #[serde(default, rename = "showLineNumbers")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "showLineNumbers"))]
+    pub show_line_numbers: Option<bool>,
+    /// Show cursor (default: true)
+    #[serde(default, rename = "showCursors")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "showCursors"))]
+    pub show_cursors: Option<bool>,
+    /// Disable text editing (default: false)
+    #[serde(default, rename = "editingDisabled")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "editingDisabled"))]
+    pub editing_disabled: Option<bool>,
+    /// Enable line wrapping
+    #[serde(default, rename = "lineWrap")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "lineWrap"))]
+    pub line_wrap: Option<bool>,
+    /// Initial content entries with optional properties
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub entries: Option<Vec<JsTextPropertyEntry>>,
+}
+
+/// Options for createVirtualBufferInExistingSplit
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "plugins", derive(TS))]
+#[cfg_attr(feature = "plugins", ts(export))]
+pub struct CreateVirtualBufferInExistingSplitOptions {
+    /// Buffer name (displayed in tabs/title)
+    pub name: String,
+    /// Target split ID (required)
+    #[serde(rename = "splitId")]
+    #[cfg_attr(feature = "plugins", ts(rename = "splitId"))]
+    pub split_id: usize,
+    /// Mode for keybindings (e.g., "git-log", "search-results")
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub mode: Option<String>,
+    /// Whether buffer is read-only (default: false)
+    #[serde(default, rename = "readOnly")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "readOnly"))]
+    pub read_only: Option<bool>,
+    /// Show line numbers in gutter (default: true)
+    #[serde(default, rename = "showLineNumbers")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "showLineNumbers"))]
+    pub show_line_numbers: Option<bool>,
+    /// Show cursor (default: true)
+    #[serde(default, rename = "showCursors")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "showCursors"))]
+    pub show_cursors: Option<bool>,
+    /// Disable text editing (default: false)
+    #[serde(default, rename = "editingDisabled")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "editingDisabled"))]
+    pub editing_disabled: Option<bool>,
+    /// Enable line wrapping
+    #[serde(default, rename = "lineWrap")]
+    #[cfg_attr(feature = "plugins", ts(optional, rename = "lineWrap"))]
+    pub line_wrap: Option<bool>,
+    /// Initial content entries with optional properties
+    #[serde(default)]
+    #[cfg_attr(feature = "plugins", ts(optional))]
+    pub entries: Option<Vec<JsTextPropertyEntry>>,
+}
+
+fn default_ratio() -> f32 {
+    0.5
+}
+
+/// Result of getTextPropertiesAtCursor - array of property objects
+///
+/// Each element contains the properties from a text property span that overlaps
+/// with the cursor position. Properties are dynamic key-value pairs set by plugins.
+#[derive(Debug, Clone, Serialize)]
+pub struct TextPropertiesAtCursor(pub Vec<HashMap<String, serde_json::Value>>);
+
+// Implement FromJs for option types using rquickjs_serde
+#[cfg(feature = "plugins")]
+mod fromjs_impls {
+    use super::*;
+    use rquickjs::{Ctx, FromJs, Value};
+
+    impl<'js> FromJs<'js> for JsTextPropertyEntry {
+        fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
+            rquickjs_serde::from_value(value).map_err(|e| rquickjs::Error::FromJs {
+                from: "object",
+                to: "JsTextPropertyEntry",
+                message: Some(e.to_string()),
+            })
+        }
+    }
+
+    impl<'js> FromJs<'js> for CreateVirtualBufferOptions {
+        fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
+            rquickjs_serde::from_value(value).map_err(|e| rquickjs::Error::FromJs {
+                from: "object",
+                to: "CreateVirtualBufferOptions",
+                message: Some(e.to_string()),
+            })
+        }
+    }
+
+    impl<'js> FromJs<'js> for CreateVirtualBufferInSplitOptions {
+        fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
+            rquickjs_serde::from_value(value).map_err(|e| rquickjs::Error::FromJs {
+                from: "object",
+                to: "CreateVirtualBufferInSplitOptions",
+                message: Some(e.to_string()),
+            })
+        }
+    }
+
+    impl<'js> FromJs<'js> for CreateVirtualBufferInExistingSplitOptions {
+        fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
+            rquickjs_serde::from_value(value).map_err(|e| rquickjs::Error::FromJs {
+                from: "object",
+                to: "CreateVirtualBufferInExistingSplitOptions",
+                message: Some(e.to_string()),
+            })
+        }
+    }
+
+    impl<'js> rquickjs::IntoJs<'js> for TextPropertiesAtCursor {
+        fn into_js(self, ctx: &Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+            rquickjs_serde::to_value(ctx.clone(), &self.0).map_err(|e| {
+                rquickjs::Error::new_from_js_message("serialize", "", &e.to_string())
+            })
+        }
+    }
+}
+
 /// Plugin API context - provides safe access to editor functionality
 pub struct PluginApi {
     /// Hook registry (shared with editor)

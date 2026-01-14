@@ -1568,6 +1568,7 @@ impl JsEditorApi {
         name: String,
         parent: Option<String>,
         bindings_arr: Vec<Vec<String>>,
+        read_only: rquickjs::function::Opt<bool>,
     ) -> bool {
         let bindings: Vec<(String, String)> = bindings_arr
             .into_iter()
@@ -1585,7 +1586,7 @@ impl JsEditorApi {
                 name,
                 parent,
                 bindings,
-                read_only: false,
+                read_only: read_only.0.unwrap_or(false),
             })
             .is_ok()
     }
@@ -1871,10 +1872,9 @@ impl JsEditorApi {
     /// Create a virtual buffer in current split (async, returns buffer ID)
     #[plugin_api(async_promise, js_name = "createVirtualBuffer", ts_return = "number")]
     #[qjs(rename = "_createVirtualBufferStart")]
-    pub fn create_virtual_buffer_start<'js>(
+    pub fn create_virtual_buffer_start(
         &self,
-        ctx: rquickjs::Ctx<'js>,
-        opts: rquickjs::Object<'js>,
+        opts: crate::services::plugins::api::CreateVirtualBufferOptions,
     ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
@@ -1883,19 +1883,15 @@ impl JsEditorApi {
             id
         };
 
-        let name: String = opts.get("name")?;
-        let mode: String = opts.get("mode").unwrap_or_default();
-        let read_only: bool = opts.get("readOnly").unwrap_or(false);
-        let show_line_numbers: bool = opts.get("showLineNumbers").unwrap_or(false);
-        let show_cursors: bool = opts.get("showCursors").unwrap_or(true);
-        let editing_disabled: bool = opts.get("editingDisabled").unwrap_or(false);
-        let hidden_from_tabs: bool = opts.get("hiddenFromTabs").unwrap_or(false);
-
-        // entries is array of {text: string, properties?: object}
-        let entries_arr: Vec<rquickjs::Object> = opts.get("entries").unwrap_or_default();
-        let entries: Vec<TextPropertyEntry> = entries_arr
-            .iter()
-            .filter_map(|obj| parse_text_property_entry(&ctx, obj))
+        // Convert JsTextPropertyEntry to TextPropertyEntry
+        let entries: Vec<TextPropertyEntry> = opts
+            .entries
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| TextPropertyEntry {
+                text: e.text,
+                properties: e.properties.unwrap_or_default(),
+            })
             .collect();
 
         tracing::debug!(
@@ -1903,14 +1899,14 @@ impl JsEditorApi {
             id
         );
         let _ = self.command_sender.send(PluginCommand::CreateVirtualBufferWithContent {
-            name,
-            mode,
-            read_only,
+            name: opts.name,
+            mode: opts.mode.unwrap_or_default(),
+            read_only: opts.read_only.unwrap_or(false),
             entries,
-            show_line_numbers,
-            show_cursors,
-            editing_disabled,
-            hidden_from_tabs,
+            show_line_numbers: opts.show_line_numbers.unwrap_or(false),
+            show_cursors: opts.show_cursors.unwrap_or(true),
+            editing_disabled: opts.editing_disabled.unwrap_or(false),
+            hidden_from_tabs: opts.hidden_from_tabs.unwrap_or(false),
             request_id: Some(id),
         });
         Ok(id)
@@ -1919,10 +1915,9 @@ impl JsEditorApi {
     /// Create a virtual buffer in a new split (async, returns request_id)
     #[plugin_api(async_promise, js_name = "createVirtualBufferInSplit", ts_return = "number")]
     #[qjs(rename = "_createVirtualBufferInSplitStart")]
-    pub fn create_virtual_buffer_in_split_start<'js>(
+    pub fn create_virtual_buffer_in_split_start(
         &self,
-        ctx: rquickjs::Ctx<'js>,
-        opts: rquickjs::Object<'js>,
+        opts: crate::services::plugins::api::CreateVirtualBufferInSplitOptions,
     ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
@@ -1931,36 +1926,29 @@ impl JsEditorApi {
             id
         };
 
-        let name: String = opts.get("name")?;
-        let mode: String = opts.get("mode").unwrap_or_default();
-        let read_only: bool = opts.get("readOnly").unwrap_or(false);
-        let ratio: f32 = opts.get("ratio").unwrap_or(0.5);
-        let direction: Option<String> = opts.get("direction").ok();
-        let panel_id: Option<String> = opts.get("panelId").ok();
-        let show_line_numbers: bool = opts.get("showLineNumbers").unwrap_or(true);
-        let show_cursors: bool = opts.get("showCursors").unwrap_or(true);
-        let editing_disabled: bool = opts.get("editingDisabled").unwrap_or(false);
-        let line_wrap: Option<bool> = opts.get("lineWrap").ok();
-
-        // entries is array of {text: string, properties?: object}
-        let entries_arr: Vec<rquickjs::Object> = opts.get("entries").unwrap_or_default();
-        let entries: Vec<TextPropertyEntry> = entries_arr
-            .iter()
-            .filter_map(|obj| parse_text_property_entry(&ctx, obj))
+        // Convert JsTextPropertyEntry to TextPropertyEntry
+        let entries: Vec<TextPropertyEntry> = opts
+            .entries
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| TextPropertyEntry {
+                text: e.text,
+                properties: e.properties.unwrap_or_default(),
+            })
             .collect();
 
         let _ = self.command_sender.send(PluginCommand::CreateVirtualBufferInSplit {
-            name,
-            mode,
-            read_only,
+            name: opts.name,
+            mode: opts.mode.unwrap_or_default(),
+            read_only: opts.read_only.unwrap_or(false),
             entries,
-            ratio,
-            direction,
-            panel_id,
-            show_line_numbers,
-            show_cursors,
-            editing_disabled,
-            line_wrap,
+            ratio: opts.ratio.unwrap_or(0.5),
+            direction: opts.direction,
+            panel_id: opts.panel_id,
+            show_line_numbers: opts.show_line_numbers.unwrap_or(true),
+            show_cursors: opts.show_cursors.unwrap_or(true),
+            editing_disabled: opts.editing_disabled.unwrap_or(false),
+            line_wrap: opts.line_wrap,
             request_id: Some(id),
         });
         Ok(id)
@@ -1969,10 +1957,9 @@ impl JsEditorApi {
     /// Create a virtual buffer in an existing split (async, returns request_id)
     #[plugin_api(async_promise, js_name = "createVirtualBufferInExistingSplit", ts_return = "number")]
     #[qjs(rename = "_createVirtualBufferInExistingSplitStart")]
-    pub fn create_virtual_buffer_in_existing_split_start<'js>(
+    pub fn create_virtual_buffer_in_existing_split_start(
         &self,
-        ctx: rquickjs::Ctx<'js>,
-        opts: rquickjs::Object<'js>,
+        opts: crate::services::plugins::api::CreateVirtualBufferInExistingSplitOptions,
     ) -> rquickjs::Result<u64> {
         let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
@@ -1981,32 +1968,27 @@ impl JsEditorApi {
             id
         };
 
-        let name: String = opts.get("name")?;
-        let mode: String = opts.get("mode").unwrap_or_default();
-        let read_only: bool = opts.get("readOnly").unwrap_or(false);
-        let split_id: usize = opts.get("splitId")?;
-        let show_line_numbers: bool = opts.get("showLineNumbers").unwrap_or(true);
-        let show_cursors: bool = opts.get("showCursors").unwrap_or(true);
-        let editing_disabled: bool = opts.get("editingDisabled").unwrap_or(false);
-        let line_wrap: Option<bool> = opts.get("lineWrap").ok();
-
-        // entries is array of {text: string, properties?: object}
-        let entries_arr: Vec<rquickjs::Object> = opts.get("entries").unwrap_or_default();
-        let entries: Vec<TextPropertyEntry> = entries_arr
-            .iter()
-            .filter_map(|obj| parse_text_property_entry(&ctx, obj))
+        // Convert JsTextPropertyEntry to TextPropertyEntry
+        let entries: Vec<TextPropertyEntry> = opts
+            .entries
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| TextPropertyEntry {
+                text: e.text,
+                properties: e.properties.unwrap_or_default(),
+            })
             .collect();
 
         let _ = self.command_sender.send(PluginCommand::CreateVirtualBufferInExistingSplit {
-            name,
-            mode,
-            read_only,
+            name: opts.name,
+            mode: opts.mode.unwrap_or_default(),
+            read_only: opts.read_only.unwrap_or(false),
             entries,
-            split_id: SplitId(split_id),
-            show_line_numbers,
-            show_cursors,
-            editing_disabled,
-            line_wrap,
+            split_id: SplitId(opts.split_id),
+            show_line_numbers: opts.show_line_numbers.unwrap_or(true),
+            show_cursors: opts.show_cursors.unwrap_or(true),
+            editing_disabled: opts.editing_disabled.unwrap_or(false),
+            line_wrap: opts.line_wrap,
             request_id: Some(id),
         });
         Ok(id)
@@ -2033,6 +2015,7 @@ impl JsEditorApi {
     }
 
     /// Get text properties at cursor position (returns JS array)
+    #[plugin_api(ts_return = "Array<Record<string, unknown>>")]
     pub fn get_text_properties_at_cursor<'js>(
         &self,
         ctx: rquickjs::Ctx<'js>,

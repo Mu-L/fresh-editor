@@ -16,9 +16,10 @@ use ts_rs::TS;
 
 use crate::services::plugins::api::{
     ActionPopupAction, ActionSpec, BackgroundProcessResult, BufferInfo, BufferSavedDiff,
-    CompositeHunk, CompositeLayoutConfig, CompositePaneStyle, CompositeSourceConfig, CursorInfo,
-    LayoutHints, SpawnResult, TsHighlightSpan, ViewTokenStyle, ViewTokenWire, ViewTokenWireKind,
-    ViewportInfo,
+    CompositeHunk, CompositeLayoutConfig, CompositePaneStyle, CompositeSourceConfig,
+    CreateVirtualBufferInExistingSplitOptions, CreateVirtualBufferInSplitOptions,
+    CreateVirtualBufferOptions, CursorInfo, JsTextPropertyEntry, LayoutHints, SpawnResult,
+    TsHighlightSpan, ViewTokenStyle, ViewTokenWire, ViewTokenWireKind, ViewportInfo,
 };
 
 /// Get the TypeScript declaration for a type by name
@@ -56,19 +57,42 @@ fn get_type_decl(type_name: &str) -> Option<String> {
         "TsActionPopupAction" | "ActionPopupAction" => Some(ActionPopupAction::decl()),
         "TsHighlightSpan" => Some(TsHighlightSpan::decl()),
 
+        // Virtual buffer option types
+        "TextPropertyEntry" | "JsTextPropertyEntry" => Some(JsTextPropertyEntry::decl()),
+        "CreateVirtualBufferOptions" => Some(CreateVirtualBufferOptions::decl()),
+        "CreateVirtualBufferInSplitOptions" => Some(CreateVirtualBufferInSplitOptions::decl()),
+        "CreateVirtualBufferInExistingSplitOptions" => {
+            Some(CreateVirtualBufferInExistingSplitOptions::decl())
+        }
+
         _ => None,
     }
 }
 
+/// Types that are dependencies of other types and must always be included.
+/// These are types referenced inside option structs or other complex types
+/// that aren't directly in method signatures.
+const DEPENDENCY_TYPES: &[&str] = &[
+    "TextPropertyEntry", // Used in CreateVirtualBuffer*Options.entries
+];
+
 /// Collect TypeScript type declarations based on referenced types from proc macro
 ///
 /// Uses `JSEDITORAPI_REFERENCED_TYPES` to determine which types to include.
-/// Falls back to including all known types if the constant isn't available.
+/// Also includes dependency types that are referenced by other types.
 pub fn collect_ts_types() -> String {
     use crate::services::plugins::backend::quickjs_backend::JSEDITORAPI_REFERENCED_TYPES;
 
     let mut types = Vec::new();
     let mut included = std::collections::HashSet::new();
+
+    // First, include dependency types (order matters - dependencies first)
+    for type_name in DEPENDENCY_TYPES {
+        if let Some(decl) = get_type_decl(type_name) {
+            types.push(decl);
+            included.insert(*type_name);
+        }
+    }
 
     // Collect types referenced by the API
     for type_name in JSEDITORAPI_REFERENCED_TYPES {

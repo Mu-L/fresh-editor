@@ -436,7 +436,10 @@ fn rust_to_typescript(ty: &Type, attrs: &[Attribute]) -> String {
                 // Known API types - pass through unchanged
                 "BufferInfo" | "CursorInfo" | "ViewportInfo" | "SpawnResult"
                 | "BackgroundProcessResult" | "DirEntry" | "FileStat"
-                | "CreateVirtualBufferResult" | "PromptSuggestion" | "TextPropertyEntry" => {
+                | "CreateVirtualBufferResult" | "PromptSuggestion" | "TextPropertyEntry"
+                | "JsTextPropertyEntry" | "CreateVirtualBufferOptions"
+                | "CreateVirtualBufferInSplitOptions"
+                | "CreateVirtualBufferInExistingSplitOptions" => {
                     type_name
                 }
 

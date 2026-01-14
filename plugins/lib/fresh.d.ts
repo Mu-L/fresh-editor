@@ -27,11 +27,144 @@ interface ProcessHandle<T> extends PromiseLike<T> {
 type BufferId = number;
 /** Split identifier */
 type SplitId = number;
+type TextPropertyEntry = {
+	/**
+	* Text content for this entry
+	*/
+	text: string;
+	/**
+	* Optional properties attached to this text (e.g., file path, line number)
+	*/
+	properties?: Record<string, unknown>;
+};
 type BackgroundProcessResult = {
 	/**
 	* Unique process ID for later reference
 	*/
 	process_id: number;
+	/**
+	* Process exit code (0 usually means success, -1 if killed)
+	* Only present when the process has exited
+	*/
+	exit_code: number;
+};
+type CreateVirtualBufferInExistingSplitOptions = {
+	/**
+	* Buffer name (displayed in tabs/title)
+	*/
+	name: string;
+	/**
+	* Target split ID (required)
+	*/
+	splitId: number;
+	/**
+	* Mode for keybindings (e.g., "git-log", "search-results")
+	*/
+	mode?: string;
+	/**
+	* Whether buffer is read-only (default: false)
+	*/
+	readOnly?: boolean;
+	/**
+	* Show line numbers in gutter (default: true)
+	*/
+	showLineNumbers?: boolean;
+	/**
+	* Show cursor (default: true)
+	*/
+	showCursors?: boolean;
+	/**
+	* Disable text editing (default: false)
+	*/
+	editingDisabled?: boolean;
+	/**
+	* Enable line wrapping
+	*/
+	lineWrap?: boolean;
+	/**
+	* Initial content entries with optional properties
+	*/
+	entries?: Array<TextPropertyEntry>;
+};
+type CreateVirtualBufferInSplitOptions = {
+	/**
+	* Buffer name (displayed in tabs/title)
+	*/
+	name: string;
+	/**
+	* Mode for keybindings (e.g., "git-log", "search-results")
+	*/
+	mode?: string;
+	/**
+	* Whether buffer is read-only (default: false)
+	*/
+	readOnly?: boolean;
+	/**
+	* Split ratio 0.0-1.0 (default: 0.5)
+	*/
+	ratio?: number;
+	/**
+	* Split direction: "horizontal" or "vertical"
+	*/
+	direction?: string;
+	/**
+	* Panel ID to split from
+	*/
+	panelId?: string;
+	/**
+	* Show line numbers in gutter (default: true)
+	*/
+	showLineNumbers?: boolean;
+	/**
+	* Show cursor (default: true)
+	*/
+	showCursors?: boolean;
+	/**
+	* Disable text editing (default: false)
+	*/
+	editingDisabled?: boolean;
+	/**
+	* Enable line wrapping
+	*/
+	lineWrap?: boolean;
+	/**
+	* Initial content entries with optional properties
+	*/
+	entries?: Array<TextPropertyEntry>;
+};
+type CreateVirtualBufferOptions = {
+	/**
+	* Buffer name (displayed in tabs/title)
+	*/
+	name: string;
+	/**
+	* Mode for keybindings (e.g., "git-log", "search-results")
+	*/
+	mode?: string;
+	/**
+	* Whether buffer is read-only (default: false)
+	*/
+	readOnly?: boolean;
+	/**
+	* Show line numbers in gutter (default: false)
+	*/
+	showLineNumbers?: boolean;
+	/**
+	* Show cursor (default: true)
+	*/
+	showCursors?: boolean;
+	/**
+	* Disable text editing (default: false)
+	*/
+	editingDisabled?: boolean;
+	/**
+	* Hide from tab bar (default: false)
+	*/
+	hiddenFromTabs?: boolean;
+	/**
+	* Initial content entries with optional properties
+	*/
+	entries?: Array<TextPropertyEntry>;
 };
 type SpawnResult = {
 	/**
@@ -298,7 +431,7 @@ interface EditorAPI {
 	/**
 	* Add an overlay with styling
 	*/
-	addOverlay(bufferId: number, namespace: string, start: number, end: number, r: number, g: number, b: number, underline: boolean, bold: boolean, italic: boolean, bgR: number, bgG: number, bgB: number, extendToLineEnd: boolean): boolean;
+	addOverlay(bufferId: number, namespace: string, start: number, end: number, r: number, g: number, b: number, underline: boolean, bold: boolean, italic: boolean, bgR?: number, bgG?: number, bgB?: number, extendToLineEnd?: boolean): boolean;
 	/**
 	* Clear all overlays in a namespace
 	*/
@@ -370,7 +503,7 @@ interface EditorAPI {
 	/**
 	* Define a buffer mode (takes bindings as array of [key, command] pairs)
 	*/
-	defineMode(name: string, parent: string | null, bindingsArr: string[][]): boolean;
+	defineMode(name: string, parent: string | null, bindingsArr: string[][], readOnly?: boolean): boolean;
 	/**
 	* Set the global editor mode
 	*/
@@ -454,15 +587,15 @@ interface EditorAPI {
 	/**
 	* Create a virtual buffer in current split (async, returns buffer ID)
 	*/
-	createVirtualBuffer(opts: Record<string, unknown>): Promise<number>;
+	createVirtualBuffer(opts: CreateVirtualBufferOptions): Promise<number>;
 	/**
 	* Create a virtual buffer in a new split (async, returns request_id)
 	*/
-	createVirtualBufferInSplit(opts: Record<string, unknown>): Promise<number>;
+	createVirtualBufferInSplit(opts: CreateVirtualBufferInSplitOptions): Promise<number>;
 	/**
 	* Create a virtual buffer in an existing split (async, returns request_id)
 	*/
-	createVirtualBufferInExistingSplit(opts: Record<string, unknown>): Promise<number>;
+	createVirtualBufferInExistingSplit(opts: CreateVirtualBufferInExistingSplitOptions): Promise<number>;
 	/**
 	* Set virtual buffer content (takes array of entry objects)
 	*/
@@ -470,11 +603,11 @@ interface EditorAPI {
 	/**
 	* Get text properties at cursor position (returns JS array)
 	*/
-	getTextPropertiesAtCursor(bufferId: number): unknown;
+	getTextPropertiesAtCursor(bufferId: number): Array<Record<string, unknown>>;
 	/**
 	* Spawn a process (async, returns request_id)
 	*/
-	spawnProcess(command: string, args: string[], cwd: string | null): ProcessHandle<SpawnResult>;
+	spawnProcess(command: string, args: string[], cwd?: string): ProcessHandle<SpawnResult>;
 	/**
 	* Wait for a process to complete and get its result (async)
 	*/
@@ -494,7 +627,7 @@ interface EditorAPI {
 	/**
 	* Spawn a background process (async, returns request_id which is also process_id)
 	*/
-	spawnBackgroundProcess(command: string, args: string[], cwd: string | null): ProcessHandle<BackgroundProcessResult>;
+	spawnBackgroundProcess(command: string, args: string[], cwd?: string): ProcessHandle<BackgroundProcessResult>;
 	/**
 	* Kill a background process
 	*/
