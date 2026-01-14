@@ -1677,6 +1677,10 @@ fn test_clangd_plugin_switch_source_header() -> anyhow::Result<()> {
 /// Test that plugin commands show the plugin name as source in command palette
 #[test]
 fn test_plugin_command_source_in_palette() {
+    // Initialize tracing and signal handlers for debugging
+    init_tracing_from_env();
+    fresh::services::signal_handler::install_signal_handlers();
+
     // Create a temporary project directory
     let temp_dir = tempfile::TempDir::new().unwrap();
     let project_root = temp_dir.path().join("project_root");
@@ -1696,7 +1700,7 @@ editor.registerCommand(
     "Test Source Plugin Command",
     "A special command for testing",
     "test_source_action",
-    "normal"
+    null
 );
 
 editor.setStatus("Test source plugin loaded!");
