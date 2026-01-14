@@ -465,7 +465,9 @@ export class Finder<T> {
         options.initialQuery
       );
     } else {
-      this.editor.startPrompt(options.title, this.config.id);
+      this.editor.debug(`[Finder] calling startPrompt with title="${options.title}", id="${this.config.id}"`);
+      const result = this.editor.startPrompt(options.title, this.config.id);
+      this.editor.debug(`[Finder] startPrompt returned: ${result}`);
     }
     this.editor.setStatus("Type to search...");
   }
