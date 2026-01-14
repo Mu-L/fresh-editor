@@ -2580,13 +2580,14 @@ impl QuickJsBackend {
             for handler_name in &handler_names {
                 // Call the handler and properly handle both sync and async errors
                 // Async handlers return Promises - we attach .catch() to surface rejections
+                // Use bracket notation for handler names to support names with special characters like dashes
                 let code = format!(
                     r#"
                     (function() {{
                         try {{
                             const data = JSON.parse({});
-                            if (typeof globalThis.{} === 'function') {{
-                                const result = globalThis.{}(data);
+                            if (typeof globalThis["{}"] === 'function') {{
+                                const result = globalThis["{}"](data);
                                 // If handler returns a Promise, catch rejections
                                 if (result && typeof result.then === 'function') {{
                                     result.catch(function(e) {{
