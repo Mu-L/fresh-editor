@@ -1083,6 +1083,133 @@ impl JsEditorApi {
             .is_ok()
     }
 
+    /// Remove an overlay by its handle
+    pub fn remove_overlay(&self, buffer_id: u32, handle: String) -> bool {
+        use crate::view::overlay::OverlayHandle;
+        self.command_sender
+            .send(PluginCommand::RemoveOverlay {
+                buffer_id: BufferId(buffer_id as usize),
+                handle: OverlayHandle(handle),
+            })
+            .is_ok()
+    }
+
+    // === View Transform ===
+
+    /// Submit a view transform for a buffer/split
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit_view_transform<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        buffer_id: u32,
+        split_id: Option<u32>,
+        start: u32,
+        end: u32,
+        tokens: Vec<rquickjs::Object<'js>>,
+        _layout_hints: rquickjs::function::Opt<rquickjs::Object<'js>>,
+    ) -> rquickjs::Result<bool> {
+        use crate::services::plugins::api::{ViewTransformPayload, ViewTokenWire, ViewTokenWireKind, ViewTokenStyle};
+
+        let tokens: Vec<ViewTokenWire> = tokens
+            .into_iter()
+            .map(|obj| {
+                let kind_str: String = obj.get("kind").unwrap_or_default();
+                let text: String = obj.get("text").unwrap_or_default();
+                let source_offset: Option<usize> = obj.get("sourceOffset").ok();
+
+                let kind = match kind_str.as_str() {
+                    "text" => ViewTokenWireKind::Text(text),
+                    "newline" => ViewTokenWireKind::Newline,
+                    "space" => ViewTokenWireKind::Space,
+                    "break" => ViewTokenWireKind::Break,
+                    _ => ViewTokenWireKind::Text(text),
+                };
+
+                let style = obj.get::<_, rquickjs::Object>("style").ok().map(|s| {
+                    let fg: Option<Vec<u8>> = s.get("fg").ok();
+                    let bg: Option<Vec<u8>> = s.get("bg").ok();
+                    ViewTokenStyle {
+                        fg: fg.and_then(|c| if c.len() >= 3 { Some((c[0], c[1], c[2])) } else { None }),
+                        bg: bg.and_then(|c| if c.len() >= 3 { Some((c[0], c[1], c[2])) } else { None }),
+                        bold: s.get("bold").unwrap_or(false),
+                        italic: s.get("italic").unwrap_or(false),
+                    }
+                });
+
+                ViewTokenWire {
+                    source_offset,
+                    kind,
+                    style,
+                }
+            })
+            .collect();
+
+        let payload = ViewTransformPayload {
+            range: (start as usize)..(end as usize),
+            tokens,
+            layout_hints: None,
+        };
+
+        Ok(self
+            .command_sender
+            .send(PluginCommand::SubmitViewTransform {
+                buffer_id: BufferId(buffer_id as usize),
+                split_id: split_id.map(|id| SplitId(id as usize)),
+                payload,
+            })
+            .is_ok())
+    }
+
+    /// Clear view transform for a buffer/split
+    pub fn clear_view_transform(&self, buffer_id: u32, split_id: Option<u32>) -> bool {
+        self.command_sender
+            .send(PluginCommand::ClearViewTransform {
+                buffer_id: BufferId(buffer_id as usize),
+                split_id: split_id.map(|id| SplitId(id as usize)),
+            })
+            .is_ok()
+    }
+
+    // === File Explorer ===
+
+    /// Set file explorer decorations for a namespace
+    pub fn set_file_explorer_decorations<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        namespace: String,
+        decorations: Vec<rquickjs::Object<'js>>,
+    ) -> rquickjs::Result<bool> {
+        use crate::view::file_tree::FileExplorerDecoration;
+
+        let decorations: Vec<FileExplorerDecoration> = decorations
+            .into_iter()
+            .map(|obj| {
+                let color: Vec<u8> = obj.get("color").unwrap_or_else(|_| vec![128, 128, 128]);
+                FileExplorerDecoration {
+                    path: std::path::PathBuf::from(obj.get::<_, String>("path").unwrap_or_default()),
+                    symbol: obj.get("symbol").unwrap_or_default(),
+                    color: if color.len() >= 3 { (color[0], color[1], color[2]) } else { (128, 128, 128) },
+                    priority: obj.get("priority").unwrap_or(0),
+                }
+            })
+            .collect();
+
+        Ok(self
+            .command_sender
+            .send(PluginCommand::SetFileExplorerDecorations {
+                namespace,
+                decorations,
+            })
+            .is_ok())
+    }
+
+    /// Clear file explorer decorations for a namespace
+    pub fn clear_file_explorer_decorations(&self, namespace: String) -> bool {
+        self.command_sender
+            .send(PluginCommand::ClearFileExplorerDecorations { namespace })
+            .is_ok()
+    }
+
     // === Virtual Text ===
 
     /// Add virtual text (inline text that doesn't exist in the buffer)
