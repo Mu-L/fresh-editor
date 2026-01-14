@@ -35,6 +35,66 @@ fn main() {
     if let Err(e) = generate_typescript_types() {
         eprintln!("Warning: Failed to generate TypeScript types: {}", e);
     }
+
+    // Generate plugins content hash for cache invalidation
+    #[cfg(feature = "embed-plugins")]
+    {
+        println!("cargo::rerun-if-changed=plugins");
+        if let Err(e) = generate_plugins_hash() {
+            eprintln!("Warning: Failed to generate plugins hash: {}", e);
+        }
+    }
+}
+
+/// Generate a hash of all plugin files for cache invalidation
+#[cfg(feature = "embed-plugins")]
+fn generate_plugins_hash() -> Result<(), Box<dyn std::error::Error>> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let plugins_dir = Path::new("plugins");
+    let mut hasher = DefaultHasher::new();
+
+    // Hash all files in the plugins directory recursively
+    hash_directory(plugins_dir, &mut hasher)?;
+
+    let hash = format!("{:016x}", hasher.finish());
+
+    let out_dir = std::env::var("OUT_DIR")?;
+    let dest_path = Path::new(&out_dir).join("plugins_hash.txt");
+    fs::write(&dest_path, &hash)?;
+
+    println!("cargo::warning=Generated plugins hash: {}", hash);
+    Ok(())
+}
+
+#[cfg(feature = "embed-plugins")]
+fn hash_directory(dir: &Path, hasher: &mut impl std::hash::Hasher) -> std::io::Result<()> {
+    use std::hash::Hash;
+
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
+    // Sort for deterministic ordering
+    entries.sort_by_key(|e| e.path());
+
+    for entry in entries {
+        let path = entry.path();
+        // Hash the relative path
+        path.strip_prefix("plugins").unwrap_or(&path).hash(hasher);
+
+        if path.is_dir() {
+            hash_directory(&path, hasher)?;
+        } else {
+            // Hash file contents
+            let contents = fs::read(&path)?;
+            contents.hash(hasher);
+        }
+    }
+
+    Ok(())
 }
 
 /// Generate a Rust file with the list of available locales from the locales directory

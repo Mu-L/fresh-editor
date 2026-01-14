@@ -18,49 +18,78 @@ static EXTRACTED_PLUGINS_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Get the path to the embedded plugins directory.
 ///
-/// On first call, this extracts the embedded plugins to a temporary directory.
-/// The directory persists for the lifetime of the process.
+/// On first call, this extracts the embedded plugins to a cache directory.
+/// The cache is content-addressed, so unchanged plugins are reused across runs.
 ///
 /// Returns `None` if extraction fails.
 pub fn get_embedded_plugins_dir() -> Option<&'static PathBuf> {
-    EXTRACTED_PLUGINS_DIR.get_or_init(|| {
-        match extract_plugins() {
-            Ok(path) => path,
-            Err(e) => {
-                tracing::error!("Failed to extract embedded plugins: {}", e);
-                // Return a non-existent path - the caller will handle missing dirs
-                PathBuf::from("/nonexistent-embedded-plugins")
-            }
+    EXTRACTED_PLUGINS_DIR.get_or_init(|| match extract_plugins() {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::error!("Failed to extract embedded plugins: {}", e);
+            PathBuf::new()
         }
     });
 
     let path = EXTRACTED_PLUGINS_DIR.get()?;
-    if path.exists() {
+    if path.exists()
+        && path
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
         Some(path)
     } else {
         None
     }
 }
 
-/// Extract embedded plugins to a temporary directory
+/// Content hash of embedded plugins, computed at build time
+const PLUGINS_CONTENT_HASH: &str = include_str!(concat!(env!("OUT_DIR"), "/plugins_hash.txt"));
+
+/// Get the cache directory for extracted plugins
+fn get_cache_dir() -> Option<PathBuf> {
+    dirs::cache_dir().map(|p| p.join("fresh").join("embedded-plugins"))
+}
+
+/// Extract embedded plugins to the cache directory
 fn extract_plugins() -> Result<PathBuf, std::io::Error> {
-    // Create a persistent temp directory (won't be auto-deleted)
-    // tempdir()? creates the dir, keep() prevents auto-deletion and returns PathBuf
-    let temp_dir = tempfile::Builder::new()
-        .prefix("fresh-plugins-")
-        .tempdir()?
-        .keep();
+    let cache_base = get_cache_dir().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not determine cache directory",
+        )
+    })?;
 
-    tracing::info!("Extracting embedded plugins to: {:?}", temp_dir);
+    let content_hash = PLUGINS_CONTENT_HASH.trim();
+    let cache_dir = cache_base.join(&content_hash);
 
-    extract_dir_recursive(&EMBEDDED_PLUGINS, &temp_dir)?;
+    // Check if already extracted
+    if cache_dir.exists() && cache_dir.read_dir()?.next().is_some() {
+        tracing::info!("Using cached embedded plugins from: {:?}", cache_dir);
+        return Ok(cache_dir);
+    }
+
+    tracing::info!("Extracting embedded plugins to: {:?}", cache_dir);
+
+    // Clean up old cache versions (move to trash for safety)
+    if cache_base.exists() {
+        for entry in std::fs::read_dir(&cache_base)? {
+            let entry = entry?;
+            if entry.file_name() != content_hash {
+                let _ = trash::delete(entry.path());
+            }
+        }
+    }
+
+    extract_dir_recursive(&EMBEDDED_PLUGINS, &cache_dir)?;
 
     tracing::info!(
         "Successfully extracted {} embedded plugin files",
         count_files(&EMBEDDED_PLUGINS)
     );
 
-    Ok(temp_dir)
+    Ok(cache_dir)
 }
 
 /// Recursively extract a directory and its contents
