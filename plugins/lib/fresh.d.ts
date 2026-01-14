@@ -47,6 +47,13 @@ type SpawnResult = {
 	*/
 	exit_code: number;
 };
+type TsHighlightSpan = {
+	start: number;
+	end: number;
+	color: [number, number, number];
+	bold: boolean;
+	italic: boolean;
+};
 /**
 * Main editor API interface
 */
@@ -252,6 +259,42 @@ interface EditorAPI {
 	* Get list of builtin themes as JS object
 	*/
 	getBuiltinThemes(): unknown;
+	/**
+	* Delete a custom theme (alias for deleteThemeSync)
+	*/
+	deleteTheme(name: string): boolean;
+	/**
+	* Get file stat information
+	*/
+	fileStat(path: string): unknown;
+	/**
+	* Check if a background process is still running
+	*/
+	isProcessRunning(processId: number): boolean;
+	/**
+	* Kill a process by ID (alias for killBackgroundProcess)
+	*/
+	killProcess(processId: number): boolean;
+	/**
+	* Translate a key for a specific plugin
+	*/
+	pluginTranslate(pluginName: string, key: string, args?: Record<string, unknown>): string;
+	/**
+	* Create a composite buffer (async)
+	*/
+	createCompositeBuffer(opts: Record<string, unknown>): Promise<number>;
+	/**
+	* Update alignment hunks for a composite buffer
+	*/
+	updateCompositeAlignment(bufferId: number, hunks: Record<string, unknown>[]): boolean;
+	/**
+	* Close a composite buffer
+	*/
+	closeCompositeBuffer(bufferId: number): boolean;
+	/**
+	* Request syntax highlights for a buffer range (async)
+	*/
+	getHighlights(bufferId: number, start: number, end: number): Promise<TsHighlightSpan[]>;
 	/**
 	* Add an overlay with styling
 	*/

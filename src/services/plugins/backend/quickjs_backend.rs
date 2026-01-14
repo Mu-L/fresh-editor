@@ -1003,6 +1003,204 @@ impl JsEditorApi {
         false
     }
 
+    /// Delete a custom theme (alias for deleteThemeSync)
+    pub fn delete_theme(&self, name: String) -> bool {
+        self.delete_theme_sync(name)
+    }
+
+    // === File Stats ===
+
+    /// Get file stat information
+    pub fn file_stat<'js>(&self, ctx: rquickjs::Ctx<'js>, path: String) -> rquickjs::Result<Value<'js>> {
+        let metadata = std::fs::metadata(&path).ok();
+        let stat = metadata.map(|m| {
+            serde_json::json!({
+                "isFile": m.is_file(),
+                "isDir": m.is_dir(),
+                "size": m.len(),
+                "readonly": m.permissions().readonly(),
+            })
+        });
+        rquickjs_serde::to_value(ctx, &stat)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    // === Process Management ===
+
+    /// Check if a background process is still running
+    pub fn is_process_running(&self, process_id: u64) -> bool {
+        // This would need to check against tracked processes
+        // For now, return false - proper implementation needs process tracking
+        false
+    }
+
+    /// Kill a process by ID (alias for killBackgroundProcess)
+    pub fn kill_process(&self, process_id: u64) -> bool {
+        self.command_sender
+            .send(PluginCommand::KillBackgroundProcess { process_id })
+            .is_ok()
+    }
+
+    // === Translation ===
+
+    /// Translate a key for a specific plugin
+    pub fn plugin_translate<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        plugin_name: String,
+        key: String,
+        args: rquickjs::function::Opt<rquickjs::Object<'js>>,
+    ) -> String {
+        let args_map: HashMap<String, String> = args.0
+            .map(|obj| {
+                let mut map = HashMap::new();
+                for result in obj.props::<String, String>() {
+                    if let Ok((k, v)) = result {
+                        map.insert(k, v);
+                    }
+                }
+                map
+            })
+            .unwrap_or_default();
+
+        crate::i18n::translate_plugin_string(&plugin_name, &key, &args_map)
+    }
+
+    // === Composite Buffers ===
+
+    /// Create a composite buffer (async)
+    #[plugin_api(async_promise, js_name = "createCompositeBuffer", ts_return = "number")]
+    #[qjs(rename = "_createCompositeBufferStart")]
+    pub fn create_composite_buffer_start<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        opts: rquickjs::Object<'js>,
+    ) -> rquickjs::Result<u64> {
+        use crate::services::plugins::api::{CompositeLayoutConfig, CompositeSourceConfig, CompositeHunk, CompositePaneStyle};
+
+        let id = {
+            let mut id_ref = self.next_request_id.borrow_mut();
+            let id = *id_ref;
+            *id_ref += 1;
+            id
+        };
+
+        let name: String = opts.get("name").unwrap_or_default();
+        let mode: String = opts.get("mode").unwrap_or_default();
+
+        // Parse layout
+        let layout_obj: rquickjs::Object = opts.get("layout")?;
+        let layout = CompositeLayoutConfig {
+            layout_type: layout_obj.get("type").unwrap_or_else(|_| "side-by-side".to_string()),
+            ratios: layout_obj.get("ratios").ok(),
+            show_separator: layout_obj.get("showSeparator").unwrap_or(true),
+            spacing: layout_obj.get("spacing").ok(),
+        };
+
+        // Parse sources
+        let sources_arr: Vec<rquickjs::Object> = opts.get("sources").unwrap_or_default();
+        let sources: Vec<CompositeSourceConfig> = sources_arr
+            .into_iter()
+            .map(|obj| {
+                let style_obj: Option<rquickjs::Object> = obj.get("style").ok();
+                let style = style_obj.map(|s| CompositePaneStyle {
+                    add_bg: None,
+                    remove_bg: None,
+                    modify_bg: None,
+                    gutter_style: s.get("gutterStyle").ok(),
+                });
+                CompositeSourceConfig {
+                    buffer_id: obj.get::<_, usize>("bufferId").unwrap_or(0),
+                    label: obj.get("label").unwrap_or_default(),
+                    editable: obj.get("editable").unwrap_or(false),
+                    style,
+                }
+            })
+            .collect();
+
+        // Parse hunks (optional)
+        let hunks: Option<Vec<CompositeHunk>> = opts.get::<_, Vec<rquickjs::Object>>("hunks").ok().map(|arr| {
+            arr.into_iter()
+                .map(|obj| CompositeHunk {
+                    old_start: obj.get("oldStart").unwrap_or(0),
+                    old_count: obj.get("oldCount").unwrap_or(0),
+                    new_start: obj.get("newStart").unwrap_or(0),
+                    new_count: obj.get("newCount").unwrap_or(0),
+                })
+                .collect()
+        });
+
+        let _ = self.command_sender.send(PluginCommand::CreateCompositeBuffer {
+            name,
+            mode,
+            layout,
+            sources,
+            hunks,
+            request_id: Some(id),
+        });
+
+        Ok(id)
+    }
+
+    /// Update alignment hunks for a composite buffer
+    pub fn update_composite_alignment<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        buffer_id: u32,
+        hunks: Vec<rquickjs::Object<'js>>,
+    ) -> rquickjs::Result<bool> {
+        use crate::services::plugins::api::CompositeHunk;
+
+        let hunks: Vec<CompositeHunk> = hunks
+            .into_iter()
+            .map(|obj| CompositeHunk {
+                old_start: obj.get("oldStart").unwrap_or(0),
+                old_count: obj.get("oldCount").unwrap_or(0),
+                new_start: obj.get("newStart").unwrap_or(0),
+                new_count: obj.get("newCount").unwrap_or(0),
+            })
+            .collect();
+
+        Ok(self
+            .command_sender
+            .send(PluginCommand::UpdateCompositeAlignment {
+                buffer_id: BufferId(buffer_id as usize),
+                hunks,
+            })
+            .is_ok())
+    }
+
+    /// Close a composite buffer
+    pub fn close_composite_buffer(&self, buffer_id: u32) -> bool {
+        self.command_sender
+            .send(PluginCommand::CloseCompositeBuffer {
+                buffer_id: BufferId(buffer_id as usize),
+            })
+            .is_ok()
+    }
+
+    // === Highlights ===
+
+    /// Request syntax highlights for a buffer range (async)
+    #[plugin_api(async_promise, js_name = "getHighlights", ts_return = "TsHighlightSpan[]")]
+    #[qjs(rename = "_getHighlightsStart")]
+    pub fn get_highlights_start(&self, buffer_id: u32, start: u32, end: u32) -> u64 {
+        let id = {
+            let mut id_ref = self.next_request_id.borrow_mut();
+            let id = *id_ref;
+            *id_ref += 1;
+            id
+        };
+
+        let _ = self.command_sender.send(PluginCommand::RequestHighlights {
+            buffer_id: BufferId(buffer_id as usize),
+            range: (start as usize)..(end as usize),
+            request_id: id,
+        });
+
+        id
+    }
+
     // === Overlays ===
 
     /// Add an overlay with styling
