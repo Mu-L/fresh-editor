@@ -3102,7 +3102,10 @@ mod tests {
             .borrow_mut()
             .entry("test_event".to_string())
             .or_default()
-            .push("testHandler".to_string());
+            .push(PluginHandler {
+                plugin_name: "test".to_string(),
+                handler_name: "testHandler".to_string(),
+            });
 
         // Now has handlers
         assert!(backend.has_handlers("test_event"));
@@ -3368,7 +3371,10 @@ mod tests {
         // Register an action with a different handler name
         backend.registered_actions.borrow_mut().insert(
             "my_action".to_string(),
-            "actual_handler_function".to_string(),
+            PluginHandler {
+                plugin_name: "test".to_string(),
+                handler_name: "actual_handler_function".to_string(),
+            },
         );
 
         backend
@@ -3624,7 +3630,7 @@ mod tests {
             .unwrap();
 
         // Verify by reading back - getCursorPosition returns byte offset as u32
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: u32 = global.get("_testResult").unwrap();
             assert_eq!(result, 42);
@@ -3651,7 +3657,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             assert_eq!(global.get::<_, String>("_dirname").unwrap(), "/foo/bar");
             assert_eq!(global.get::<_, String>("_basename").unwrap(), "baz.txt");
@@ -3754,12 +3760,12 @@ mod tests {
         backend.resolve_callback(JsCallbackId::from(request_id), "\"hello world\"");
 
         // Drive the Promise to completion
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             run_pending_jobs_checked(&ctx, "test async getText");
         });
 
         // Verify the Promise resolved with the text
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: String = global.get("_resolvedText").unwrap();
             assert_eq!(result, "hello world");
@@ -3781,7 +3787,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             // Without actual translations, it returns the key
             let result: String = global.get("_translated").unwrap();
@@ -3820,7 +3826,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let greeting: String = global.get("_greeting").unwrap();
             assert_eq!(greeting, "Hello, World!");
@@ -4060,7 +4066,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let is_object: bool = global.get("_isObject").unwrap();
             // getThemeSchema should return an object
@@ -4083,7 +4089,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let is_object: bool = global.get("_isObject").unwrap();
             // getBuiltinThemes should return an object
@@ -4205,7 +4211,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let is_array: bool = global.get("_isArray").unwrap();
             let length: u32 = global.get("_length").unwrap();
@@ -4322,7 +4328,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: u32 = global.get("_activeId").unwrap();
             assert_eq!(result, 42);
@@ -4352,7 +4358,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: u32 = global.get("_splitId").unwrap();
             assert_eq!(result, 7);
@@ -4376,7 +4382,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: bool = global.get("_exists").unwrap();
             assert!(result);
@@ -4397,7 +4403,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: String = global.get("_cwd").unwrap();
             // Should return some path
@@ -4422,7 +4428,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: Option<String> = global.get("_envVal").unwrap();
             assert_eq!(result, Some("test_value".to_string()));
@@ -4446,7 +4452,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let is_object: bool = global.get("_isObject").unwrap();
             // getConfig should return an object, not a string
@@ -4468,7 +4474,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let result: String = global.get("_themesDir").unwrap();
             // Should return some path
@@ -4494,7 +4500,7 @@ mod tests {
             )
             .unwrap();
 
-        backend.context.with(|ctx| {
+        backend.plugin_contexts.borrow().get("test").unwrap().clone().with(|ctx| {
             let global = ctx.globals();
             let is_array: bool = global.get("_isArray").unwrap();
             let length: u32 = global.get("_length").unwrap();
