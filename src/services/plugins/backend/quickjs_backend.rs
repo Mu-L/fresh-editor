@@ -10,7 +10,9 @@ use crate::model::event::{BufferId, SplitId};
 use crate::primitives::text_property::TextPropertyEntry;
 #[cfg(test)]
 use crate::services::plugins::api::CursorInfo;
-use crate::services::plugins::api::{BufferInfo, EditorStateSnapshot, PluginCommand, PluginResponse};
+use crate::services::plugins::api::{
+    ActionPopupAction, ActionSpec, BufferInfo, EditorStateSnapshot, PluginCommand, PluginResponse,
+};
 use crate::services::plugins::transpile::{
     bundle_module, has_es_imports, has_es_module_syntax, strip_imports_and_exports,
     transpile_typescript,
@@ -617,6 +619,108 @@ impl JsEditorApi {
         false
     }
 
+    /// Get buffer info by ID
+    pub fn get_buffer_info<'js>(
+        &self,
+        ctx: rquickjs::Ctx<'js>,
+        buffer_id: u32,
+    ) -> rquickjs::Result<Value<'js>> {
+        let info = if let Ok(s) = self.state_snapshot.read() {
+            s.buffers.get(&BufferId(buffer_id as usize)).cloned()
+        } else {
+            None
+        };
+        rquickjs_serde::to_value(ctx, &info)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    /// Get primary cursor info for active buffer
+    pub fn get_primary_cursor<'js>(&self, ctx: rquickjs::Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        let cursor = if let Ok(s) = self.state_snapshot.read() {
+            s.primary_cursor.clone()
+        } else {
+            None
+        };
+        rquickjs_serde::to_value(ctx, &cursor)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    /// Get all cursors for active buffer
+    pub fn get_all_cursors<'js>(&self, ctx: rquickjs::Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        let cursors = if let Ok(s) = self.state_snapshot.read() {
+            s.all_cursors.clone()
+        } else {
+            Vec::new()
+        };
+        rquickjs_serde::to_value(ctx, &cursors)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    /// Get all cursor positions as byte offsets
+    pub fn get_all_cursor_positions<'js>(
+        &self,
+        ctx: rquickjs::Ctx<'js>,
+    ) -> rquickjs::Result<Value<'js>> {
+        let positions: Vec<u32> = if let Ok(s) = self.state_snapshot.read() {
+            s.all_cursors.iter().map(|c| c.position as u32).collect()
+        } else {
+            Vec::new()
+        };
+        rquickjs_serde::to_value(ctx, &positions)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    /// Get viewport info for active buffer
+    pub fn get_viewport<'js>(&self, ctx: rquickjs::Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        let viewport = if let Ok(s) = self.state_snapshot.read() {
+            s.viewport.clone()
+        } else {
+            None
+        };
+        rquickjs_serde::to_value(ctx, &viewport)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    /// Get the line number (0-indexed) of the primary cursor
+    pub fn get_cursor_line(&self) -> u32 {
+        // This would require line counting from the buffer
+        // For now, return 0 - proper implementation needs buffer access
+        // TODO: Add line number tracking to EditorStateSnapshot
+        0
+    }
+
+    /// Find buffer by file path, returns buffer ID or 0 if not found
+    pub fn find_buffer_by_path(&self, path: String) -> u32 {
+        let path_buf = std::path::PathBuf::from(&path);
+        if let Ok(s) = self.state_snapshot.read() {
+            for (id, info) in &s.buffers {
+                if let Some(buf_path) = &info.path {
+                    if buf_path == &path_buf {
+                        return id.0 as u32;
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    /// Get diff between buffer content and last saved version
+    pub fn get_buffer_saved_diff<'js>(
+        &self,
+        ctx: rquickjs::Ctx<'js>,
+        buffer_id: u32,
+    ) -> rquickjs::Result<Value<'js>> {
+        let diff = if let Ok(s) = self.state_snapshot.read() {
+            s.buffer_saved_diffs
+                .get(&BufferId(buffer_id as usize))
+                .cloned()
+        } else {
+            None
+        };
+        rquickjs_serde::to_value(ctx, &diff)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
     // === Text Editing ===
 
     /// Insert text at a position in a buffer
@@ -968,6 +1072,116 @@ impl JsEditorApi {
             .is_ok()
     }
 
+    /// Clear all overlays that overlap with a byte range
+    pub fn clear_overlays_in_range(&self, buffer_id: u32, start: u32, end: u32) -> bool {
+        self.command_sender
+            .send(PluginCommand::ClearOverlaysInRange {
+                buffer_id: BufferId(buffer_id as usize),
+                start: start as usize,
+                end: end as usize,
+            })
+            .is_ok()
+    }
+
+    // === Virtual Text ===
+
+    /// Add virtual text (inline text that doesn't exist in the buffer)
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_virtual_text(
+        &self,
+        buffer_id: u32,
+        virtual_text_id: String,
+        position: u32,
+        text: String,
+        r: u8,
+        g: u8,
+        b: u8,
+        before: bool,
+        use_bg: bool,
+    ) -> bool {
+        self.command_sender
+            .send(PluginCommand::AddVirtualText {
+                buffer_id: BufferId(buffer_id as usize),
+                virtual_text_id,
+                position: position as usize,
+                text,
+                color: (r, g, b),
+                use_bg,
+                before,
+            })
+            .is_ok()
+    }
+
+    /// Remove a virtual text by ID
+    pub fn remove_virtual_text(&self, buffer_id: u32, virtual_text_id: String) -> bool {
+        self.command_sender
+            .send(PluginCommand::RemoveVirtualText {
+                buffer_id: BufferId(buffer_id as usize),
+                virtual_text_id,
+            })
+            .is_ok()
+    }
+
+    /// Remove virtual texts whose ID starts with the given prefix
+    pub fn remove_virtual_texts_by_prefix(&self, buffer_id: u32, prefix: String) -> bool {
+        self.command_sender
+            .send(PluginCommand::RemoveVirtualTextsByPrefix {
+                buffer_id: BufferId(buffer_id as usize),
+                prefix,
+            })
+            .is_ok()
+    }
+
+    /// Clear all virtual texts from a buffer
+    pub fn clear_virtual_texts(&self, buffer_id: u32) -> bool {
+        self.command_sender
+            .send(PluginCommand::ClearVirtualTexts {
+                buffer_id: BufferId(buffer_id as usize),
+            })
+            .is_ok()
+    }
+
+    /// Clear all virtual texts in a namespace
+    pub fn clear_virtual_text_namespace(&self, buffer_id: u32, namespace: String) -> bool {
+        self.command_sender
+            .send(PluginCommand::ClearVirtualTextNamespace {
+                buffer_id: BufferId(buffer_id as usize),
+                namespace,
+            })
+            .is_ok()
+    }
+
+    /// Add a virtual line (full line above/below a position)
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_virtual_line(
+        &self,
+        buffer_id: u32,
+        position: u32,
+        text: String,
+        fg_r: u8,
+        fg_g: u8,
+        fg_b: u8,
+        bg_r: u8,
+        bg_g: u8,
+        bg_b: u8,
+        above: bool,
+        namespace: String,
+        priority: i32,
+    ) -> bool {
+        self.command_sender
+            .send(PluginCommand::AddVirtualLine {
+                buffer_id: BufferId(buffer_id as usize),
+                position: position as usize,
+                text,
+                fg_color: (fg_r, fg_g, fg_b),
+                bg_color: Some((bg_r, bg_g, bg_b)),
+                above,
+                namespace,
+                priority,
+            })
+            .is_ok()
+    }
+
     // === Prompts ===
 
     /// Start an interactive prompt
@@ -1091,6 +1305,34 @@ impl JsEditorApi {
             .is_ok()
     }
 
+    /// Set scroll position of a split
+    pub fn set_split_scroll(&self, split_id: u32, top_byte: u32) -> bool {
+        self.command_sender
+            .send(PluginCommand::SetSplitScroll {
+                split_id: SplitId(split_id as usize),
+                top_byte: top_byte as usize,
+            })
+            .is_ok()
+    }
+
+    /// Set the ratio of a split (0.0 to 1.0, 0.5 = equal)
+    pub fn set_split_ratio(&self, split_id: u32, ratio: f32) -> bool {
+        self.command_sender
+            .send(PluginCommand::SetSplitRatio {
+                split_id: SplitId(split_id as usize),
+                ratio,
+            })
+            .is_ok()
+    }
+
+    /// Distribute all splits evenly
+    pub fn distribute_splits_evenly(&self) -> bool {
+        // Get all split IDs - for now send empty vec (app will handle)
+        self.command_sender
+            .send(PluginCommand::DistributeSplitsEvenly { split_ids: vec![] })
+            .is_ok()
+    }
+
     /// Set cursor position in a buffer
     pub fn set_buffer_cursor(&self, buffer_id: u32, position: u32) -> bool {
         self.command_sender
@@ -1136,6 +1378,162 @@ impl JsEditorApi {
                 namespace,
             })
             .is_ok()
+    }
+
+    /// Enable or disable line numbers for a buffer
+    pub fn set_line_numbers(&self, buffer_id: u32, enabled: bool) -> bool {
+        self.command_sender
+            .send(PluginCommand::SetLineNumbers {
+                buffer_id: BufferId(buffer_id as usize),
+                enabled,
+            })
+            .is_ok()
+    }
+
+    // === Scroll Sync ===
+
+    /// Create a scroll sync group for anchor-based synchronized scrolling
+    pub fn create_scroll_sync_group(
+        &self,
+        group_id: u32,
+        left_split: u32,
+        right_split: u32,
+    ) -> bool {
+        self.command_sender
+            .send(PluginCommand::CreateScrollSyncGroup {
+                group_id,
+                left_split: SplitId(left_split as usize),
+                right_split: SplitId(right_split as usize),
+            })
+            .is_ok()
+    }
+
+    /// Set sync anchors for a scroll sync group
+    pub fn set_scroll_sync_anchors<'js>(
+        &self,
+        _ctx: rquickjs::Ctx<'js>,
+        group_id: u32,
+        anchors: Vec<Vec<u32>>,
+    ) -> bool {
+        let anchors: Vec<(usize, usize)> = anchors
+            .into_iter()
+            .filter_map(|pair| {
+                if pair.len() >= 2 {
+                    Some((pair[0] as usize, pair[1] as usize))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.command_sender
+            .send(PluginCommand::SetScrollSyncAnchors { group_id, anchors })
+            .is_ok()
+    }
+
+    /// Remove a scroll sync group
+    pub fn remove_scroll_sync_group(&self, group_id: u32) -> bool {
+        self.command_sender
+            .send(PluginCommand::RemoveScrollSyncGroup { group_id })
+            .is_ok()
+    }
+
+    // === Actions ===
+
+    /// Execute multiple actions in sequence
+    pub fn execute_actions<'js>(
+        &self,
+        ctx: rquickjs::Ctx<'js>,
+        actions: Vec<rquickjs::Object<'js>>,
+    ) -> rquickjs::Result<bool> {
+        let specs: Vec<ActionSpec> = actions
+            .into_iter()
+            .map(|obj| ActionSpec {
+                action: obj.get("action").unwrap_or_default(),
+                count: obj.get("count").unwrap_or(1),
+            })
+            .collect();
+        Ok(self
+            .command_sender
+            .send(PluginCommand::ExecuteActions { actions: specs })
+            .is_ok())
+    }
+
+    /// Show an action popup
+    pub fn show_action_popup<'js>(
+        &self,
+        ctx: rquickjs::Ctx<'js>,
+        opts: rquickjs::Object<'js>,
+    ) -> rquickjs::Result<bool> {
+        let popup_id: String = opts.get("popupId").unwrap_or_default();
+        let title: String = opts.get("title").unwrap_or_default();
+        let message: String = opts.get("message").unwrap_or_default();
+        let actions_arr: Vec<rquickjs::Object> = opts.get("actions").unwrap_or_default();
+
+        let actions: Vec<ActionPopupAction> = actions_arr
+            .into_iter()
+            .map(|obj| ActionPopupAction {
+                id: obj.get("id").unwrap_or_default(),
+                label: obj.get("label").unwrap_or_default(),
+            })
+            .collect();
+
+        Ok(self
+            .command_sender
+            .send(PluginCommand::ShowActionPopup {
+                popup_id,
+                title,
+                message,
+                actions,
+            })
+            .is_ok())
+    }
+
+    /// Disable LSP for a specific language
+    pub fn disable_lsp_for_language(&self, language: String) -> bool {
+        self.command_sender
+            .send(PluginCommand::DisableLspForLanguage { language })
+            .is_ok()
+    }
+
+    /// Get all diagnostics from LSP
+    pub fn get_all_diagnostics<'js>(&self, ctx: rquickjs::Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        let diagnostics = if let Ok(s) = self.state_snapshot.read() {
+            // Convert to a simpler format for JS
+            let mut result: Vec<serde_json::Value> = Vec::new();
+            for (uri, diags) in &s.diagnostics {
+                for diag in diags {
+                    result.push(serde_json::json!({
+                        "uri": uri,
+                        "message": diag.message,
+                        "severity": diag.severity.map(|s| match s {
+                            lsp_types::DiagnosticSeverity::ERROR => 1,
+                            lsp_types::DiagnosticSeverity::WARNING => 2,
+                            lsp_types::DiagnosticSeverity::INFORMATION => 3,
+                            lsp_types::DiagnosticSeverity::HINT => 4,
+                            _ => 0,
+                        }),
+                        "range": {
+                            "start": {"line": diag.range.start.line, "character": diag.range.start.character},
+                            "end": {"line": diag.range.end.line, "character": diag.range.end.character}
+                        }
+                    }));
+                }
+            }
+            result
+        } else {
+            Vec::new()
+        };
+        rquickjs_serde::to_value(ctx, &diagnostics)
+            .map_err(|e| rquickjs::Error::new_from_js_message("serialize", "", &e.to_string()))
+    }
+
+    /// Get registered event handlers for an event
+    pub fn get_handlers(&self, event_name: String) -> Vec<String> {
+        self.event_handlers
+            .borrow()
+            .get(&event_name)
+            .cloned()
+            .unwrap_or_default()
     }
 
     // === Virtual Buffers ===

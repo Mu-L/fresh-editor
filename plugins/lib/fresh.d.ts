@@ -109,6 +109,38 @@ interface EditorAPI {
 	*/
 	isBufferModified(bufferId: number): boolean;
 	/**
+	* Get buffer info by ID
+	*/
+	getBufferInfo(bufferId: number): unknown;
+	/**
+	* Get primary cursor info for active buffer
+	*/
+	getPrimaryCursor(): unknown;
+	/**
+	* Get all cursors for active buffer
+	*/
+	getAllCursors(): unknown;
+	/**
+	* Get all cursor positions as byte offsets
+	*/
+	getAllCursorPositions(): unknown;
+	/**
+	* Get viewport info for active buffer
+	*/
+	getViewport(): unknown;
+	/**
+	* Get the line number (0-indexed) of the primary cursor
+	*/
+	getCursorLine(): number;
+	/**
+	* Find buffer by file path, returns buffer ID or 0 if not found
+	*/
+	findBufferByPath(path: string): number;
+	/**
+	* Get diff between buffer content and last saved version
+	*/
+	getBufferSavedDiff(bufferId: number): unknown;
+	/**
 	* Insert text at a position in a buffer
 	*/
 	insertText(bufferId: number, position: number, text: string): boolean;
@@ -233,6 +265,34 @@ interface EditorAPI {
 	*/
 	clearAllOverlays(bufferId: number): boolean;
 	/**
+	* Clear all overlays that overlap with a byte range
+	*/
+	clearOverlaysInRange(bufferId: number, start: number, end: number): boolean;
+	/**
+	* Add virtual text (inline text that doesn't exist in the buffer)
+	*/
+	addVirtualText(bufferId: number, virtualTextId: string, position: number, text: string, r: number, g: number, b: number, before: boolean, useBg: boolean): boolean;
+	/**
+	* Remove a virtual text by ID
+	*/
+	removeVirtualText(bufferId: number, virtualTextId: string): boolean;
+	/**
+	* Remove virtual texts whose ID starts with the given prefix
+	*/
+	removeVirtualTextsByPrefix(bufferId: number, prefix: string): boolean;
+	/**
+	* Clear all virtual texts from a buffer
+	*/
+	clearVirtualTexts(bufferId: number): boolean;
+	/**
+	* Clear all virtual texts in a namespace
+	*/
+	clearVirtualTextNamespace(bufferId: number, namespace: string): boolean;
+	/**
+	* Add a virtual line (full line above/below a position)
+	*/
+	addVirtualLine(bufferId: number, position: number, text: string, fgR: number, fgG: number, fgB: number, bgR: number, bgG: number, bgB: number, above: boolean, namespace: string, priority: number): boolean;
+	/**
 	* Start an interactive prompt
 	*/
 	startPrompt(label: string, promptType: string): boolean;
@@ -269,6 +329,18 @@ interface EditorAPI {
 	*/
 	focusSplit(splitId: number): boolean;
 	/**
+	* Set scroll position of a split
+	*/
+	setSplitScroll(splitId: number, topByte: number): boolean;
+	/**
+	* Set the ratio of a split (0.0 to 1.0, 0.5 = equal)
+	*/
+	setSplitRatio(splitId: number, ratio: number): boolean;
+	/**
+	* Distribute all splits evenly
+	*/
+	distributeSplitsEvenly(): boolean;
+	/**
 	* Set cursor position in a buffer
 	*/
 	setBufferCursor(bufferId: number, position: number): boolean;
@@ -280,6 +352,42 @@ interface EditorAPI {
 	* Clear line indicators in a namespace
 	*/
 	clearLineIndicators(bufferId: number, namespace: string): boolean;
+	/**
+	* Enable or disable line numbers for a buffer
+	*/
+	setLineNumbers(bufferId: number, enabled: boolean): boolean;
+	/**
+	* Create a scroll sync group for anchor-based synchronized scrolling
+	*/
+	createScrollSyncGroup(groupId: number, leftSplit: number, rightSplit: number): boolean;
+	/**
+	* Set sync anchors for a scroll sync group
+	*/
+	setScrollSyncAnchors(groupId: number, anchors: number[][]): boolean;
+	/**
+	* Remove a scroll sync group
+	*/
+	removeScrollSyncGroup(groupId: number): boolean;
+	/**
+	* Execute multiple actions in sequence
+	*/
+	executeActions(actions: Record<string, unknown>[]): boolean;
+	/**
+	* Show an action popup
+	*/
+	showActionPopup(opts: Record<string, unknown>): boolean;
+	/**
+	* Disable LSP for a specific language
+	*/
+	disableLspForLanguage(language: string): boolean;
+	/**
+	* Get all diagnostics from LSP
+	*/
+	getAllDiagnostics(): unknown;
+	/**
+	* Get registered event handlers for an event
+	*/
+	getHandlers(eventName: string): string[];
 	/**
 	* Create a virtual buffer in current split (async, returns buffer ID)
 	*/

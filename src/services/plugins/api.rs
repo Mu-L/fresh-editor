@@ -50,7 +50,7 @@ pub enum PluginResponse {
 }
 
 /// Information about a cursor in the editor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "plugins", derive(TS))]
 #[cfg_attr(feature = "plugins", ts(export))]
 pub struct CursorInfo {
@@ -95,7 +95,7 @@ fn serialize_path<S: serde::Serializer>(path: &Option<PathBuf>, s: S) -> Result<
 }
 
 /// Diff between current buffer content and last saved snapshot
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "plugins", derive(TS))]
 #[cfg_attr(feature = "plugins", ts(export))]
 pub struct BufferSavedDiff {
@@ -107,7 +107,7 @@ pub struct BufferSavedDiff {
 }
 
 /// Information about the viewport
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "plugins", derive(TS))]
 #[cfg_attr(feature = "plugins", ts(export))]
 pub struct ViewportInfo {
