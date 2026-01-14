@@ -263,7 +263,60 @@ impl PluginThreadHandle {
     ///
     /// This is called by the editor after processing a command that requires a response.
     pub fn deliver_response(&self, response: crate::services::plugins::api::PluginResponse) {
-        respond_to_pending(&self.pending_responses, response);
+        // First try to find a pending Rust request (oneshot channel)
+        if respond_to_pending(&self.pending_responses, response.clone()) {
+            return;
+        }
+
+        // If not found, it must be a JS callback
+        use crate::services::plugins::api::{JsCallbackId, PluginResponse};
+        use serde_json::json;
+
+        match response {
+            PluginResponse::VirtualBufferCreated {
+                request_id,
+                buffer_id,
+                split_id,
+            } => {
+                let result = json!({
+                    "buffer_id": buffer_id,
+                    "split_id": split_id
+                });
+                self.resolve_callback(JsCallbackId(request_id), result.to_string());
+            }
+            PluginResponse::LspRequest { request_id, result } => match result {
+                Ok(value) => {
+                    self.resolve_callback(JsCallbackId(request_id), value.to_string());
+                }
+                Err(e) => {
+                    self.reject_callback(JsCallbackId(request_id), e);
+                }
+            },
+            PluginResponse::HighlightsComputed { request_id, spans } => {
+                let result = serde_json::to_string(&spans).unwrap_or_else(|_| "[]".to_string());
+                self.resolve_callback(JsCallbackId(request_id), result);
+            }
+            PluginResponse::BufferText { request_id, text } => match text {
+                Ok(content) => {
+                    // JSON stringify the content string
+                    let result =
+                        serde_json::to_string(&content).unwrap_or_else(|_| "\"\"".to_string());
+                    self.resolve_callback(JsCallbackId(request_id), result);
+                }
+                Err(e) => {
+                    self.reject_callback(JsCallbackId(request_id), e);
+                }
+            },
+            PluginResponse::CompositeBufferCreated {
+                request_id,
+                buffer_id,
+            } => {
+                let result = json!({
+                    "buffer_id": buffer_id
+                });
+                self.resolve_callback(JsCallbackId(request_id), result.to_string());
+            }
+        }
     }
 
     /// Load a plugin from a file (blocking)
@@ -519,7 +572,7 @@ impl Drop for PluginThreadHandle {
 fn respond_to_pending(
     pending_responses: &PendingResponses,
     response: crate::services::plugins::api::PluginResponse,
-) {
+) -> bool {
     let request_id = match &response {
         crate::services::plugins::api::PluginResponse::VirtualBufferCreated {
             request_id, ..
@@ -542,6 +595,9 @@ fn respond_to_pending(
 
     if let Some(tx) = sender {
         let _ = tx.send(response);
+        true
+    } else {
+        false
     }
 }
 

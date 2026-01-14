@@ -1082,6 +1082,8 @@ impl JsEditorApi {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
+            // Record context for this callback
+            self.callback_contexts.borrow_mut().insert(id, self.plugin_name.clone());
             id
         };
 
@@ -3304,6 +3306,15 @@ mod tests {
     async fn test_execute_action_sync_function() {
         let (mut backend, rx) = create_test_backend();
 
+        // Register the action explicitly so it knows to look in "test" plugin
+        backend.registered_actions.borrow_mut().insert(
+            "my_sync_action".to_string(),
+            PluginHandler {
+                plugin_name: "test".to_string(),
+                handler_name: "my_sync_action".to_string(),
+            },
+        );
+
         // Define a sync function and register it
         backend
             .execute_js(
@@ -3336,6 +3347,15 @@ mod tests {
     #[tokio::test]
     async fn test_execute_action_async_function() {
         let (mut backend, rx) = create_test_backend();
+
+        // Register the action explicitly
+        backend.registered_actions.borrow_mut().insert(
+            "my_async_action".to_string(),
+            PluginHandler {
+                plugin_name: "test".to_string(),
+                handler_name: "my_async_action".to_string(),
+            },
+        );
 
         // Define an async function
         backend
