@@ -937,7 +937,10 @@ impl Editor {
         if let Some(req_id) = _request_id {
             // Return just the buffer ID as a number (consistent with createVirtualBuffer)
             let result = buffer_id.0.to_string();
-            self.plugin_manager.resolve_callback(req_id, result);
+            self.plugin_manager.resolve_callback(
+                crate::services::plugins::api::JsCallbackId::from(req_id),
+                result,
+            );
             tracing::info!(
                 "CreateCompositeBuffer: resolve_callback sent for request_id={}",
                 req_id

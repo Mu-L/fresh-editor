@@ -1133,7 +1133,10 @@ impl Editor {
             Some("LSP manager not initialized".to_string())
         };
         if let Some(err_msg) = error {
-            self.plugin_manager.reject_callback(request_id, err_msg);
+            self.plugin_manager.reject_callback(
+                crate::services::plugins::api::JsCallbackId::from(request_id),
+                err_msg,
+            );
         }
     }
 

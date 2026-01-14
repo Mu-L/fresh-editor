@@ -35,12 +35,15 @@ pub enum PluginRequest {
 
     /// Resolve an async callback with a result (for async operations like SpawnProcess, Delay)
     ResolveCallback {
-        callback_id: u64,
+        callback_id: super::api::JsCallbackId,
         result_json: String,
     },
 
     /// Reject an async callback with an error
-    RejectCallback { callback_id: u64, error: String },
+    RejectCallback {
+        callback_id: super::api::JsCallbackId,
+        error: String,
+    },
 
     /// Load all plugins from a directory
     LoadPluginsFromDir {
@@ -489,7 +492,7 @@ impl PluginThreadHandle {
 
     /// Resolve an async callback in the plugin runtime
     /// Called by the app when async operations (SpawnProcess, Delay) complete
-    pub fn resolve_callback(&self, callback_id: u64, result_json: String) {
+    pub fn resolve_callback(&self, callback_id: super::api::JsCallbackId, result_json: String) {
         if let Some(sender) = self.request_sender.as_ref() {
             let _ = sender.send(PluginRequest::ResolveCallback {
                 callback_id,
@@ -500,7 +503,7 @@ impl PluginThreadHandle {
 
     /// Reject an async callback in the plugin runtime
     /// Called by the app when async operations fail
-    pub fn reject_callback(&self, callback_id: u64, error: String) {
+    pub fn reject_callback(&self, callback_id: super::api::JsCallbackId, error: String) {
         if let Some(sender) = self.request_sender.as_ref() {
             let _ = sender.send(PluginRequest::RejectCallback { callback_id, error });
         }

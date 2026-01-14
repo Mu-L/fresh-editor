@@ -18,6 +18,44 @@ use std::sync::{Arc, RwLock};
 #[cfg(feature = "plugins")]
 use ts_rs::TS;
 
+/// A callback ID for JavaScript promises in the plugin runtime.
+///
+/// This newtype distinguishes JS promise callbacks (resolved via `resolve_callback`)
+/// from Rust oneshot channel IDs (resolved via `send_plugin_response`).
+/// Using a newtype prevents accidentally mixing up these two callback mechanisms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JsCallbackId(pub u64);
+
+impl JsCallbackId {
+    /// Create a new JS callback ID
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// Get the underlying u64 value
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for JsCallbackId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<JsCallbackId> for u64 {
+    fn from(id: JsCallbackId) -> u64 {
+        id.0
+    }
+}
+
+impl std::fmt::Display for JsCallbackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Response from the editor for async plugin operations
 #[derive(Debug, Clone)]
 pub enum PluginResponse {
@@ -429,11 +467,14 @@ pub enum PluginCommand {
         command: String,
         args: Vec<String>,
         cwd: Option<String>,
-        callback_id: u64,
+        callback_id: JsCallbackId,
     },
 
     /// Delay/sleep for a duration (async, resolves callback when done)
-    Delay { callback_id: u64, duration_ms: u64 },
+    Delay {
+        callback_id: JsCallbackId,
+        duration_ms: u64,
+    },
 
     /// Spawn a long-running background process
     /// Unlike SpawnProcess, this returns immediately with a process handle
@@ -448,7 +489,7 @@ pub enum PluginCommand {
         /// Working directory (optional)
         cwd: Option<String>,
         /// Callback ID to call when process exits
-        callback_id: u64,
+        callback_id: JsCallbackId,
     },
 
     /// Kill a background process by ID
@@ -460,7 +501,7 @@ pub enum PluginCommand {
         /// Process ID to wait for
         process_id: u64,
         /// Callback ID for async response
-        callback_id: u64,
+        callback_id: JsCallbackId,
     },
 
     /// Set layout hints for a buffer/viewport
@@ -1009,6 +1050,9 @@ pub struct BackgroundProcessResult {
     /// Unique process ID for later reference
     #[cfg_attr(feature = "plugins", ts(type = "number"))]
     pub process_id: u64,
+    /// Process exit code (0 usually means success, -1 if killed)
+    /// Only present when the process has exited
+    pub exit_code: i32,
 }
 
 /// Plugin API context - provides safe access to editor functionality

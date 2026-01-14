@@ -3364,11 +3364,18 @@ impl Editor {
                     stderr,
                     exit_code,
                 } => {
-                    self.handle_plugin_process_output(process_id, stdout, stderr, exit_code);
+                    self.handle_plugin_process_output(
+                        crate::services::plugins::api::JsCallbackId::from(process_id),
+                        stdout,
+                        stderr,
+                        exit_code,
+                    );
                 }
                 AsyncMessage::PluginDelayComplete { callback_id } => {
-                    self.plugin_manager
-                        .resolve_callback(callback_id, "null".to_string());
+                    self.plugin_manager.resolve_callback(
+                        crate::services::plugins::api::JsCallbackId::from(callback_id),
+                        "null".to_string(),
+                    );
                 }
                 AsyncMessage::PluginProcessStdout { process_id, data } => {
                     // Run onProcessStdout hook for streaming output
@@ -3398,12 +3405,15 @@ impl Editor {
                     // Clean up abort handle
                     self.background_process_handles.remove(&process_id);
                     // Resolve callback with exit info
-                    let result = serde_json::json!({
-                        "process_id": process_id,
-                        "exit_code": exit_code
-                    });
-                    self.plugin_manager
-                        .resolve_callback(callback_id, result.to_string());
+                    // Using BackgroundProcessResult struct ensures field names match TypeScript types
+                    let result = crate::services::plugins::api::BackgroundProcessResult {
+                        process_id,
+                        exit_code,
+                    };
+                    self.plugin_manager.resolve_callback(
+                        crate::services::plugins::api::JsCallbackId::from(callback_id),
+                        serde_json::to_string(&result).unwrap(),
+                    );
                 }
                 AsyncMessage::CustomNotification {
                     language,
@@ -4092,7 +4102,7 @@ impl Editor {
                         match output {
                             Ok(output) => {
                                 let _ = sender.send(AsyncMessage::PluginProcessOutput {
-                                    process_id: callback_id,
+                                    process_id: callback_id.as_u64(),
                                     stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                                     stderr: String::from_utf8_lossy(&output.stderr).to_string(),
                                     exit_code: output.status.code().unwrap_or(-1),
@@ -4100,7 +4110,7 @@ impl Editor {
                             }
                             Err(e) => {
                                 let _ = sender.send(AsyncMessage::PluginProcessOutput {
-                                    process_id: callback_id,
+                                    process_id: callback_id.as_u64(),
                                     stdout: String::new(),
                                     stderr: e.to_string(),
                                     exit_code: -1,
@@ -4117,13 +4127,14 @@ impl Editor {
                         .output()
                     {
                         Ok(output) => {
-                            let result = serde_json::json!({
-                                "stdout": String::from_utf8_lossy(&output.stdout),
-                                "stderr": String::from_utf8_lossy(&output.stderr),
-                                "exit_code": output.status.code().unwrap_or(-1)
-                            });
+                            // Using SpawnResult struct ensures field names match TypeScript types
+                            let result = crate::services::plugins::api::SpawnResult {
+                                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                                exit_code: output.status.code().unwrap_or(-1),
+                            };
                             self.plugin_manager
-                                .resolve_callback(callback_id, result.to_string());
+                                .resolve_callback(callback_id, serde_json::to_string(&result).unwrap());
                         }
                         Err(e) => {
                             self.plugin_manager
@@ -4153,9 +4164,11 @@ impl Editor {
                 // Spawn async delay via tokio
                 if let (Some(runtime), Some(bridge)) = (&self.tokio_runtime, &self.async_bridge) {
                     let sender = bridge.sender();
+                    let callback_id_u64 = callback_id.as_u64();
                     runtime.spawn(async move {
                         tokio::time::sleep(tokio::time::Duration::from_millis(duration_ms)).await;
-                        let _ = sender.send(AsyncMessage::PluginDelayComplete { callback_id });
+                        let _ =
+                            sender.send(AsyncMessage::PluginDelayComplete { callback_id: callback_id_u64 });
                     });
                 } else {
                     // Fallback to blocking if no runtime available
@@ -4186,6 +4199,7 @@ impl Editor {
                     let sender = bridge.sender();
                     let sender_stdout = sender.clone();
                     let sender_stderr = sender.clone();
+                    let callback_id_u64 = callback_id.as_u64();
 
                     let handle = runtime.spawn(async move {
                         let mut child = match TokioCommand::new(&command)
@@ -4199,7 +4213,7 @@ impl Editor {
                             Err(e) => {
                                 let _ = sender.send(AsyncMessage::PluginBackgroundProcessExit {
                                     process_id,
-                                    callback_id,
+                                    callback_id: callback_id_u64,
                                     exit_code: -1,
                                 });
                                 tracing::error!("Failed to spawn background process: {}", e);
@@ -4250,7 +4264,7 @@ impl Editor {
 
                         let _ = sender.send(AsyncMessage::PluginBackgroundProcessExit {
                             process_id,
-                            callback_id,
+                            callback_id: callback_id_u64,
                             exit_code,
                         });
                     });
@@ -4344,7 +4358,10 @@ impl Editor {
                             );
                             // createVirtualBuffer returns just the buffer ID (number), not an object
                             let result = buffer_id.0.to_string();
-                            self.plugin_manager.resolve_callback(req_id, result);
+                            self.plugin_manager.resolve_callback(
+                                crate::services::plugins::api::JsCallbackId::from(req_id),
+                                result,
+                            );
                             tracing::info!("CreateVirtualBufferWithContent: resolve_callback sent for request_id={}", req_id);
                         }
                     }
@@ -4400,8 +4417,10 @@ impl Editor {
                                     "bufferId": existing_buffer_id.0,
                                     "splitId": splits.first().map(|s| s.0)
                                 });
-                                self.plugin_manager
-                                    .resolve_callback(req_id, result.to_string());
+                                self.plugin_manager.resolve_callback(
+                                    crate::services::plugins::api::JsCallbackId::from(req_id),
+                                    result.to_string(),
+                                );
                             }
                             return Ok(());
                         } else {
@@ -4500,8 +4519,10 @@ impl Editor {
                         "bufferId": buffer_id.0,
                         "splitId": created_split_id.map(|s| s.0)
                     });
-                    self.plugin_manager
-                        .resolve_callback(req_id, result.to_string());
+                    self.plugin_manager.resolve_callback(
+                        crate::services::plugins::api::JsCallbackId::from(req_id),
+                        result.to_string(),
+                    );
                 }
             }
             PluginCommand::SetVirtualBufferContent { buffer_id, entries } => {
@@ -4592,8 +4613,10 @@ impl Editor {
                         "bufferId": buffer_id.0,
                         "splitId": split_id.0
                     });
-                    self.plugin_manager
-                        .resolve_callback(req_id, result.to_string());
+                    self.plugin_manager.resolve_callback(
+                        crate::services::plugins::api::JsCallbackId::from(req_id),
+                        result.to_string(),
+                    );
                 }
             }
 
@@ -4854,14 +4877,15 @@ impl Editor {
         };
 
         // Resolve the JavaScript Promise callback directly
+        let callback_id = crate::services::plugins::api::JsCallbackId::from(request_id);
         match result {
             Ok(text) => {
                 // Serialize text as JSON string
                 let json = serde_json::to_string(&text).unwrap_or_else(|_| "null".to_string());
-                self.plugin_manager.resolve_callback(request_id, json);
+                self.plugin_manager.resolve_callback(callback_id, json);
             }
             Err(error) => {
-                self.plugin_manager.reject_callback(request_id, error);
+                self.plugin_manager.reject_callback(callback_id, error);
             }
         }
     }

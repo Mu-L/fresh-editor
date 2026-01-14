@@ -783,14 +783,16 @@ impl Editor {
         request_id: u64,
         result: Result<Value, String>,
     ) {
+        use crate::services::plugins::api::JsCallbackId;
         tracing::debug!("Received plugin LSP response (request_id={})", request_id);
+        let callback_id = JsCallbackId::from(request_id);
         match result {
             Ok(value) => {
                 self.plugin_manager
-                    .resolve_callback(request_id, value.to_string());
+                    .resolve_callback(callback_id, value.to_string());
             }
             Err(err) => {
-                self.plugin_manager.reject_callback(request_id, err);
+                self.plugin_manager.reject_callback(callback_id, err);
             }
         }
     }
@@ -945,26 +947,27 @@ impl Editor {
     /// Handle plugin process output completion
     pub(super) fn handle_plugin_process_output(
         &mut self,
-        process_id: u64,
+        callback_id: crate::services::plugins::api::JsCallbackId,
         stdout: String,
         stderr: String,
         exit_code: i32,
     ) {
         tracing::debug!(
             "Process {} completed: exit_code={}, stdout_len={}, stderr_len={}",
-            process_id,
+            callback_id,
             exit_code,
             stdout.len(),
             stderr.len()
         );
         // Resolve the plugin callback with the process output
-        let result = serde_json::json!({
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": exit_code
-        });
+        // Using SpawnResult struct ensures field names match TypeScript types
+        let result = crate::services::plugins::api::SpawnResult {
+            stdout,
+            stderr,
+            exit_code,
+        };
         self.plugin_manager
-            .resolve_callback(process_id, result.to_string());
+            .resolve_callback(callback_id, serde_json::to_string(&result).unwrap());
     }
 
     /// Process TypeScript plugin commands

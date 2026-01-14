@@ -11,7 +11,8 @@ use crate::primitives::text_property::TextPropertyEntry;
 #[cfg(test)]
 use crate::services::plugins::api::CursorInfo;
 use crate::services::plugins::api::{
-    ActionPopupAction, ActionSpec, BufferInfo, EditorStateSnapshot, PluginCommand, PluginResponse,
+    ActionPopupAction, ActionSpec, BufferInfo, EditorStateSnapshot, JsCallbackId, PluginCommand,
+    PluginResponse,
 };
 use crate::services::plugins::transpile::{
     bundle_module, has_es_imports, has_es_module_syntax, strip_imports_and_exports,
@@ -2063,7 +2064,7 @@ impl JsEditorApi {
             command, args, cwd.0, id
         );
         let _ = self.command_sender.send(PluginCommand::SpawnProcess {
-            callback_id: id,
+            callback_id: JsCallbackId::new(id),
             command,
             args,
             cwd: cwd.0,
@@ -2083,7 +2084,7 @@ impl JsEditorApi {
         };
         let _ = self.command_sender.send(PluginCommand::SpawnProcessWait {
             process_id,
-            callback_id: id,
+            callback_id: JsCallbackId::new(id),
         });
         id
     }
@@ -2118,7 +2119,7 @@ impl JsEditorApi {
             id
         };
         let _ = self.command_sender.send(PluginCommand::Delay {
-            callback_id: id,
+            callback_id: JsCallbackId::new(id),
             duration_ms,
         });
         id
@@ -2163,22 +2164,22 @@ impl JsEditorApi {
         args: Vec<String>,
         cwd: rquickjs::function::Opt<String>,
     ) -> u64 {
-        let callback_id = {
+        let id = {
             let mut id_ref = self.next_request_id.borrow_mut();
             let id = *id_ref;
             *id_ref += 1;
             id
         };
-        // Use callback_id as process_id for simplicity
-        let process_id = callback_id;
+        // Use id as process_id for simplicity
+        let process_id = id;
         let _ = self.command_sender.send(PluginCommand::SpawnBackgroundProcess {
             process_id,
             command,
             args,
             cwd: cwd.0,
-            callback_id,
+            callback_id: JsCallbackId::new(id),
         });
-        callback_id
+        id
     }
 
     /// Kill a background process
@@ -2801,41 +2802,101 @@ impl QuickJsBackend {
     }
 
     /// Resolve a pending async callback with a result (called from Rust when async op completes)
-    pub fn resolve_callback(&mut self, callback_id: u64, result_json: &str) {
-        tracing::debug!("resolve_callback: starting for callback_id={}", callback_id);
-        let code = format!(
-            "globalThis._resolveCallback({}, {});",
-            callback_id, result_json
-        );
+    ///
+    /// Takes a JSON string which is parsed and converted to a proper JS value.
+    /// This avoids string interpolation with eval for better type safety.
+    pub fn resolve_callback(
+        &mut self,
+        callback_id: crate::services::plugins::api::JsCallbackId,
+        result_json: &str,
+    ) {
+        let id = callback_id.as_u64();
+        tracing::debug!("resolve_callback: starting for callback_id={}", id);
         self.context.with(|ctx| {
-            tracing::debug!("resolve_callback: evaluating JS code: {}", code);
-            if let Err(e) = ctx.eval::<(), _>(code.as_bytes()) {
-                log_js_error(&ctx, e, &format!("resolving callback {}", callback_id));
+            // Parse JSON string to serde_json::Value
+            let json_value: serde_json::Value = match serde_json::from_str(result_json) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        "resolve_callback: failed to parse JSON for callback_id={}: {}",
+                        id,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            // Convert to JS value using rquickjs_serde
+            let js_value = match rquickjs_serde::to_value(ctx.clone(), &json_value) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        "resolve_callback: failed to convert to JS value for callback_id={}: {}",
+                        id,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            // Get _resolveCallback function from globalThis
+            let globals = ctx.globals();
+            let resolve_fn: rquickjs::Function = match globals.get("_resolveCallback") {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!(
+                        "resolve_callback: _resolveCallback not found for callback_id={}: {:?}",
+                        id,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            // Call the function with callback_id (as u64) and the JS value
+            if let Err(e) = resolve_fn.call::<_, ()>((id, js_value)) {
+                log_js_error(&ctx, e, &format!("resolving callback {}", id));
             }
+
             // IMPORTANT: Run pending jobs to process Promise continuations
-            let job_count =
-                run_pending_jobs_checked(&ctx, &format!("resolve_callback {}", callback_id));
+            let job_count = run_pending_jobs_checked(&ctx, &format!("resolve_callback {}", id));
             tracing::info!(
                 "resolve_callback: executed {} pending jobs for callback_id={}",
                 job_count,
-                callback_id
+                id
             );
         });
     }
 
     /// Reject a pending async callback with an error (called from Rust when async op fails)
-    pub fn reject_callback(&mut self, callback_id: u64, error: &str) {
-        let code = format!(
-            "globalThis._rejectCallback({}, {});",
-            callback_id,
-            serde_json::to_string(error).unwrap_or_else(|_| "\"Unknown error\"".to_string())
-        );
+    pub fn reject_callback(
+        &mut self,
+        callback_id: crate::services::plugins::api::JsCallbackId,
+        error: &str,
+    ) {
+        let id = callback_id.as_u64();
         self.context.with(|ctx| {
-            if let Err(e) = ctx.eval::<(), _>(code.as_bytes()) {
-                log_js_error(&ctx, e, &format!("rejecting callback {}", callback_id));
+            // Get _rejectCallback function from globalThis
+            let globals = ctx.globals();
+            let reject_fn: rquickjs::Function = match globals.get("_rejectCallback") {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!(
+                        "reject_callback: _rejectCallback not found for callback_id={}: {:?}",
+                        id,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            // Call the function with callback_id (as u64) and error string
+            if let Err(e) = reject_fn.call::<_, ()>((id, error)) {
+                log_js_error(&ctx, e, &format!("rejecting callback {}", id));
             }
+
             // IMPORTANT: Run pending jobs to process Promise continuations
-            run_pending_jobs_checked(&ctx, &format!("reject_callback {}", callback_id));
+            run_pending_jobs_checked(&ctx, &format!("reject_callback {}", id));
         });
     }
 }
@@ -3530,7 +3591,7 @@ mod tests {
         };
 
         // Simulate the editor responding with the text
-        backend.resolve_callback(request_id, "\"hello world\"");
+        backend.resolve_callback(JsCallbackId::from(request_id), "\"hello world\"");
 
         // Drive the Promise to completion
         backend.context.with(|ctx| {
