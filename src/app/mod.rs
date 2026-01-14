@@ -831,6 +831,14 @@ impl Editor {
             dir_context.clone(),
         );
 
+        // Update the plugin state snapshot with working_dir BEFORE loading plugins
+        // This ensures plugins can call getCwd() correctly during initialization
+        #[cfg(feature = "plugins")]
+        if let Some(snapshot_handle) = plugin_manager.state_snapshot_handle() {
+            let mut snapshot = snapshot_handle.write().unwrap();
+            snapshot.working_dir = working_dir.clone();
+        }
+
         // Load TypeScript plugins from multiple directories:
         // 1. Next to the executable (for cargo-dist installations)
         // 2. In the working directory (for development/local usage)

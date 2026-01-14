@@ -50,7 +50,7 @@ function addTestHeaders(bufferId: number): void {
         byteOffset,
         `── Header before line ${lineNum} ──`,
         200, 200, 100,  // Yellow-ish fg
-        -1, -1, -1,     // No background
+        0, 0, 0,        // Black background (u8 values required)
         true,           // above
         TEST_NAMESPACE,
         0
@@ -66,7 +66,7 @@ function addTestHeaders(bufferId: number): void {
       0,
       "== INTERLEAVED HEADER ==",
       255, 255, 0,  // Yellow fg
-      -1, -1, -1,   // No background
+      0, 0, 0,      // Black background (u8 values required)
       true,         // above
       TEST_NAMESPACE,
       -1  // lower priority to appear first
@@ -78,7 +78,7 @@ function addTestHeaders(bufferId: number): void {
       0,
       "== HEADER AT BYTE 0 ==",
       255, 255, 0,  // Yellow fg
-      -1, -1, -1,   // No background
+      0, 0, 0,      // Black background (u8 values required)
       true,         // above
       TEST_NAMESPACE,
       0
@@ -91,7 +91,7 @@ function addTestHeaders(bufferId: number): void {
         0,
         `Virtual pad ${i + 1}`,
         180, 180, 180,  // Light gray fg
-        -1, -1, -1,     // No background
+        0, 0, 0,        // Black background (u8 values required)
         true,           // above
         TEST_NAMESPACE,
         i + 1  // increasing priority so they appear in order after header
