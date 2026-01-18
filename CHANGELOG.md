@@ -12,6 +12,9 @@
 
 ### Bug Fixes
 
+* **Toggle Comment YAML**: Fixed toggle comment not working for YAML files by falling back to config-based language detection (#774).
+* **Undo History Panic**: Fixed panic when undoing past a save point and making new edits caused out-of-bounds slice access (#776).
+* **Sudo Save Prompt**: Fixed permission denied crash when saving files owned by another user; now shows sudo prompt correctly (#775).
 * **Musl Plugin Support**: Plugins now work on musl target builds (x86_64/aarch64-unknown-linux-musl).
 * **LSP Server Requests**: Fixed LSP server-to-client request handling not being dispatched to plugins.
 * **Git Find File Selection**: Fixed race condition causing wrong file selection when pressing Enter quickly.
