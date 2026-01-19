@@ -1,0 +1,18 @@
+[package]
+name = "terminal_cleanup_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crossterm = "0.28"
+
+[[bin]]
+name = "terminal_cleanup_test"
+path = "src/main.rs"
+
+[[bin]]
+name = "capture_sequences"
+path = "capture_sequences.rs"
+
+# Keep this package independent from the parent workspace
+[workspace]
