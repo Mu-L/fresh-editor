@@ -100,7 +100,7 @@ impl Editor {
                     needs_render = true;
                     return Ok(needs_render);
                 }
-                self.handle_mouse_click(col, row)?;
+                self.handle_mouse_click(col, row, mouse_event.modifiers)?;
                 needs_render = true;
             }
             MouseEventKind::Drag(MouseButton::Left) => {
@@ -762,7 +762,7 @@ impl Editor {
                 Some(TabHit::TabName(buffer_id)) => {
                     return Some(HoverTarget::TabName(buffer_id, *split_id));
                 }
-                Some(TabHit::BarBackground) | None => {}
+                Some(TabHit::ScrollLeft) | Some(TabHit::ScrollRight) | Some(TabHit::BarBackground) | None => {}
             }
         }
 
@@ -959,7 +959,12 @@ impl Editor {
         Ok(())
     }
     /// Handle mouse click (down event)
-    pub(super) fn handle_mouse_click(&mut self, col: u16, row: u16) -> AnyhowResult<()> {
+    pub(super) fn handle_mouse_click(
+        &mut self,
+        col: u16,
+        row: u16,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> AnyhowResult<()> {
         // Check if click is on tab context menu first
         if self.tab_context_menu.is_some() {
             if let Some(result) = self.handle_tab_context_menu_click(col, row) {
@@ -1425,6 +1430,20 @@ impl Editor {
                     ));
                     return Ok(());
                 }
+                TabHit::ScrollLeft => {
+                    // Scroll tabs left by one tab width (use 5 chars as estimate)
+                    if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+                        view_state.tab_scroll_offset = view_state.tab_scroll_offset.saturating_sub(10);
+                    }
+                    return Ok(());
+                }
+                TabHit::ScrollRight => {
+                    // Scroll tabs right by one tab width (use 5 chars as estimate)
+                    if let Some(view_state) = self.split_view_states.get_mut(&split_id) {
+                        view_state.tab_scroll_offset = view_state.tab_scroll_offset.saturating_add(10);
+                    }
+                    return Ok(());
+                }
                 TabHit::BarBackground => {}
             }
         }
@@ -1454,7 +1473,7 @@ impl Editor {
             {
                 // Click in editor - focus split and position cursor
                 tracing::debug!("  -> HIT! calling handle_editor_click");
-                self.handle_editor_click(col, row, *split_id, *buffer_id, *content_rect)?;
+                self.handle_editor_click(col, row, *split_id, *buffer_id, *content_rect, modifiers)?;
                 return Ok(());
             }
         }

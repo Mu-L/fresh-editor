@@ -33,6 +33,10 @@ pub struct TabLayout {
     pub tabs: Vec<TabHitArea>,
     /// The full tab bar area
     pub bar_area: Rect,
+    /// Hit area for the left scroll button (if shown)
+    pub left_scroll_area: Option<Rect>,
+    /// Hit area for the right scroll button (if shown)
+    pub right_scroll_area: Option<Rect>,
 }
 
 /// Hit test result for tab interactions
@@ -44,6 +48,10 @@ pub enum TabHit {
     CloseButton(BufferId),
     /// Hit the tab bar background
     BarBackground,
+    /// Hit the left scroll button
+    ScrollLeft,
+    /// Hit the right scroll button
+    ScrollRight,
 }
 
 impl TabLayout {
@@ -52,11 +60,25 @@ impl TabLayout {
         Self {
             tabs: Vec::new(),
             bar_area,
+            left_scroll_area: None,
+            right_scroll_area: None,
         }
     }
 
     /// Perform a hit test to determine what element is at the given position
     pub fn hit_test(&self, x: u16, y: u16) -> Option<TabHit> {
+        // Check scroll buttons first (they're at the edges)
+        if let Some(left_area) = self.left_scroll_area {
+            if point_in_rect(left_area, x, y) {
+                return Some(TabHit::ScrollLeft);
+            }
+        }
+        if let Some(right_area) = self.right_scroll_area {
+            if point_in_rect(right_area, x, y) {
+                return Some(TabHit::ScrollRight);
+            }
+        }
+
         for tab in &self.tabs {
             // Check close button first (it's inside the tab area)
             if point_in_rect(tab.close_area, x, y) {
@@ -454,6 +476,16 @@ impl TabsRenderer {
         // 2. The left scroll indicator (if shown)
         // 3. The base area.x position
         let left_indicator_offset = if show_left { SCROLL_INDICATOR_WIDTH } else { 0 };
+
+        // Set scroll button areas if shown
+        if show_left {
+            layout.left_scroll_area = Some(Rect::new(area.x, area.y, SCROLL_INDICATOR_WIDTH as u16, 1));
+        }
+        if show_right {
+            // Right scroll button is at the end of the rendered area
+            let right_x = area.x + max_width as u16 - SCROLL_INDICATOR_WIDTH as u16;
+            layout.right_scroll_area = Some(Rect::new(right_x, area.y, SCROLL_INDICATOR_WIDTH as u16, 1));
+        }
 
         for (idx, buffer_id) in rendered_buffer_ids.iter().enumerate() {
             let (logical_start, logical_end, logical_close_start) = tab_ranges[idx];

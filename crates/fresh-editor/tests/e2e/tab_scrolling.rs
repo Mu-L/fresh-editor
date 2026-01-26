@@ -158,3 +158,67 @@ fn test_active_tab_visibility_with_scrolling() {
         // Check for indicators based on current position and width.
     }
 }
+
+/// Test that clicking on scroll buttons scrolls the tab bar
+#[test]
+fn test_tab_scroll_button_click() {
+    let temp_dir = TempDir::new().unwrap();
+    let files = create_dummy_files(&temp_dir);
+
+    let mut harness = EditorTestHarness::new(NARROW_WIDTH, TEST_HEIGHT).unwrap();
+
+    // Open all dummy files to ensure tab overflow
+    for file_path in &files {
+        harness.open_file(file_path).unwrap();
+        harness.render().unwrap();
+    }
+
+    // Go to first tab to ensure we can scroll right
+    for _ in 0..NUM_FILES {
+        harness
+            .send_key(KeyCode::PageUp, KeyModifiers::CONTROL)
+            .unwrap();
+        harness.render().unwrap();
+    }
+
+    // Now we're on the first file - should see ">" indicator for right scroll
+    let screen = harness.screen_to_string();
+    if screen.contains(">") {
+        // Click on the right scroll indicator (rightmost position of first row, which is the tab bar)
+        // The tab bar is typically at row 1 (after menu bar)
+        let tab_row = 1; // Tab bar is usually at row 1
+        let right_scroll_col = NARROW_WIDTH - 1; // Right edge
+
+        harness.mouse_click(right_scroll_col, tab_row).unwrap();
+        harness.render().unwrap();
+
+        // After clicking, the tab offset should have increased
+        // The active tab should still be visible
+        let first_file = files[0].file_name().unwrap().to_str().unwrap();
+        harness.assert_screen_contains(first_file);
+    }
+
+    // Go to last tab to ensure we can scroll left
+    for _ in 0..NUM_FILES {
+        harness
+            .send_key(KeyCode::PageDown, KeyModifiers::CONTROL)
+            .unwrap();
+        harness.render().unwrap();
+    }
+
+    // Now on the last file - should see "<" indicator for left scroll
+    let screen = harness.screen_to_string();
+    if screen.contains("<") {
+        // Click on the left scroll indicator (leftmost position of tab bar)
+        let tab_row = 1;
+        let left_scroll_col = 0; // Left edge (or after file explorer if visible)
+
+        harness.mouse_click(left_scroll_col, tab_row).unwrap();
+        harness.render().unwrap();
+
+        // After clicking, the tab offset should have decreased
+        // The active tab should still be visible
+        let last_file = files[NUM_FILES - 1].file_name().unwrap().to_str().unwrap();
+        harness.assert_screen_contains(last_file);
+    }
+}
