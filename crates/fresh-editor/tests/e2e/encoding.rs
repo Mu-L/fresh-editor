@@ -884,3 +884,131 @@ fn test_large_utf16_file_navigation() {
     // Should still show content
     harness.assert_screen_contains("test line");
 }
+
+// ============================================================================
+// Status Bar Encoding Indicator Click Tests
+// ============================================================================
+
+/// Test that clicking on the encoding indicator in the status bar opens the encoding selector.
+/// This test will fail if the click handler is not implemented.
+#[test]
+fn test_encoding_indicator_click_opens_selector() {
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("test.txt");
+    // Use non-ASCII content to ensure UTF-8 detection (not ASCII)
+    std::fs::write(&file_path, "Hello, World! こんにちは").unwrap();
+
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // Verify UTF-8 encoding is shown in status bar
+    harness.assert_screen_contains("UTF-8");
+
+    // Find the position of "UTF-8" on screen
+    let (col, row) = harness
+        .find_text_on_screen("UTF-8")
+        .expect("UTF-8 encoding indicator should be visible in status bar");
+
+    // Click on the encoding indicator
+    harness.mouse_click(col, row).unwrap();
+
+    // After clicking, the encoding selector prompt should open
+    // The prompt should show encoding options (UTF-16 is one of the available encodings)
+    harness.assert_screen_contains("UTF-16");
+}
+
+/// Test that the encoding indicator is displayed for all files (ASCII and UTF-8).
+#[test]
+fn test_encoding_indicator_always_visible() {
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("test.txt");
+    std::fs::write(&file_path, "Hello, World!").unwrap();
+
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // Encoding indicator should be visible in status bar
+    // ASCII files are detected as ASCII, not UTF-8
+    harness.assert_screen_contains("ASCII");
+}
+
+/// Test that clicking on UTF-16 encoding indicator opens selector and can change encoding.
+/// This is a complete flow test: load UTF-16 file, change encoding to UTF-8 via click, save.
+#[test]
+fn test_utf16_encoding_indicator_click_and_change() {
+    let temp_dir = TempDir::new().unwrap();
+    let file_path = temp_dir.path().join("test_utf16.txt");
+
+    // Create UTF-16 LE file with test content
+    let text = "Hello UTF-16!\nLine 2\n";
+    let mut content = UTF16_LE_BOM.to_vec();
+    for ch in text.encode_utf16() {
+        content.extend_from_slice(&ch.to_le_bytes());
+    }
+    std::fs::write(&file_path, &content).unwrap();
+
+    let mut harness = EditorTestHarness::new(80, 24).unwrap();
+    harness.open_file(&file_path).unwrap();
+    harness.render().unwrap();
+
+    // Verify UTF-16 LE encoding is shown in status bar
+    harness.assert_screen_contains("UTF-16 LE");
+
+    // Find the position of "UTF-16 LE" on screen
+    let (col, row) = harness
+        .find_text_on_screen("UTF-16 LE")
+        .expect("UTF-16 LE encoding indicator should be visible in status bar");
+
+    // Click on the encoding indicator to open encoding selector
+    harness.mouse_click(col, row).unwrap();
+
+    // After clicking, the encoding selector prompt should open
+    harness.assert_screen_contains("Encoding:");
+
+    // Clear the prompt input first (Ctrl+A to select all, then type to replace)
+    harness
+        .send_key(KeyCode::Char('a'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.type_text("UTF-8").unwrap();
+    harness.render().unwrap();
+
+    // Press Enter to confirm the selection
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Verify encoding changed to UTF-8 in status bar
+    harness.assert_screen_contains("UTF-8");
+    // Status bar should not show "UTF-16 LE" indicator anymore
+    // (the content still contains "UTF-16" text, so we check for the indicator format)
+    harness.assert_screen_not_contains("UTF-16 LE");
+
+    // Save the file (Ctrl+S)
+    harness
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Read the saved file and verify it's now UTF-8 (no BOM, plain text)
+    let saved_content = std::fs::read(&file_path).unwrap();
+
+    // UTF-8 file should NOT have UTF-16 BOM
+    assert!(
+        !saved_content.starts_with(UTF16_LE_BOM),
+        "Saved file should not have UTF-16 LE BOM"
+    );
+
+    // Content should be plain UTF-8
+    let saved_text = String::from_utf8(saved_content).expect("Saved file should be valid UTF-8");
+    assert!(
+        saved_text.contains("Hello UTF-16!"),
+        "Saved file should contain the original text"
+    );
+    assert!(
+        saved_text.contains("Line 2"),
+        "Saved file should contain all lines"
+    );
+}

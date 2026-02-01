@@ -623,18 +623,9 @@ impl StatusBarRenderer {
         let line_ending_width = str_width(&line_ending_text);
 
         // Encoding indicator (clickable to change encoding)
-        // Only show for non-UTF-8/ASCII encodings to save space (these are the expected defaults)
         let encoding = state.buffer.encoding();
-        let (encoding_text, encoding_width) = {
-            use crate::model::encoding::Encoding;
-            if encoding != Encoding::Utf8 && encoding != Encoding::Ascii {
-                let text = format!(" {} ", encoding.display_name());
-                let width = str_width(&text);
-                (text, width)
-            } else {
-                (String::new(), 0)
-            }
-        };
+        let encoding_text = format!(" {} ", encoding.display_name());
+        let encoding_width = str_width(&encoding_text);
 
         // Language indicator (clickable to change language)
         let language_text = format!(" {} ", &state.language);
@@ -787,8 +778,7 @@ impl StatusBarRenderer {
             }
 
             // Add encoding indicator (clickable to change encoding)
-            // Only shown for non-UTF-8 encodings
-            if encoding_width > 0 {
+            {
                 let is_hovering = hover == StatusBarHover::EncodingIndicator;
                 // Record position for click detection
                 layout.encoding_indicator =
