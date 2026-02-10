@@ -14,6 +14,19 @@ pub enum BindingSource {
     Unbound,
 }
 
+/// Result of a delete operation in the keybinding editor
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteResult {
+    /// A custom binding was removed
+    CustomRemoved,
+    /// A keymap binding was overridden with a noop custom binding
+    KeymapOverridden,
+    /// Cannot delete (e.g. unbound entry)
+    CannotDelete,
+    /// Nothing was selected
+    NothingSelected,
+}
+
 /// A single resolved keybinding entry for display
 #[derive(Debug, Clone)]
 pub struct ResolvedBinding {

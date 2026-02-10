@@ -926,6 +926,8 @@ impl Action {
             "event_debug" => EventDebug,
             "open_keybinding_editor" => OpenKeybindingEditor,
 
+            "noop" => None,
+
             "open_settings" => OpenSettings,
             "close_settings" => CloseSettings,
             "settings_save" => SettingsSave,

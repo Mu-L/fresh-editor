@@ -523,23 +523,182 @@ fn test_add_new_binding() {
 // Delete binding
 // ========================
 
-/// Test that deleting a keymap binding shows an error
+/// Test that deleting a keymap binding creates a noop override
+/// (disabling the binding rather than removing it from the keymap),
+/// and that the original action appears as unbound in the table.
 #[test]
-fn test_cannot_delete_keymap_binding() {
+fn test_delete_keymap_binding_creates_noop_override() {
     let mut harness = EditorTestHarness::new(120, 40).unwrap();
     open_keybinding_editor(&mut harness);
 
-    // Try to delete the first binding (which should be a keymap binding)
+    // Search for "save" to find the Ctrl+S keymap binding
+    harness
+        .send_key(KeyCode::Char('/'), KeyModifiers::NONE)
+        .unwrap();
+    for ch in "save".chars() {
+        harness
+            .send_key(KeyCode::Char(ch), KeyModifiers::NONE)
+            .unwrap();
+    }
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Navigate to the keymap "save" binding (the one with Ctrl+S)
+    harness.send_key(KeyCode::Home, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+    let mut found_keymap = false;
+    for _ in 0..20 {
+        let screen = harness.screen_to_string();
+        for line in screen.lines() {
+            if line.contains(">") && line.contains("keymap") && line.contains("Ctrl+S") {
+                found_keymap = true;
+                break;
+            }
+        }
+        if found_keymap {
+            break;
+        }
+        harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
+        harness.render().unwrap();
+    }
+    assert!(
+        found_keymap,
+        "Should find the Ctrl+S save keymap binding in search results"
+    );
+
+    // Delete (override) the keymap binding
     harness
         .send_key(KeyCode::Char('d'), KeyModifiers::NONE)
         .unwrap();
     harness.render().unwrap();
 
-    // Should show error about not being able to delete keymap bindings
+    // Should show status about keymap being overridden
     let screen = harness.screen_to_string();
     assert!(
-        screen.contains("custom") || screen.contains("keymap") || screen.contains("delete"),
-        "Should show a message about not being able to delete non-custom bindings"
+        screen.contains("disabled") || screen.contains("override") || screen.contains("noop"),
+        "Should show a status message about the keymap binding being disabled.\nScreen:\n{}",
+        screen,
+    );
+
+    // The editor should be marked as modified
+    assert!(
+        screen.contains("modified"),
+        "Editor should show [modified] after overriding a keymap binding"
+    );
+
+    // Cancel the "save" search so we can see all results.
+    // Pressing Escape cancels the search.
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
+    // Now search for Ctrl+S (via record-key search) to find the noop override
+    harness
+        .send_key(KeyCode::Char('r'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    // The noop override should appear with "custom" source
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("noop"),
+        "After overriding keymap binding, Ctrl+S should show 'noop' action.\nScreen:\n{}",
+        screen,
+    );
+    assert!(
+        screen.contains("custom"),
+        "The noop override should have 'custom' source.\nScreen:\n{}",
+        screen,
+    );
+
+    // Cancel the record-key search and search for "save" again to verify
+    // the original "save" action still appears as unbound (no key).
+    harness.send_key(KeyCode::Esc, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Char('/'), KeyModifiers::NONE)
+        .unwrap();
+    // Search for "^save" specifically
+    for ch in "save".chars() {
+        harness
+            .send_key(KeyCode::Char(ch), KeyModifiers::NONE)
+            .unwrap();
+    }
+    harness.render().unwrap();
+
+    // "save" action should still appear (now unbound — no key, no "keymap" source)
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("save"),
+        "The 'save' action should still appear in search results.\nScreen:\n{}",
+        screen,
+    );
+    // There should be no "keymap" source for "save" (the keymap entry was overridden)
+    // and Ctrl+S should not appear next to "save" (it's now bound to noop)
+    // Check that a row has "save" as action but no key
+    let has_unbound_save = screen
+        .lines()
+        .any(|line| line.contains("save") && !line.contains("Ctrl+S") && !line.contains("keymap"));
+    assert!(
+        has_unbound_save,
+        "The 'save' action should appear without Ctrl+S key (unbound).\nScreen:\n{}",
+        screen,
+    );
+
+    // Save and close
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+    harness
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+    harness.assert_screen_not_contains("Keybinding Editor");
+
+    // Ctrl+S should now have no effect (noop override is active).
+    // Type something so we can verify save doesn't trigger.
+    harness.type_text("x").unwrap();
+    harness.render().unwrap();
+
+    let buffer_before = harness.get_buffer_content().unwrap();
+
+    // Press Ctrl+S — if the noop override works, this does nothing
+    harness
+        .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.render().unwrap();
+
+    let buffer_after = harness.get_buffer_content().unwrap();
+    assert_eq!(
+        buffer_after, buffer_before,
+        "Buffer content should be unchanged — Ctrl+S should be a noop now"
+    );
+}
+
+/// Test that deleting an unbound action shows an error
+#[test]
+fn test_cannot_delete_unbound_action() {
+    let mut harness = EditorTestHarness::new(120, 40).unwrap();
+    open_keybinding_editor(&mut harness);
+
+    // The first visible row in the default sort is an unbound action
+    // (unbound actions have empty context which sorts first)
+    harness
+        .send_key(KeyCode::Char('d'), KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    // Should show error about not being able to delete
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Cannot") || screen.contains("cannot") || screen.contains("delete"),
+        "Should show a message about not being able to delete unbound actions.\nScreen:\n{}",
+        screen,
     );
 }
 

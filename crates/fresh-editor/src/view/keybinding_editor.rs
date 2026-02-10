@@ -3,7 +3,8 @@
 //! Renders the keybinding editor modal and handles input events.
 
 use crate::app::keybinding_editor::{
-    BindingSource, ContextFilter, EditMode, KeybindingEditor, SearchMode, SourceFilter,
+    BindingSource, ContextFilter, DeleteResult, EditMode, KeybindingEditor, SearchMode,
+    SourceFilter,
 };
 use crate::input::keybindings::{format_keybinding, KeybindingResolver};
 use crate::view::theme::Theme;
@@ -1244,14 +1245,18 @@ fn handle_main_input(editor: &mut KeybindingEditor, event: &KeyEvent) -> Keybind
 
         // Delete binding
         (KeyCode::Char('d'), KeyModifiers::NONE) | (KeyCode::Delete, _) => {
-            if editor.delete_selected() {
-                KeybindingEditorAction::StatusMessage(
+            match editor.delete_selected() {
+                DeleteResult::CustomRemoved => KeybindingEditorAction::StatusMessage(
                     t!("keybinding_editor.status_binding_removed").to_string(),
-                )
-            } else {
-                KeybindingEditorAction::StatusMessage(
-                    t!("keybinding_editor.status_cannot_delete").to_string(),
-                )
+                ),
+                DeleteResult::KeymapOverridden => KeybindingEditorAction::StatusMessage(
+                    t!("keybinding_editor.status_keymap_overridden").to_string(),
+                ),
+                DeleteResult::CannotDelete | DeleteResult::NothingSelected => {
+                    KeybindingEditorAction::StatusMessage(
+                        t!("keybinding_editor.status_cannot_delete").to_string(),
+                    )
+                }
             }
         }
 

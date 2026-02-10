@@ -478,34 +478,27 @@ impl KeybindingEditor {
         self.edit_dialog = None;
     }
 
-    /// Delete the selected custom binding
-    pub fn delete_selected(&mut self) -> bool {
-        if let Some(&idx) = self.filtered_indices.get(self.selected) {
-            if self.bindings[idx].source == BindingSource::Custom {
+    /// Delete the selected binding.
+    ///
+    /// * **Custom** bindings are removed outright (tracked in `pending_removes`
+    ///   or dropped from `pending_adds` when added in the same session).
+    /// * **Keymap** bindings cannot be removed from the built-in map, so a
+    ///   custom `noop` override is created for the same key, which shadows the
+    ///   default binding in the resolver.
+    ///
+    /// Returns `DeleteResult` indicating what happened.
+    pub fn delete_selected(&mut self) -> DeleteResult {
+        let Some(&idx) = self.filtered_indices.get(self.selected) else {
+            return DeleteResult::NothingSelected;
+        };
+
+        match self.bindings[idx].source {
+            BindingSource::Custom => {
                 let binding = &self.bindings[idx];
                 let action_name = binding.action.clone();
 
                 // Build config-level Keybinding for matching during save
-                let config_kb = Keybinding {
-                    key: if binding.is_chord {
-                        String::new()
-                    } else {
-                        key_code_to_config_name(binding.key_code)
-                    },
-                    modifiers: if binding.is_chord {
-                        Vec::new()
-                    } else {
-                        modifiers_to_config_names(binding.modifiers)
-                    },
-                    keys: Vec::new(),
-                    action: binding.action.clone(),
-                    args: HashMap::new(),
-                    when: if binding.context.is_empty() {
-                        None
-                    } else {
-                        Some(binding.context.clone())
-                    },
-                };
+                let config_kb = self.resolved_to_config_keybinding(binding);
 
                 // If this binding was added in the current session, just
                 // remove it from pending_adds. Otherwise track for removal
@@ -542,10 +535,94 @@ impl KeybindingEditor {
                 }
 
                 self.apply_filters();
-                return true;
+                DeleteResult::CustomRemoved
             }
+            BindingSource::Keymap => {
+                let binding = &self.bindings[idx];
+                let action_name = binding.action.clone();
+
+                // Build a noop custom override for the same key+context
+                let noop_kb = Keybinding {
+                    key: if binding.is_chord {
+                        String::new()
+                    } else {
+                        key_code_to_config_name(binding.key_code)
+                    },
+                    modifiers: if binding.is_chord {
+                        Vec::new()
+                    } else {
+                        modifiers_to_config_names(binding.modifiers)
+                    },
+                    keys: Vec::new(),
+                    action: "noop".to_string(),
+                    args: HashMap::new(),
+                    when: if binding.context.is_empty() {
+                        None
+                    } else {
+                        Some(binding.context.clone())
+                    },
+                };
+                self.pending_adds.push(noop_kb);
+
+                // Replace the keymap entry with a noop custom entry in the display
+                let noop_display = KeybindingResolver::format_action_from_str("noop");
+                self.bindings[idx] = ResolvedBinding {
+                    key_display: self.bindings[idx].key_display.clone(),
+                    action: "noop".to_string(),
+                    action_display: noop_display,
+                    context: self.bindings[idx].context.clone(),
+                    source: BindingSource::Custom,
+                    key_code: self.bindings[idx].key_code,
+                    modifiers: self.bindings[idx].modifiers,
+                    is_chord: self.bindings[idx].is_chord,
+                };
+                self.has_changes = true;
+
+                // The original action may now be unbound
+                let still_bound = self.bindings.iter().any(|b| b.action == action_name);
+                if !still_bound {
+                    let action_display = KeybindingResolver::format_action_from_str(&action_name);
+                    self.bindings.push(ResolvedBinding {
+                        key_display: String::new(),
+                        action: action_name,
+                        action_display,
+                        context: String::new(),
+                        source: BindingSource::Unbound,
+                        key_code: KeyCode::Null,
+                        modifiers: KeyModifiers::NONE,
+                        is_chord: false,
+                    });
+                }
+
+                self.apply_filters();
+                DeleteResult::KeymapOverridden
+            }
+            BindingSource::Unbound => DeleteResult::CannotDelete,
         }
-        false
+    }
+
+    /// Convert a ResolvedBinding to a config-level Keybinding (for matching).
+    fn resolved_to_config_keybinding(&self, binding: &ResolvedBinding) -> Keybinding {
+        Keybinding {
+            key: if binding.is_chord {
+                String::new()
+            } else {
+                key_code_to_config_name(binding.key_code)
+            },
+            modifiers: if binding.is_chord {
+                Vec::new()
+            } else {
+                modifiers_to_config_names(binding.modifiers)
+            },
+            keys: Vec::new(),
+            action: binding.action.clone(),
+            args: HashMap::new(),
+            when: if binding.context.is_empty() {
+                None
+            } else {
+                Some(binding.context.clone())
+            },
+        }
     }
 
     /// Apply the edit dialog to create/update a binding.
