@@ -2227,8 +2227,8 @@ impl SplitRenderer {
 
         // Get total line count (if available) or estimate
         let line_count = state.buffer.line_count().unwrap_or_else(|| {
-            // Estimate based on buffer size
-            (buffer_len / 80).max(1)
+            // Estimate based on buffer size and configured line length
+            (buffer_len / state.buffer.estimated_line_length()).max(1)
         });
 
         for line_idx in 0..line_count {
@@ -4930,7 +4930,7 @@ impl SplitRenderer {
                     }
 
                     // Line number
-                    let estimated_lines = (state.buffer.len() / 80).max(1);
+                    let estimated_lines = (state.buffer.len() / state.buffer.estimated_line_length()).max(1);
                     let margin_content = state.margins.render_line(
                         implicit_line_num,
                         crate::view::margin::MarginPosition::Left,
@@ -5115,7 +5115,7 @@ impl SplitRenderer {
         let buffer_len = state.buffer.len();
         let approximate_line_numbers = state.buffer.line_count().is_none();
         let estimated_lines = if approximate_line_numbers {
-            (buffer_len / 80).max(1)
+            (buffer_len / state.buffer.estimated_line_length()).max(1)
         } else {
             state.buffer.line_count().unwrap_or(1)
         };
@@ -5896,7 +5896,7 @@ mod tests {
         );
         let view_anchor = SplitRenderer::calculate_view_anchor(&view_data.lines, 0);
 
-        let estimated_lines = (state.buffer.len() / 80).max(1);
+        let estimated_lines = (state.buffer.len() / state.buffer.estimated_line_length()).max(1);
         state.margins.update_width_for_buffer(estimated_lines, true);
         let gutter_width = state.margins.left_total_width();
 

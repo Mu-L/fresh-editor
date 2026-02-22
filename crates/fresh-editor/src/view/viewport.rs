@@ -147,12 +147,12 @@ impl Viewport {
     /// - Separator: " │ " = 3 chars (space, box char, space)
     ///
     /// Total width = 1 + N + 3 = N + 4 (where N >= 4 minimum, so min 8 total)
-    /// This is a heuristic that assumes approximately 80 chars per line
+    /// This is a heuristic using the configured estimated line length
     pub fn gutter_width(&self, buffer: &Buffer) -> usize {
         let buffer_len = buffer.len();
         let approximate = buffer.line_count().is_none();
         let estimated_lines = if approximate {
-            (buffer_len / 80).max(1)
+            (buffer_len / buffer.estimated_line_length()).max(1)
         } else {
             buffer.line_count().unwrap_or(1)
         };

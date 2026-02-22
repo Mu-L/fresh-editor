@@ -99,6 +99,22 @@ pub const LOAD_CHUNK_SIZE: usize = 1024 * 1024;
 /// Chunk alignment for lazy loading (64 KB)
 pub const CHUNK_ALIGNMENT: usize = 64 * 1024;
 
+/// Configuration passed to TextBuffer constructors.
+#[derive(Debug, Clone)]
+pub struct BufferConfig {
+    /// Estimated average line length in bytes. Used for approximate line number
+    /// display in large files and for goto-line byte offset estimation.
+    pub estimated_line_length: usize,
+}
+
+impl Default for BufferConfig {
+    fn default() -> Self {
+        Self {
+            estimated_line_length: 80,
+        }
+    }
+}
+
 /// Line ending format used in the file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineEnding {
@@ -294,6 +310,9 @@ pub struct TextBuffer {
 
     /// Monotonic version counter for change tracking.
     version: u64,
+
+    /// Buffer configuration (estimated line length, etc.)
+    config: BufferConfig,
 }
 
 /// Snapshot of a TextBuffer's piece tree and associated string buffers.
@@ -333,6 +352,7 @@ impl TextBuffer {
             original_encoding: encoding,
             saved_file_size: None,
             version: 0,
+            config: BufferConfig::default(),
         }
     }
 
@@ -401,6 +421,7 @@ impl TextBuffer {
             is_binary: true,
             saved_file_size: Some(bytes),
             version: 0,
+            config: BufferConfig::default(),
         }
     }
 
@@ -444,6 +465,7 @@ impl TextBuffer {
             is_binary: false,
             saved_file_size: Some(bytes), // Treat initial content as "saved" state
             version: 0,
+            config: BufferConfig::default(),
         }
     }
 
@@ -491,6 +513,7 @@ impl TextBuffer {
             is_binary: false,
             saved_file_size: Some(bytes),
             version: 0,
+            config: BufferConfig::default(),
         }
     }
 
@@ -527,6 +550,7 @@ impl TextBuffer {
             original_encoding: encoding,
             saved_file_size: None,
             version: 0,
+            config: BufferConfig::default(),
         }
     }
 
@@ -562,6 +586,7 @@ impl TextBuffer {
         path: P,
         encoding: Encoding,
         fs: Arc<dyn FileSystem + Send + Sync>,
+        config: BufferConfig,
     ) -> anyhow::Result<Self> {
         let path = path.as_ref();
         let contents = fs.read_file(path)?;
@@ -569,6 +594,7 @@ impl TextBuffer {
         let mut buffer = Self::from_bytes_with_encoding(contents, encoding, fs);
         buffer.file_path = Some(path.to_path_buf());
         buffer.modified = false;
+        buffer.config = config;
         Ok(buffer)
     }
 
@@ -772,6 +798,7 @@ impl TextBuffer {
             original_encoding: encoding,
             saved_file_size: Some(file_size),
             version: 0,
+            config: BufferConfig::default(),
         })
     }
 
@@ -3560,17 +3587,22 @@ impl TextBuffer {
     ///
     /// # Behavior by File Size:
     /// - **Small files (< 1MB)**: Returns exact line number from piece tree's `line_starts` metadata
-    /// - **Large files (≥ 1MB)**: Returns estimated line number using `byte_offset / 80`
+    /// - **Large files (≥ 1MB)**: Returns estimated line number using `byte_offset / estimated_line_length`
     ///
     /// Large files don't maintain line metadata for performance reasons. The estimation
-    /// assumes ~80 bytes per line on average, which works reasonably well for most text files.
+    /// uses the configured `estimated_line_length` (default 80 bytes).
     pub fn get_line_number(&self, byte_offset: usize) -> usize {
         self.offset_to_position(byte_offset)
             .map(|pos| pos.line)
             .unwrap_or_else(|| {
-                // Estimate line number based on average line length of ~80 bytes
-                byte_offset / 80
+                // Estimate line number based on configured average line length
+                byte_offset / self.config.estimated_line_length
             })
+    }
+
+    /// Get the configured estimated line length for approximate line number calculations.
+    pub fn estimated_line_length(&self) -> usize {
+        self.config.estimated_line_length
     }
 
     /// Get the starting line number at a byte offset (used for viewport rendering)
@@ -3593,7 +3625,7 @@ impl TextBuffer {
     ///
     /// ## Small vs Large File Modes:
     /// - **Small files**: `line_starts = Some(vec)` → returns exact line number from metadata
-    /// - **Large files**: `line_starts = None` → returns estimated line number (byte_offset / 80)
+    /// - **Large files**: `line_starts = None` → returns estimated line number (byte_offset / estimated_line_length)
     ///
     /// ## Legacy Line Cache Methods:
     /// These methods are now no-ops and can be removed in a future cleanup:
@@ -5437,6 +5469,7 @@ mod tests {
                 original_encoding: Encoding::Utf8,
                 saved_file_size: Some(bytes),
                 version: 0,
+            config: BufferConfig::default(),
             }
         }
 
@@ -5650,6 +5683,7 @@ mod tests {
                 original_encoding: Encoding::Utf8,
                 saved_file_size: Some(file_size),
                 version: 0,
+            config: BufferConfig::default(),
             }
         }
 

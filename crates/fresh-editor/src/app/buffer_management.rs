@@ -421,6 +421,9 @@ impl Editor {
             path,
             encoding,
             Arc::clone(&self.filesystem),
+            crate::model::buffer::BufferConfig {
+                estimated_line_length: self.config.editor.estimated_line_length,
+            },
         )?;
 
         // Create editor state with the buffer
@@ -492,10 +495,13 @@ impl Editor {
         }
 
         // Reload the buffer with the new encoding
-        let new_buffer = crate::model::buffer::Buffer::load_from_file_with_encoding(
+        let mut new_buffer = crate::model::buffer::Buffer::load_from_file_with_encoding(
             &path,
             encoding,
             Arc::clone(&self.filesystem),
+            crate::model::buffer::BufferConfig {
+                estimated_line_length: self.config.editor.estimated_line_length,
+            },
         )?;
 
         // Update the buffer in the editor state
@@ -761,20 +767,21 @@ impl Editor {
                     0
                 }
             } else if !has_line_index {
-                // No line index at all: estimate byte offset based on line number
-                let estimated_offset = target_line * estimated_line_length;
-                let clamped_offset = estimated_offset.min(buffer_len);
+                // No line index at all: estimate byte offset from the same formula
+                // the gutter uses (byte_offset / estimated_line_length → line number),
+                // so that jumping to line N lands where the gutter shows ~N.
+                // We snap backward to the start of the line containing the estimated
+                // offset so the cursor sits at a real line boundary.
+                let estimated_offset = (target_line * estimated_line_length).min(buffer_len);
 
-                // Use LineIterator to find the actual line start at the estimated position
                 if let Some(state) = self.buffers.get_mut(&buffer_id) {
                     let iter = state
                         .buffer
-                        .line_iterator(clamped_offset, estimated_line_length);
+                        .line_iterator(estimated_offset, estimated_line_length);
                     let line_start = iter.current_position();
-                    // Add column offset, clamped to buffer length
                     (line_start + target_col).min(buffer_len)
                 } else {
-                    clamped_offset
+                    estimated_offset
                 }
             } else {
                 // Small file with full line starts: use exact line position
