@@ -16,9 +16,9 @@ pub struct PieceTreeDiff {
 
 /// Compute a diff between two piece tree roots.
 ///
-/// Comparison happens at the byte-span level (not whole leaves) so split leaves
-/// still align. The result identifies the minimal contiguous range in the
-/// "after" tree that differs from "before".
+/// Uses structural sharing (Arc::ptr_eq) to skip identical subtrees in O(1),
+/// falling back to leaf-level comparison only for subtrees that actually differ.
+/// After path-copying edits, this is O(changed_path) instead of O(all_leaves).
 ///
 /// `line_counter` should return the number of line feeds in a slice of a leaf.
 /// If it returns None for any consulted slice, the diff will have line_range=None.
@@ -27,15 +27,24 @@ pub fn diff_piece_trees(
     after: &Arc<PieceTreeNode>,
     line_counter: &dyn Fn(&LeafData, usize, usize) -> Option<usize>,
 ) -> PieceTreeDiff {
-    let mut before_leaves = Vec::new();
-    collect_leaves(before, &mut before_leaves);
-    let before_leaves = normalize_leaves(before_leaves);
+    // Fast path: identical subtree (same Arc pointer)
+    if Arc::ptr_eq(before, after) {
+        return PieceTreeDiff {
+            equal: true,
+            byte_ranges: Vec::new(),
+            line_ranges: Some(Vec::new()),
+        };
+    }
 
+    // Collect leaves only from differing subtrees using structural walk
+    let mut before_leaves = Vec::new();
     let mut after_leaves = Vec::new();
-    collect_leaves(after, &mut after_leaves);
+    diff_collect_leaves(before, after, &mut before_leaves, &mut after_leaves);
+
+    let before_leaves = normalize_leaves(before_leaves);
     let after_leaves = normalize_leaves(after_leaves);
 
-    // Fast-path: identical leaf sequences.
+    // Fast-path: identical leaf sequences (same content, different tree structure).
     if leaf_slices_equal(&before_leaves, &after_leaves) {
         return PieceTreeDiff {
             equal: true,
@@ -46,8 +55,6 @@ pub fn diff_piece_trees(
 
     let before_spans = with_doc_offsets(&before_leaves);
     let after_spans = with_doc_offsets(&after_leaves);
-
-    let _total_after = sum_bytes(&after_leaves);
 
     // Longest common prefix at byte granularity.
     let prefix = common_prefix_bytes(&before_spans, &after_spans);
@@ -63,6 +70,44 @@ pub fn diff_piece_trees(
         equal: false,
         byte_ranges: ranges,
         line_ranges,
+    }
+}
+
+/// Parallel tree walk that uses Arc::ptr_eq to skip identical subtrees.
+/// Only collects leaves from subtrees that differ between before and after.
+fn diff_collect_leaves(
+    before: &Arc<PieceTreeNode>,
+    after: &Arc<PieceTreeNode>,
+    before_out: &mut Vec<LeafData>,
+    after_out: &mut Vec<LeafData>,
+) {
+    // Identical subtree - skip entirely
+    if Arc::ptr_eq(before, after) {
+        return;
+    }
+
+    match (before.as_ref(), after.as_ref()) {
+        // Both internal: recurse into children
+        (
+            PieceTreeNode::Internal {
+                left: b_left,
+                right: b_right,
+                ..
+            },
+            PieceTreeNode::Internal {
+                left: a_left,
+                right: a_right,
+                ..
+            },
+        ) => {
+            diff_collect_leaves(b_left, a_left, before_out, after_out);
+            diff_collect_leaves(b_right, a_right, before_out, after_out);
+        }
+        // Structure mismatch - fall back to full leaf collection for both subtrees
+        _ => {
+            collect_leaves(before, before_out);
+            collect_leaves(after, after_out);
+        }
     }
 }
 
@@ -115,10 +160,6 @@ fn normalize_leaves(mut leaves: Vec<LeafData>) -> Vec<LeafData> {
 
     normalized.push(current);
     normalized
-}
-
-fn sum_bytes(leaves: &[LeafData]) -> usize {
-    leaves.iter().map(|leaf| leaf.bytes).sum()
 }
 
 #[derive(Clone)]
@@ -409,6 +450,10 @@ fn line_ranges(
 mod tests {
     use super::*;
     use crate::model::piece_tree::BufferLocation;
+
+    fn sum_bytes(leaves: &[LeafData]) -> usize {
+        leaves.iter().map(|leaf| leaf.bytes).sum()
+    }
 
     fn leaf(loc: BufferLocation, offset: usize, bytes: usize, lfs: Option<usize>) -> LeafData {
         LeafData::new(loc, offset, bytes, lfs)
