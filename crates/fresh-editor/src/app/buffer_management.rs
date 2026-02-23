@@ -2274,14 +2274,14 @@ impl Editor {
         true
     }
 
-    /// Process leaves in parallel batches, yielding for a render after each batch.
+    /// Process leaves concurrently, yielding for a render after each batch.
     ///
-    /// Collects up to `PARALLEL_SCAN_BATCH` leaves that need I/O, then scans
-    /// them concurrently using `std::thread::scope`. Each thread calls
+    /// Collects up to `read_concurrency` leaves that need I/O, then scans
+    /// them concurrently using `tokio::task::spawn_blocking`. Each task calls
     /// `count_line_feeds_in_range` on the filesystem, which remote implementations
-    /// can override to count on the server without transferring data.
+    /// override to count on the server without transferring data.
     fn process_line_scan_batch(&mut self, buffer_id: BufferId) -> std::io::Result<()> {
-        const PARALLEL_SCAN_BATCH: usize = 8;
+        let concurrency = self.config.editor.read_concurrency.max(1);
 
         let state = self.buffers.get(&buffer_id);
         let scan = self.line_scan_state.as_mut().unwrap();
@@ -2304,7 +2304,7 @@ impl Editor {
         }
 
         let mut batch: Vec<ScanWork> = Vec::new();
-        while scan.next_chunk < scan.chunks.len() && batch.len() < PARALLEL_SCAN_BATCH {
+        while scan.next_chunk < scan.chunks.len() && batch.len() < concurrency {
             let chunk = scan.chunks[scan.next_chunk].clone();
             scan.next_chunk += 1;
             scan.scanned_bytes += chunk.byte_len;
@@ -2368,30 +2368,32 @@ impl Editor {
             }
         }
 
-        // Run I/O in parallel using thread::scope
+        // Run I/O concurrently using tokio::task::spawn_blocking
         if !io_work.is_empty() {
             let fs = match state {
                 Some(s) => s.buffer.filesystem().clone(),
                 None => return Ok(()),
             };
 
-            let io_results: Vec<std::io::Result<(usize, usize)>> = std::thread::scope(|scope| {
-                let handles: Vec<_> = io_work
-                    .iter()
-                    .map(|(leaf_idx, path, offset, len)| {
-                        let fs = &fs;
-                        let leaf_idx = *leaf_idx;
-                        let path = path.as_path();
-                        let offset = *offset;
-                        let len = *len;
-                        scope.spawn(move || {
-                            let count = fs.count_line_feeds_in_range(path, offset, len)?;
-                            Ok((leaf_idx, count))
-                        })
-                    })
-                    .collect();
+            let rt = self.tokio_runtime.as_ref().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "async runtime not available")
+            })?;
 
-                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            let io_results: Vec<std::io::Result<(usize, usize)>> = rt.block_on(async {
+                let mut handles = Vec::with_capacity(io_work.len());
+                for (leaf_idx, path, offset, len) in io_work {
+                    let fs = fs.clone();
+                    handles.push(tokio::task::spawn_blocking(move || {
+                        let count = fs.count_line_feeds_in_range(&path, offset, len)?;
+                        Ok((leaf_idx, count))
+                    }));
+                }
+
+                let mut results = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    results.push(handle.await.unwrap());
+                }
+                results
             });
 
             for result in io_results {
