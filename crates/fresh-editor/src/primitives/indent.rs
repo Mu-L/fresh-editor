@@ -867,6 +867,29 @@ impl IndentCalculator {
         // Calculate delta: how many more @indent levels are we at cursor vs reference
         indent_delta += cursor_indent_count - reference_indent_count;
 
+        // When cursor is at the end of a line that ends with an indent trigger
+        // (like ':' for Python, or '{', '[', '(' for other languages), tree-sitter
+        // captures may place both the reference and cursor inside the same set of
+        // @indent nodes, yielding delta=0 even though pressing Enter should increase
+        // indent. This happens with nested Python blocks like:
+        //   def foo():
+        //       if True:   <-- cursor here, delta=0 but should indent
+        // Detect this case and add +1 to the delta.
+        if indent_delta == 0 && !last_nonws_is_closing {
+            let mut check_pos = cursor_offset;
+            while check_pos > line_start_offset {
+                check_pos -= 1;
+                match source.get(check_pos) {
+                    Some(b' ') | Some(b'\t') | Some(b'\r') => continue,
+                    Some(b':') | Some(b'{') | Some(b'[') | Some(b'(') => {
+                        indent_delta = 1;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+        }
+
         // If no captures were found, return None to trigger pattern-based fallback
         if !found_any_captures {
             tracing::debug!("No tree-sitter captures found, falling back to pattern matching");
