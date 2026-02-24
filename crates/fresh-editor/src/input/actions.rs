@@ -408,6 +408,10 @@ pub fn get_auto_close_char(ch: char, auto_indent: bool, language: &str) -> Optio
     if language == "text" && matches!(ch, '"' | '\'' | '`') {
         return None;
     }
+    // Disable auto-closing single quotes in markdown (used as apostrophes)
+    if matches!(language, "markdown" | "mdx") && ch == '\'' {
+        return None;
+    }
     match ch {
         '(' => Some(')'),
         '[' => Some(']'),
