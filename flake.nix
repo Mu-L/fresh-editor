@@ -56,6 +56,8 @@
               (lib.fileset.fileFilter (file: file.hasExt "py") unfilteredRoot)
               # Keep sublime-syntax grammar files (used by include_str! in grammar_registry.rs)
               (lib.fileset.fileFilter (file: file.hasExt "sublime-syntax") unfilteredRoot)
+              # Font files (used by include_bytes! in fresh-gui and fresh-editor)
+              (lib.fileset.fileFilter (file: file.hasExt "ttf") unfilteredRoot)
               # Runtime assets in crates/fresh-editor
               ./crates/fresh-editor/docs
               ./crates/fresh-editor/keymaps
