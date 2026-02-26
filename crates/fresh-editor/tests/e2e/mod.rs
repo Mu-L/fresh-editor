@@ -48,6 +48,7 @@ pub mod margin;
 pub mod markdown_compose;
 pub mod menu_bar;
 pub mod menu_cursor_bleed;
+pub mod menu_tab_color_bleed;
 pub mod merge_conflict;
 pub mod mouse;
 pub mod movement;
