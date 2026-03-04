@@ -229,6 +229,8 @@ interface ThemeEditorState {
   isBuiltin: boolean;
   /** Saved cursor field path (for restoring after prompts) */
   savedCursorPath: string | null;
+  /** Whether to close the editor after a successful save */
+  closeAfterSave: boolean;
 }
 
 /**
@@ -274,6 +276,7 @@ const state: ThemeEditorState = {
   pendingSaveName: null,
   isBuiltin: false,
   savedCursorPath: null,
+  closeAfterSave: false,
 };
 
 // =============================================================================
@@ -1189,9 +1192,10 @@ globalThis.onThemeSaveAsPromptConfirmed = async function(args: {
 globalThis.onThemePromptCancelled = function(args: { prompt_type: string }): boolean {
   if (!args.prompt_type.startsWith("theme-")) return true;
 
-  // Clear saved cursor path on cancellation
+  // Clear saved state on cancellation
   state.savedCursorPath = null;
   state.pendingSaveName = null;
+  state.closeAfterSave = false;
 
   editor.debug(editor.t("status.cancelled"));
   return true;
@@ -1342,8 +1346,15 @@ async function saveTheme(name?: string, restorePath?: string | null): Promise<bo
     editor.reloadThemes();
     editor.applyTheme(themeName);
     editor.setStatus(editor.t("status.saved_and_applied", { name: themeName }));
+
+    if (state.closeAfterSave) {
+      state.closeAfterSave = false;
+      doCloseEditor();
+    }
+
     return true;
   } catch (e) {
+    state.closeAfterSave = false;
     editor.setStatus(editor.t("status.save_failed", { error: String(e) }));
     return false;
   }
@@ -1839,8 +1850,9 @@ globalThis.theme_editor_close = function(): void {
     // Show confirmation prompt before closing with unsaved changes
     editor.startPrompt(editor.t("prompt.discard_confirm"), "theme-discard-confirm");
     const suggestions: PromptSuggestion[] = [
-      { text: editor.t("prompt.discard_yes"), description: "", value: "discard" },
       { text: editor.t("prompt.discard_no"), description: "", value: "keep" },
+      { text: editor.t("prompt.discard_save"), description: "", value: "save" },
+      { text: editor.t("prompt.discard_yes"), description: "", value: "discard" },
     ];
     editor.setPromptSuggestions(suggestions);
     return;
@@ -1879,9 +1891,12 @@ globalThis.onThemeDiscardPromptConfirmed = function(args: {
   if (args.prompt_type !== "theme-discard-confirm") return true;
 
   const response = args.input.trim().toLowerCase();
-  if (response === "discard" || args.selected_index === 0) {
+  if (response === "discard" || args.selected_index === 2) {
     editor.setStatus(editor.t("status.unsaved_discarded"));
     doCloseEditor();
+  } else if (response === "save" || args.selected_index === 1) {
+    state.closeAfterSave = true;
+    globalThis.theme_editor_save();
   } else {
     editor.debug(editor.t("status.cancelled"));
   }
@@ -2022,6 +2037,7 @@ globalThis.onThemeOverwritePromptConfirmed = async function(args: {
   } else {
     state.pendingSaveName = null;
     state.savedCursorPath = null;
+    state.closeAfterSave = false;
     editor.debug(editor.t("status.cancelled"));
   }
 
