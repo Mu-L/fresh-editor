@@ -112,7 +112,7 @@ Git appends the filename, so the final command becomes e.g. `fresh --cmd session
 
 #### Annotated Code Walkthroughs
 
-Combine `--wait` with [range selection and popup messages](../../#file-location-syntax) to walk a user through code one location at a time. Each command blocks until the user presses Escape, then the next location opens:
+Combine `--wait` with [range selection and popup messages](../getting-started/#running-fresh) to walk a user through code one location at a time. Each command blocks until the user presses Escape, then the next location opens:
 
 ```bash
 fresh --cmd session open-file . 'src/parse.rs:10-25@"Step 1: The parser entry point"' --wait
