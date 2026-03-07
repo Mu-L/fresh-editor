@@ -42,6 +42,17 @@ impl RemoteFileSystem {
         self.channel.is_connected()
     }
 
+    /// Extract the remote temp directory from an agent `info` response.
+    /// Falls back to `/tmp` if the response is missing or doesn't contain `temp_dir`.
+    fn parse_temp_dir_from_info(info: Option<&serde_json::Value>) -> PathBuf {
+        info.and_then(|r| {
+            r.get("temp_dir")
+                .and_then(|v| v.as_str())
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+    }
+
     /// Convert a ChannelError to io::Error
     fn to_io_error(e: ChannelError) -> io::Error {
         match e {
@@ -471,8 +482,15 @@ impl FileSystem for RemoteFileSystem {
     }
 
     fn unique_temp_path(&self, dest_path: &Path) -> PathBuf {
-        // Use /tmp on the remote system, not local temp_dir
-        let temp_dir = PathBuf::from("/tmp");
+        // Query the remote system's temp directory instead of hardcoding /tmp,
+        // which doesn't exist on Windows remotes. Falls back to /tmp if the
+        // info request fails (e.g. older agent without temp_dir support).
+        let temp_dir = Self::parse_temp_dir_from_info(
+            self.channel
+                .request_blocking("info", serde_json::json!({}))
+                .ok()
+                .as_ref(),
+        );
         let file_name = dest_path
             .file_name()
             .unwrap_or_else(|| std::ffi::OsStr::new("fresh-save"));

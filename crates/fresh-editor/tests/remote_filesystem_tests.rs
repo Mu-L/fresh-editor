@@ -1592,3 +1592,39 @@ fn test_concurrent_mixed_requests() {
         num_each
     );
 }
+
+#[test]
+fn test_unique_temp_path_uses_system_temp_dir() {
+    let Some((fs, _temp_dir, _rt)) = create_test_filesystem() else {
+        eprintln!("Skipping test: could not create test filesystem");
+        return;
+    };
+
+    let dest = std::path::Path::new("/some/dir/myfile.txt");
+    let temp_path = fs.unique_temp_path(dest);
+
+    // The temp path should be under the system's temp directory (what Python's
+    // tempfile.gettempdir() returns), NOT a hardcoded /tmp.
+    let expected_temp_dir = std::env::temp_dir();
+    assert!(
+        temp_path.starts_with(&expected_temp_dir),
+        "unique_temp_path should use system temp dir ({:?}), got {:?}",
+        expected_temp_dir,
+        temp_path,
+    );
+
+    // The temp file name should contain the original file's name
+    let name = temp_path.file_name().unwrap().to_string_lossy();
+    assert!(
+        name.contains("myfile.txt"),
+        "temp file name should contain the original file name, got {:?}",
+        name,
+    );
+
+    // The temp file name should end with .tmp
+    assert!(
+        name.ends_with(".tmp"),
+        "temp file name should end with .tmp, got {:?}",
+        name,
+    );
+}

@@ -359,10 +359,12 @@ def cmd_exists(id, p):
 
 
 def cmd_info(id, p):
-    """Get system info (home directory, cwd, etc.)."""
+    """Get system info (home directory, cwd, temp directory, etc.)."""
+    import tempfile
     send(id, r={
         "home": os.path.expanduser("~"),
         "cwd": os.getcwd(),
+        "temp_dir": tempfile.gettempdir(),
     })
 
 
