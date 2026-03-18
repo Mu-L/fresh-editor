@@ -4,73 +4,51 @@
 
 ### Features
 
-* **Project-Wide Search & Replace**: Search and replace across all files in the project with streaming parallel grep, virtual-scrolled results tree, inline editing UX, and debounced search. Trigger from the search panel with Alt+Enter. Supports regex, case-sensitive, and whole-word modes. Results capped at 10,000 matches with a truncation indicator.
+* **Project-Wide Search & Replace**: Search and replace across the entire project. Works reliably with unsaved buffers, large files, and up to 10,000 results. Alt+Enter to replace in project.
 
-* **Hot Exit**: Unsaved changes in file-backed buffers are now preserved across editor restarts (VS Code-style). The file on disk stays untouched; only in-memory edits are backed up and restored. Unnamed scratch buffers also survive editor restarts. Both controlled by the `hot_exit` config option (default: true) (#1148).
+* **Hot Exit**: All buffers — including unnamed scratch buffers — persist across sessions automatically. Configurable via `hot_exit` setting (#1148, #1233).
 
-* **Plugin API: Global State**: New `setGlobalState()`/`getGlobalState()` plugin API with per-plugin isolation and persistence across sessions via workspace serialization.
-
-* **Unified Plugin Keybindings**: Plugin mode bindings (from `defineMode()`) are now first-class in the keybinding system. Users can override them via config. Plugin bindings are visible in the keybinding editor with Plugin source and mode context.
-
-* **Keybinding Editor Sections**: Bindings are grouped by plugin with collapsible section headers. Plugin sections collapsed by default, auto-expand when search/filter matches. New PluginOnly source filter.
-
-* **Markdown Compose/Preview Global Toggle**: New "Toggle Compose/Preview (All Files)" command enables or disables compose mode for all open markdown files and auto-enables for future markdown opens (#1250).
-
-* **Duplicate Tab Disambiguation**: When multiple unnamed buffers or files with the same name are open, tabs show numbered suffixes (e.g. "[No Name] 1", "[No Name] 2") to distinguish them.
-
-* **GUI Release Builds**: Native GUI builds (GPU-accelerated via wgpu) now available as release artifacts — Windows `.exe`, macOS `.pkg` installer, and Linux AppImage.
+* **Workspace Storage**: Session state always restored on startup, even when opening specific files from CLI. Plugin state also persists across sessions.
 
 ### Improvements
 
-* **Hot Exit Quit Prompt**: When quitting with unsaved file-backed buffers, the editor now prompts with options: (s)ave and quit, (q)uit (recoverable), or (C)ancel. Auto-save users get silent save-on-exit.
+* **Keybinding Editor**: Collapsible section headers and plugin mode bindings shown as first-class entries.
 
-* **Command Palette Width**: Name column scales with terminal width (30% of width, min 30 chars) to reduce truncation on wide terminals.
+* **Markdown Compose Mode**: Easier to discover via global toggle and searchable command palette entries.
 
-* **Hybrid Search for Large Remote Files**: Project-wide search on partially-loaded large files dispatches unloaded regions to the filesystem (searched where the data lives) while searching edited regions in memory, avoiding full file transfer over SSH.
+* **Tab Naming**: Duplicate tab names are disambiguated with appended numbers.
+
+* **View...Keybinding Style: Menu Checkboxes**: Submenu items now show checkbox indicators for toggled settings.
 
 ### Bug Fixes
 
-* **CapsLock Breaking Shortcuts**: Fixed CapsLock causing Ctrl+A, Ctrl+C, etc. to stop working. Terminals with the kitty protocol send uppercase characters without SHIFT when CapsLock is on; the key normalizer no longer spuriously adds SHIFT.
+* Fixed crash when workspace references deleted files (#1278).
 
-* **Line Number Bugs**: Fixed Delete key incorrectly decrementing the status bar line number (#1261). Fixed relative line numbers showing wrong values due to using byte offsets instead of line numbers (#1262).
+* Fixed CapsLock breaking keyboard shortcuts like Ctrl+A, Ctrl+C, etc.
 
-* **Latin-1 Encoding Misdetection**: Fixed short Latin-1 files (e.g. files ending with `é`) being misdetected as UTF-8 due to trailing-byte tolerance intended only for truncated samples.
+* Fixed bracketed paste not working on Windows Terminal.
 
-* **Theme Editor PageUp/PageDown**: Fixed PageUp/PageDown keys not working in the Theme Editor sidebar (#1247).
+* Fixed clipboard not working in client-server session mode.
 
-* **C# LSP Support**: Fixed language ID mismatch (`c_sharp` vs `csharp`) that completely prevented LSP support for C# files.
+* Fixed Latin-1 files misdetected as UTF-8 for short files with trailing high bytes.
 
-* **Windows Bracketed Paste**: Fixed paste not working in Windows Terminal due to console stripping VT escape sequences. Uses hybrid VT input mode for proper bracketed paste support.
+* Fixed line number bugs: Delete key not updating status bar (#1261), relative line numbers miscounting (#1262).
 
-* **Session Mode Clipboard**: Fixed copy-to-clipboard not working in client-server session mode (`fresh -a`). OSC 52 and system clipboard operations are now forwarded from the server to the client via control messages.
+* Fixed C# LSP not working due to language ID mismatch.
 
-* **Client Clipboard on X11/Wayland**: Fixed system clipboard being empty after copy in client/server mode due to temporary arboard handle being dropped immediately.
+* Fixed remote editing using hardcoded `/tmp` instead of querying the remote system.
 
-* **Windows Temp Path**: Fixed hardcoded `/tmp` path in recovery storage and remote editing that doesn't exist on Windows. Now uses platform-appropriate temp directories (#1216).
+* Fixed high memory usage on Windows (#1205).
 
-* **Multibyte Character Insertion**: Fixed insertion logic to properly handle multibyte characters.
+* Fixed PageUp/PageDown not working in Theme Editor sidebar.
 
-* **Keybinding Editor Truncation**: Fixed context column truncating long mode names like "mode:search-replace-list". Column width is now proportional to terminal width.
-
-* **Hot Exit Recovery for CLI Files**: Fixed hot exit recovery files being saved on quit but never loaded when files were opened via CLI arguments.
-
-* **Workspace Restore with CLI Args**: Fixed opening Fresh with file arguments discarding all previous buffers from the session (#1231, #1232).
+* Fixed unbound keys being swallowed in plugin modes.
 
 ### Packaging
 
-* **Linux Desktop Integration**: All Linux packages (AppImage, Flatpak, deb, rpm, AUR) now install hicolor PNG icons and a `fresh.desktop` file for desktop environment integration (#619).
-
-* **Flatpak Metadata**: Fixed AppStream/metainfo and desktop file for app stores and desktop menus.
-
-### Internal
-
-* Unified keybinding resolution: removed dual ModeRegistry/KeybindingResolver dispatch path.
-* Added `search_file` to FileSystem trait with cursor-driven streaming for remote search.
-* Replaced `ignore::WalkBuilder` with FileSystem trait recursive walking for remote-compatible project grep.
-* Session-scoped recovery directories for named session isolation.
+* **Linux**: Icons and desktop files added to all packaging methods (deb, rpm, Flatpak, AppImage). Fixed Flatpak AppStream metadata for app stores.
 
 ---
-
 ## 0.2.14
 
 ### Improvements
