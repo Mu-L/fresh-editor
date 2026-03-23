@@ -12,6 +12,7 @@ pub mod capslock_shortcuts;
 pub mod case_conversion;
 pub mod command_palette;
 pub mod crash_repro;
+pub mod csi_u_session_input;
 pub mod crlf_rendering;
 pub mod csharp_language_coherence;
 pub mod ctrl_end_wrapped;
