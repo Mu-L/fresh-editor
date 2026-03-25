@@ -752,10 +752,17 @@ impl GrammarRegistry {
         &self.filename_scopes
     }
 
+    /// Get the loaded grammar paths (for deduplication in flush_pending_grammars)
+    pub fn loaded_grammar_paths(&self) -> &[(String, PathBuf, Vec<String>)] {
+        &self.loaded_grammar_paths
+    }
+
     /// Create a new registry with additional grammar files
     ///
     /// This builds a new GrammarRegistry that includes all grammars from
     /// the base registry plus the additional grammars specified.
+    /// Uses the base registry's syntax_set as the builder base, preserving
+    /// all existing grammars (user grammars, language packs, etc.).
     ///
     /// # Arguments
     /// * `base` - The base registry to extend
@@ -768,48 +775,21 @@ impl GrammarRegistry {
         additional: &[(String, PathBuf, Vec<String>)],
     ) -> Option<Self> {
         tracing::info!(
-            "[SYNTAX DEBUG] with_additional_grammars: adding {} grammars, base has {} user_extensions, {} previously loaded grammars",
+            "[SYNTAX DEBUG] with_additional_grammars: adding {} grammars to base with {} syntaxes",
             additional.len(),
-            base.user_extensions.len(),
-            base.loaded_grammar_paths.len()
+            base.syntax_set.syntaxes().len()
         );
 
-        // Start with defaults and embedded grammars (same as Default impl)
-        let defaults = SyntaxSet::load_defaults_newlines();
-        let mut builder = defaults.into_builder();
-        Self::add_embedded_grammars(&mut builder);
+        // Use the base registry's syntax_set as builder base — this preserves
+        // ALL existing grammars (defaults, embedded, user, language packs)
+        // without needing to reload them from disk.
+        let mut builder = (*base.syntax_set).clone().into_builder();
 
-        // Start fresh with user extensions - we'll rebuild from loaded grammars
-        let mut user_extensions = HashMap::new();
+        // Preserve existing user extensions and add new ones
+        let mut user_extensions = base.user_extensions.clone();
 
-        // Track all loaded grammar paths (existing + new)
+        // Track loaded grammar paths (existing + new)
         let mut loaded_grammar_paths = base.loaded_grammar_paths.clone();
-
-        // First, reload all previously loaded grammars from base
-        for (language, path, extensions) in &base.loaded_grammar_paths {
-            tracing::info!(
-                "[SYNTAX DEBUG] reloading existing grammar: lang='{}', path={:?}",
-                language,
-                path
-            );
-            match Self::load_grammar_file(path) {
-                Ok(syntax) => {
-                    let scope = syntax.scope.to_string();
-                    builder.add(syntax);
-                    for ext in extensions {
-                        user_extensions.insert(ext.clone(), scope.clone());
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to reload grammar for '{}' from {:?}: {}",
-                        language,
-                        path,
-                        e
-                    );
-                }
-            }
-        }
 
         // Add each new grammar
         for (language, path, extensions) in additional {
@@ -865,7 +845,7 @@ impl GrammarRegistry {
     /// Only Sublime Text (.sublime-syntax) format is supported.
     /// TextMate (.tmLanguage) grammars use a completely different format
     /// and cannot be loaded by syntect's yaml-load feature.
-    fn load_grammar_file(path: &Path) -> Result<SyntaxDefinition, String> {
+    pub(crate) fn load_grammar_file(path: &Path) -> Result<SyntaxDefinition, String> {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match ext {

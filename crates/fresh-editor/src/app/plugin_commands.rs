@@ -1720,7 +1720,45 @@ impl Editor {
     /// RegisterGrammar+ReloadGrammars pairs result in only one rebuild.
     /// The rebuild happens on a background thread; when complete, a
     /// `GrammarRegistryBuilt` message swaps in the new registry.
+    ///
+    /// On the first call, this triggers the deferred full grammar build
+    /// (user grammars + language packs + any plugin grammars accumulated so far).
     pub(super) fn flush_pending_grammars(&mut self) {
+        // On the first call, start the deferred full grammar build.
+        // This includes any plugin grammars that were registered during init,
+        // so we get everything in a single builder.build() pass.
+        if self.needs_full_grammar_build {
+            self.needs_full_grammar_build = false;
+            self.grammar_reload_pending = false;
+
+            // Drain all pending grammars to include in the initial build
+            let additional: Vec<_> = self
+                .pending_grammars
+                .drain(..)
+                .map(|g| {
+                    (
+                        g.language.clone(),
+                        std::path::PathBuf::from(g.grammar_path),
+                        g.extensions.clone(),
+                    )
+                })
+                .collect();
+
+            // Update config.languages with the extensions so detect_language() works
+            for (language, _path, extensions) in &additional {
+                let lang_config = self.config.languages.entry(language.clone()).or_default();
+                for ext in extensions {
+                    if !lang_config.extensions.contains(ext) {
+                        lang_config.extensions.push(ext.clone());
+                    }
+                }
+            }
+
+            let callback_ids: Vec<_> = self.pending_grammar_callbacks.drain(..).collect();
+            self.start_background_grammar_build(additional, callback_ids);
+            return;
+        }
+
         if !self.grammar_reload_pending {
             return;
         }
@@ -1739,6 +1777,50 @@ impl Editor {
 
         if self.pending_grammars.is_empty() {
             tracing::debug!("Grammar reload requested but no pending grammars");
+            return;
+        }
+
+        // Deduplicate: skip grammars whose extensions are all already mapped
+        // in the current registry (meaning the grammar was already loaded by
+        // for_editor or a previous build).
+        let pending_before = self.pending_grammars.len();
+        self.pending_grammars.retain(|g| {
+            // Check if ALL extensions for this grammar are already mapped
+            let all_mapped = !g.extensions.is_empty()
+                && g.extensions
+                    .iter()
+                    .all(|ext| self.grammar_registry.user_extensions().contains_key(ext));
+            if all_mapped {
+                tracing::debug!(
+                    "Skipping already-loaded grammar '{}' (extensions {:?} already mapped)",
+                    g.language,
+                    g.extensions
+                );
+                false
+            } else {
+                true
+            }
+        });
+        if pending_before != self.pending_grammars.len() {
+            tracing::info!(
+                "Deduplicated pending grammars: {} -> {}",
+                pending_before,
+                self.pending_grammars.len()
+            );
+        }
+
+        if self.pending_grammars.is_empty() {
+            tracing::info!(
+                "All pending grammars already loaded, resolving callbacks without rebuild"
+            );
+            // Resolve callbacks immediately — no rebuild needed
+            #[cfg(feature = "plugins")]
+            for cb_id in self.pending_grammar_callbacks.drain(..) {
+                self.plugin_manager
+                    .resolve_callback(cb_id, "null".to_string());
+            }
+            #[cfg(not(feature = "plugins"))]
+            self.pending_grammar_callbacks.clear();
             return;
         }
 

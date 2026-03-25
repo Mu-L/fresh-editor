@@ -182,6 +182,141 @@ impl GrammarRegistry {
         Arc::new(Self::load(&LocalGrammarLoader::new(config_dir)))
     }
 
+    /// Create a fully-loaded grammar registry for the editor, also including
+    /// additional grammars registered by plugins.
+    ///
+    /// This performs a single build that combines filesystem grammars (user grammars,
+    /// language packs) with plugin-registered grammars, avoiding redundant rebuilds.
+    pub fn for_editor_with_additional(
+        config_dir: std::path::PathBuf,
+        additional: &[(String, PathBuf, Vec<String>)],
+    ) -> Arc<Self> {
+        Arc::new(Self::load_with_additional(
+            &LocalGrammarLoader::new(config_dir),
+            additional,
+        ))
+    }
+
+    /// Load grammar registry using a GrammarLoader, including additional grammars.
+    ///
+    /// Same as `load()` but includes extra grammars (from plugins) in the same
+    /// builder pass, so only one `builder.build()` call is needed.
+    pub fn load_with_additional(
+        loader: &dyn GrammarLoader,
+        additional: &[(String, PathBuf, Vec<String>)],
+    ) -> Self {
+        // Start with built-in extra extension mappings, user grammars override these
+        let mut user_extensions = Self::build_extra_extensions();
+
+        // Check if there are any user grammars or language packs to add
+        let has_user_grammars = loader.grammars_dir().is_some_and(|dir| loader.exists(&dir));
+        let has_language_packs = loader
+            .languages_packages_dir()
+            .is_some_and(|dir| loader.exists(&dir));
+
+        let needs_builder = has_user_grammars || has_language_packs || !additional.is_empty();
+
+        let syntax_set = if !needs_builder {
+            // Fast path: no user additions or plugin grammars, use packdump directly
+            tracing::info!(
+                "[grammar-build] No user grammars, language packs, or plugin grammars — using pre-compiled packdump"
+            );
+            let ss: SyntaxSet = syntect::dumps::from_uncompressed_data(include_bytes!(concat!(
+                env!("OUT_DIR"),
+                "/default_syntaxes.packdump"
+            )))
+            .expect("Failed to load pre-compiled syntax packdump");
+            tracing::info!(
+                "[grammar-build] Loaded {} syntaxes from packdump",
+                ss.syntaxes().len()
+            );
+            ss
+        } else {
+            // Slow path: need to add grammars, must go through builder
+            tracing::info!("[grammar-build] Loading pre-compiled packdump as builder base...");
+            let base: SyntaxSet = syntect::dumps::from_uncompressed_data(include_bytes!(concat!(
+                env!("OUT_DIR"),
+                "/default_syntaxes.packdump"
+            )))
+            .expect("Failed to load pre-compiled syntax packdump");
+            tracing::info!("[grammar-build] Converting to builder...");
+            let mut builder = base.into_builder();
+
+            if has_user_grammars {
+                let grammars_dir = loader.grammars_dir().unwrap();
+                tracing::info!(
+                    "[grammar-build] Loading user grammars from {:?}...",
+                    grammars_dir
+                );
+                load_user_grammars(loader, &grammars_dir, &mut builder, &mut user_extensions);
+            }
+
+            if has_language_packs {
+                let packages_dir = loader.languages_packages_dir().unwrap();
+                tracing::info!(
+                    "[grammar-build] Loading language pack grammars from {:?}...",
+                    packages_dir
+                );
+                load_language_pack_grammars(
+                    loader,
+                    &packages_dir,
+                    &mut builder,
+                    &mut user_extensions,
+                );
+            }
+
+            // Add plugin-registered grammars in the same builder pass
+            if !additional.is_empty() {
+                tracing::info!(
+                    "[grammar-build] Adding {} plugin-registered grammars...",
+                    additional.len()
+                );
+                for (language, path, extensions) in additional {
+                    match Self::load_grammar_file(path) {
+                        Ok(syntax) => {
+                            let scope = syntax.scope.to_string();
+                            tracing::info!(
+                                "[grammar-build] Loaded plugin grammar '{}' from {:?}",
+                                language,
+                                path
+                            );
+                            builder.add(syntax);
+                            for ext in extensions {
+                                user_extensions.insert(ext.clone(), scope.clone());
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "[grammar-build] Failed to load plugin grammar '{}' from {:?}: {}",
+                                language,
+                                path,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+
+            tracing::info!(
+                "[grammar-build] Building syntax set ({} syntaxes)...",
+                builder.syntaxes().len()
+            );
+            let ss = builder.build();
+            tracing::info!("[grammar-build] Syntax set built");
+            ss
+        };
+        let filename_scopes = Self::build_filename_scopes();
+
+        tracing::info!(
+            "Loaded {} syntaxes, {} user extension mappings, {} filename mappings",
+            syntax_set.syntaxes().len(),
+            user_extensions.len(),
+            filename_scopes.len()
+        );
+
+        Self::new(syntax_set, user_extensions, filename_scopes)
+    }
+
     /// Get the grammars directory path for the given config directory.
     pub fn grammars_directory(config_dir: &std::path::Path) -> PathBuf {
         config_dir.join("grammars")

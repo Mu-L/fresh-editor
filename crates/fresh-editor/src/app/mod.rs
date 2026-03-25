@@ -289,6 +289,11 @@ pub struct Editor {
     /// When true, `flush_pending_grammars()` defers work until the build completes.
     grammar_build_in_progress: bool,
 
+    /// Whether the initial full grammar build (user grammars + language packs)
+    /// still needs to happen. Deferred from construction so that plugin-registered
+    /// grammars from the first event-loop tick are included in a single build.
+    needs_full_grammar_build: bool,
+
     /// Cancellation flag for the current streaming grep search.
     streaming_grep_cancellation: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 
@@ -984,7 +989,10 @@ impl Editor {
         let start = std::time::Instant::now();
         let grammar_registry = crate::primitives::grammar::GrammarRegistry::defaults_only();
         tracing::info!("Default grammar registry built in {:?}", start.elapsed());
-        let mut editor = Self::with_options(
+        // Don't start background grammar build here — it's deferred to the
+        // first flush_pending_grammars() call so that plugin-registered grammars
+        // from the first event-loop tick are included in a single build.
+        Self::with_options(
             config,
             width,
             height,
@@ -995,9 +1003,7 @@ impl Editor {
             None,
             color_capability,
             grammar_registry,
-        )?;
-        editor.start_background_grammar_build();
-        Ok(editor)
+        )
     }
 
     /// Create a new editor for testing with custom backends
@@ -1346,6 +1352,7 @@ impl Editor {
             pending_grammars: Vec::new(),
             grammar_reload_pending: false,
             grammar_build_in_progress: false,
+            needs_full_grammar_build: true,
             streaming_grep_cancellation: None,
             pending_grammar_callbacks: Vec::new(),
             theme,
@@ -1576,28 +1583,42 @@ impl Editor {
     }
 
     /// Spawn a background thread to build the full grammar registry
-    /// (embedded grammars, user grammars, and language packs).
-    /// Called by production entry points after construction; tests skip this
-    /// since they provide their own registry and don't need the expensive build.
-    fn start_background_grammar_build(&mut self) {
+    /// (embedded grammars, user grammars, language packs, and any plugin-registered grammars).
+    /// Called on the first event-loop tick (via `flush_pending_grammars`) so that
+    /// plugin grammars registered during init are included in a single build.
+    fn start_background_grammar_build(
+        &mut self,
+        additional: Vec<(String, std::path::PathBuf, Vec<String>)>,
+        callback_ids: Vec<fresh_core::api::JsCallbackId>,
+    ) {
         let Some(bridge) = &self.async_bridge else {
             return;
         };
         self.grammar_build_in_progress = true;
         let sender = bridge.sender();
         let config_dir = self.dir_context.config_dir.clone();
-        tracing::info!("Spawning background grammar build thread...");
+        tracing::info!(
+            "Spawning background grammar build thread ({} plugin grammars)...",
+            additional.len()
+        );
         std::thread::Builder::new()
             .name("grammar-build".to_string())
             .spawn(move || {
                 tracing::info!("[grammar-build] Thread started");
                 let start = std::time::Instant::now();
-                let registry = crate::primitives::grammar::GrammarRegistry::for_editor(config_dir);
+                let registry = if additional.is_empty() {
+                    crate::primitives::grammar::GrammarRegistry::for_editor(config_dir)
+                } else {
+                    crate::primitives::grammar::GrammarRegistry::for_editor_with_additional(
+                        config_dir,
+                        &additional,
+                    )
+                };
                 tracing::info!("[grammar-build] Complete in {:?}", start.elapsed());
                 drop(sender.send(
                     crate::services::async_bridge::AsyncMessage::GrammarRegistryBuilt {
                         registry,
-                        callback_ids: Vec::new(),
+                        callback_ids,
                     },
                 ));
             })
