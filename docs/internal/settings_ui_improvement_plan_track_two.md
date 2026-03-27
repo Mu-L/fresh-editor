@@ -4,365 +4,329 @@
 
 This document presents findings from a comprehensive UX audit of the Settings UI dialog,
 focusing on the LSP Configuration section. Testing was conducted via `tmux`-scripted
-interaction with the debug build. The audit uncovered **9 confirmed bugs** (including
-3 critical ones) and **6 usability issues**, evaluated against a strict TUI UX
-architecture rubric.
+interaction with the debug build, across two rounds (pre- and post-rebase on latest master).
+
+**Round 1** uncovered 9 bugs and 6 usability issues.
+**Round 2** (post-rebase) confirmed that **5 of 9 original bugs are now fixed**, but
+uncovered **1 new critical regression** and **2 remaining bugs**.
+
+### Current Bug Status (Post-Rebase)
+
+| ID | Status | Summary |
+|----|--------|---------|
+| Bug 1 | **FIXED** | Text input now works — auto-edit mode on character input |
+| Bug 2 | **FIXED** | Tab now toggles Fields ↔ Buttons via `toggle_focus_region()` |
+| Bug 3 | **FIXED** | Button focus indicator (`>`) renders when buttons are focused |
+| Bug 4 | **FIXED** | Enter on booleans no longer toggles; Space toggles booleans |
+| Bug 5 | **PARTIALLY FIXED** | Down navigation still has inconsistencies (double-visits) |
+| Bug 6 | **FIXED** | Ctrl+S saves entry dialog from any mode |
+| Issue 7 | **FIXED** | LSP entries now show command preview (e.g., `pylsp`) |
+| Issue 8 | **PARTIALLY FIXED** | Fields reordered by importance; "Advanced" separator added |
+| **NEW** | **CRITICAL** | ObjectArray `[+] Add new` unreachable via keyboard |
 
 ---
 
 ## Part 1: Test Environment & Methodology
 
-- **Build**: `cargo build` (debug profile)
+- **Build**: `cargo build` (debug profile, post-rebase on latest master)
 - **Terminal**: `tmux` session, 160×50, `TERM=xterm-256color`
 - **Test file**: `/tmp/fresh-test/test.py`
-- **Navigation path**: Command Palette → Open Settings → General category → scroll to LSP section → Edit Value → Edit Item
+- **Navigation path**: Command Palette → Open Settings → General category → scroll to
+  LSP section → Edit Value → Edit Item
 - **Tools**: `tmux send-keys` for input, `tmux capture-pane -p` for screen capture
 
 ---
 
-## Part 2: Confirmed Bugs & Findings
+## Part 2: Verified Fixes (Post-Rebase)
 
-### Bug 1 — Text Input Broken in Entry Dialog (CRITICAL)
+### Bug 1 — Text Input: FIXED
 
-**Reproduction**: Open any LSP entry → Edit Item → navigate to `Command` field → type characters.
+**What changed**: `handle_entry_dialog_navigation()` (`input.rs:454–480`) now handles
+`KeyCode::Char(c)` for Text, TextList, and Number fields. It calls `dialog.start_editing()`
+then forwards the character to `handle_entry_dialog_text_editing()`.
 
-**Observed**: Characters are silently consumed. The `Command` field remains empty. Focus
-jumps to unrelated fields (e.g., `Auto Start` gets toggled).
+**Verified**: Typing `a` on the Command field immediately appends it: `pylsp` → `pylspa`.
+Multiple characters in rapid succession all register correctly.
 
-**Root Cause**: In `handle_entry_dialog_navigation()` (`input.rs:294–416`), `KeyCode::Char`
-events are not matched at all — they fall through to `_ => {}` (line 413) and are consumed
-without action. Text fields require the user to press `Enter` first to activate
-`ControlAction::StartEditing` (line 400), which sets `editing_text = true`. Only then does
-`handle_entry_dialog_text_editing()` process character input. However:
+### Bug 2 — Tab Key: FIXED
 
-1. There is no visual cue that `Enter` is required to start typing.
-2. Typed characters before pressing `Enter` are silently lost.
-3. The `Enter` key also triggers `ControlAction::ToggleBool` on boolean fields (line 390),
-   so if focus is misaligned, `Enter` toggles the wrong control.
+**What changed**: `Tab` now calls `dialog.toggle_focus_region()` (`entry_dialog.rs:380–401`)
+which toggles between `focus_on_buttons = true/false`. This matches the status bar hint
+`Tab:Fields/Buttons`.
 
-**Recommended Fix**:
-- Auto-enter edit mode when a printable character is typed on a focused Text/Number field
-  (forward `KeyCode::Char` to `start_editing()` + `insert_char()`).
-- Add a visual cue (e.g., blinking cursor or `[type to edit]` hint) for text fields.
+**Verified**: Tab cycles between the item fields and the button bar. The cycle is:
+- Fields (first editable item) → Tab → Buttons (Save) → Tab → Fields
 
----
+**Note**: If a text field is in edit mode, the first Tab exits edit mode; the second Tab
+toggles to buttons. This is correct behavior but could use a visual hint.
 
-### Bug 2 — Tab Key Contradicts Status Bar (CRITICAL)
+### Bug 3 — Button Focus Indicator: FIXED
 
-**Reproduction**: Open LSP Edit Item dialog → press `Tab` repeatedly.
+**What changed**: Buttons now show `> [ Save ]` when focused. The rendering code at
+`render.rs:3067–3075` was already correct; the fix was in Tab navigation (Bug 2) which
+now actually sets `focus_on_buttons = true`.
 
-**Observed**: `Tab` navigates sequentially through every single field (same as `Down`).
-It **never** reaches the `Save`/`Cancel` buttons. The cycle is:
-`field₁ → field₂ → ... → fieldₙ → field₁` (wraps without visiting buttons).
+**Verified**: When Tab reaches buttons, `> [ Save ]` is visible with bold styling.
 
-**Status bar claims**: `Tab:Fields/Buttons` — implying Tab toggles between the two regions.
+### Bug 4 — Enter on Booleans: FIXED
 
-**Root Cause**: In `handle_entry_dialog_navigation()` (`input.rs:310–313`):
-```rust
-KeyCode::Tab => {
-    if let Some(dialog) = self.entry_dialog_mut() {
-        dialog.focus_next(); // Same as Down arrow
-    }
-}
+**What changed**: `Enter` and `Space` are now separate handlers (`input.rs:352–453`):
+- `Enter` (line 352): Activates control (opens nested dialog, starts editing) or
+  triggers button action. On boolean fields, it advances to the next field.
+- `Space` (line 425): Only toggles booleans and dropdowns. Does nothing on buttons.
+
+**Verified**: Enter on `Enabled` advances to `Name`. Space on `Enabled` toggles the
+checkbox.
+
+### Bug 6 — Ctrl+S in Entry Dialog: FIXED
+
+**What changed**: `handle_entry_dialog_input()` (`input.rs:86–92`) now checks for
+`Ctrl+S` before routing to mode-specific handlers. The status bar shows `Ctrl+S:Save`.
+
+**Verified**: Pressing Ctrl+S in the Edit Item dialog saves and closes it, returning
+to the Edit Value dialog.
+
+### Issue 7 — Array Items Show `[1 items]`: FIXED
+
+**What changed**: LSP entries in the main settings list now show the command name
+(e.g., `pylsp`, `rust-analyzer`, `clangd`) instead of `[1 items]`.
+
+**Verified**: All LSP language entries display their server command as the preview.
+
+### Issue 8 — Field Ordering and Grouping: PARTIALLY FIXED
+
+**What changed**: Fields are now reordered by importance:
 ```
-`Tab` calls `focus_next()` which is identical to the `Down` handler. There is no
-region-toggling logic. The `focus_next()` method (`entry_dialog.rs:292–372`) cycles
-through items and buttons sequentially, but in practice the button region is rarely
-reached because the item cycle wraps first.
-
-**Contrast with main settings**: The outer settings dialog correctly uses `Tab` to cycle
-between three panels (Categories → Settings → Footer), with the footer buttons properly
-receiving focus.
-
-**Recommended Fix**:
-- Redefine `Tab` in entry dialog to toggle between items region and buttons region
-  (matching the status bar hint).
-- Use `Down`/`Up` for sequential field navigation within a region.
-- Ensure `Shift+Tab` performs the reverse toggle.
-
----
-
-### Bug 3 — No Visible Focus Indicator on Entry Dialog Buttons
-
-**Reproduction**: Open LSP Edit Item dialog → try to navigate to `Save`/`Cancel` buttons.
-
-**Observed**: Buttons always render as `[ Save ]  [ Cancel ]` with no visual
-differentiation. Since `Tab` never reaches them (Bug 2), the focus indicator code
-(which does exist at `render.rs:3062–3075`) is never triggered.
-
-**Root Cause**: The rendering code at `render.rs:3067` correctly checks
-`dialog.focus_on_buttons` and renders a `>` prefix with BOLD+REVERSED styling when
-a button is selected. However, because navigation never sets `focus_on_buttons = true`
-(due to Bug 2), buttons always appear unfocused.
-
-**Note**: The outer settings footer buttons **do** have proper focus indicators (`>[ Save ]`).
-This is an entry-dialog-specific issue.
-
-**Recommended Fix**: Fixing Bug 2 (Tab toggles regions) will naturally expose the existing
-button focus rendering. No rendering changes needed — only the navigation fix.
-
----
-
-### Bug 4 — Enter on Boolean Fields Toggles Instead of Saving
-
-**Reproduction**: Navigate to `Enabled` (boolean) in Edit Item dialog → press `Enter`.
-
-**Observed**: The boolean value toggles (e.g., `[✓]` → `[ ]`). The form is NOT saved.
-
-**Root Cause**: `handle_entry_dialog_navigation()` at `input.rs:340–411` dispatches
-`Enter`/`Space` to `ControlAction::ToggleBool` for boolean controls. There is no
-distinction between "activate control" and "submit form".
-
-**This is technically by design** — `Enter` activates the focused control — but it
-violates the principle of least surprise. In most form UIs, `Enter` submits the form.
-The only way to save is to navigate to the `Save` button (which is itself broken per
-Bug 2) or use `Ctrl+Enter` (undiscoverable, line 365–367).
-
-**Recommended Fix**:
-- Reserve `Space` for toggling booleans and activating controls.
-- Make `Enter` submit the form (save) when focus is on a non-editable control.
-- Alternatively, add a discoverable `Ctrl+S` shortcut in the entry dialog.
-
----
-
-### Bug 5 — Down Arrow Navigation Skips Items in Entry Dialog (CRITICAL)
-
-**Reproduction**: Open bash LSP Edit Item → press `Down` repeatedly from `Args`.
-
-**Observed (mapped via scripted test)**:
-```
-Down cycle: Args → Command → Env → Init Options → Lang Id Overrides →
-            Name → Process Limits → [Buttons] → Args → ...
-```
-**Skipped items**: `Auto Start`, `Enabled`, `Except Features`, `Only Features`,
-`Root Markers` — these are never reachable via `Down`.
-
-**Up arrow** visits a different set of items, creating asymmetric navigation:
-```
-Up cycle: ... → Name → Process Limits → [Buttons] → Args → Command →
-          Command → Env → Env → Except Features → Init Options → ...
-```
-Some items appear twice (likely sub-focus within composite controls consuming an
-extra keypress), and `Auto Start`/`Enabled` are still unreachable.
-
-**Root Cause**: The `focus_next()` method (`entry_dialog.rs:310–367`) has special
-handling for `ObjectArray` controls but treats all other controls uniformly with
-`selected_item += 1`. The likely cause is that composite controls (Maps, TextLists)
-with sub-focus consume `Down` presses for internal navigation, causing the visual
-focus to appear stuck while the internal index advances. When the composite control
-is exited, the next `selected_item` value skips over intermediate simple controls.
-
-Additionally, `update_focus_states()` (`entry_dialog.rs:524–543`) only sets
-`FocusState::Focused` on `items[selected_item]`, but if the rendering of composite
-controls with sub-focus creates visual ambiguity, the actual focused item and the
-visually indicated item can diverge.
-
-**Recommended Fix**:
-- Audit the interaction between `focus_next()`/`focus_prev()` and composite control
-  sub-focus for Maps and TextLists.
-- Ensure Down/Up visits every item exactly once in a consistent order.
-- Add integration tests that verify the complete navigation cycle covers all items.
-
----
-
-### Bug 6 — Ctrl+S Does Not Work in Entry Dialog
-
-**Reproduction**: Open Edit Item dialog → press `Ctrl+S`.
-
-**Observed**: Nothing happens. Focus may shift slightly but the dialog is not saved.
-
-**Root Cause**: In `handle_key_event()` (`input.rs:27–66`), entry dialog input is
-checked first (line 29), before the global `Ctrl+S` handler (line 54). The entry dialog
-handler (`handle_entry_dialog_input`) routes to `handle_entry_dialog_navigation` which
-does not handle `Ctrl+S` — it falls through to `_ => {}`.
-
-**Note**: `Ctrl+Enter` IS implemented as a save shortcut (`input.rs:365–367`), but it
-is not shown in the status bar and is not universally supported by terminal emulators.
-
-**Recommended Fix**:
-- Add `Ctrl+S` handling at the top of `handle_entry_dialog_input()`, before mode routing.
-- Show the shortcut in the entry dialog's help bar.
-- Consider also supporting `Alt+S` as a terminal-safe fallback.
-
----
-
-### Issue 7 — Array Items Show `[1 items]` Instead of Command Preview
-
-**Reproduction**: View the LSP section in the main settings list.
-
-**Observed**: Each LSP language entry displays `[1 items]` (e.g., `astro  [1 items]`).
-
-**Root Cause**: `LspLanguageConfig` is defined as a JSON `array` type in the schema
-(`config-schema.json:1118`), wrapping one or more `LspServerConfig` objects. The
-`get_display_value()` method (`map_input/mod.rs:86–105`) falls back to
-`format!("[{} items]", arr.len())` for array values. The `x-display-field: "/command"`
-is set on `LspServerConfig` (the inner object), not on the outer `LspLanguageConfig`
-array wrapper.
-
-**Recommended Fix**:
-- For array-typed map values, unwrap the first element and apply `display_field` to it.
-  E.g., show `clojure-lsp` instead of `[1 items]`.
-- If the array has multiple items, show `command₁ (+N more)`.
-- Add `x-display-field` support for array-of-object types in `get_display_value()`.
-
----
-
-### Issue 8 — No Logical Grouping for 11+ Fields (Information Architecture)
-
-**Observed**: The Edit Item dialog for an LSP server config presents **12 fields** in a
-flat alphabetical list:
-```
-Args, Auto Start, Command, Enabled, Env, Except Features,
-Initialization Options, Language Id Overrides, Name,
-Only Features, Process Limits, Root Markers
-```
-
-**Impact**: Users must scroll through all fields to find common ones (`Command`, `Enabled`).
-Advanced fields like `Process Limits`, `Except Features`, and `Initialization Options`
-are rarely needed but occupy equal visual weight.
-
-**Recommended Fix** (phased):
-
-**Phase 1 — Reorder fields by importance**:
-```
-Command (required, most important)
+Command (first, most important)
 Enabled
 Name
 Args
 Auto Start
 Root Markers
-─── Advanced ───
+── Advanced ──
 Env
 Language Id Overrides
 Initialization Options
-Only Features / Except Features
+Only Features
+Except Features
 Process Limits
 ```
 
-**Phase 2 — Collapsible "Advanced" section**:
-- Implement an accordion widget. `Enter`/`Space` toggles collapse state.
-- When collapsed, `Tab`/`Down` skips all children.
-- Persist collapse state in the dialog session.
-- Schema extension: `"x-section": "advanced"` is already defined (`schema.rs:664`).
+An `── Advanced ──` separator is now visible. However, the Advanced section is not
+collapsible — all fields are always visible.
 
 ---
 
-### Issue 9 — Complex Types Rendered as Raw JSON
+## Part 3: Remaining Bugs
 
-**Observed**: `Process Limits`, `Except Features`, `Only Features`, and
-`Initialization Options` are rendered as raw JSON text editors:
+### BUG A — ObjectArray `[+] Add new` Unreachable via Keyboard (CRITICAL / NEW)
+
+**Reproduction**: Settings → LSP → python → Edit Value → try to navigate to `[+] Add new`.
+
+**Observed**: The Down arrow cycle in the Edit Value dialog is:
 ```
-Process Limits:
-  │{                           │
-  │  "max_memory_percent": 50, │
-  │  "max_cpu_percent": 90,    │
-  │  "enabled": true           │
-  │}                           │
+Value (ObjectArray label) → [Buttons: Save, Delete, Cancel] → Value → ...
+```
+The `[+] Add new` row inside the ObjectArray is **never focused**. It is visually
+rendered but completely unreachable via keyboard navigation.
+
+**Impact**: Users **cannot add a second LSP server** for any language via keyboard.
+This is a blocking workflow issue. For example, adding `pyright` alongside `pylsp` for
+Python is impossible without mouse interaction or manual JSON editing.
+
+**Root Cause**: The `focus_next()` method (`entry_dialog.rs:316–343`) was simplified
+during the recent refactor. It now treats the entire ObjectArray as a single item:
+```rust
+} else if self.selected_item + 1 < self.items.len() {
+    self.selected_item += 1;
+    self.sub_focus = None;
+} else {
+    self.focus_on_buttons = true;
+    self.focused_button = 0;
+}
 ```
 
-**Impact**: Users must understand JSON syntax to edit these. No validation feedback
-until save. `null` values for `Except Features` and `Only Features` are confusing.
+The old code had explicit ObjectArray sub-focus logic that navigated through entries and
+the `[+] Add new` row before exiting the control. This logic was removed. Since the
+Edit Value dialog has only one editable item (the ObjectArray), `focus_next()` immediately
+transitions to buttons.
+
+The same issue affects any ObjectArray in the Edit Item dialog (e.g., the inner
+ObjectArray if one existed), though in practice most composite controls in the Edit Item
+dialog are Maps or TextLists which have their own sub-focus issues.
 
 **Recommended Fix**:
-- **Process Limits**: Render as three named fields: `Max Memory %` (number),
-  `Max CPU %` (number), `Enabled` (boolean). Create a sub-schema with
-  `SettingType::Object` properties.
-- **Only Features / Except Features**: Render as a multi-select checklist of
-  known LSP features (completion, hover, diagnostics, etc.). Use `null` = "all features".
-- **Initialization Options**: Keep as JSON editor (server-specific), but add syntax
-  validation and a `null` → `{}` default hint.
+- Restore ObjectArray sub-focus navigation in `focus_next()`/`focus_prev()`.
+- The Down arrow within a focused ObjectArray should cycle:
+  `entry₁ → entry₂ → ... → [+] Add new → (exit to next item/buttons)`.
+- The Up arrow should reverse this.
+- Alternatively, treat `[+] Add new` as a separate virtual item in the dialog's item
+  list, so `selected_item += 1` naturally reaches it.
 
 ---
 
-## Part 3: Additional Observations
+### BUG B — Down Navigation Inconsistencies in Edit Item Dialog (MEDIUM)
 
-### Observation A — Main Settings Dialog Navigation Works Correctly
+**Reproduction**: Open Edit Item for any LSP server → press Down repeatedly.
 
-The outer settings dialog has proper three-panel focus cycling:
-`Categories → Settings → Footer`, with `Tab` correctly switching panels and footer
-buttons showing `>` focus indicators. This correct behavior should be the model for
-fixing the entry dialog.
+**Observed navigation trace** (25 steps):
+```
+Step 1:  Command (auto-enters edit mode)
+Step 2:  Command (Down exits edit mode, stays on Command)
+Step 3:  Enabled
+Step 4:  Name (auto-enters edit mode)
+Step 5:  Args (TextList label)
+Step 6:  Args (sub-focus)
+Step 7:  Auto Start
+Step 8:  Env (Map)
+Step 9:  Language Id Overrides (Map)
+Step 10: Language Id Overrides (sub-focus)
+Step 11: Initialization Options (JSON)
+Step 12: Except Features (JSON)
+Step 13: Process Limits (JSON)
+Step 14: [Save button]
+Step 15: [Save button]
+Step 16: [Delete button]
+Step 17: Command (wrap)
+...
+```
 
-### Observation B — Ctrl+Enter Save Exists but Is Undiscoverable
+**Issues identified**:
+1. **Text fields consume an extra Down press** (steps 1–2, 4–5): When a text field is
+   focused, the first Down auto-enters edit mode (via `start_editing()`), and the second
+   Down exits edit mode and advances. This makes navigation feel sluggish — each text
+   field requires 2 Down presses to pass.
+2. **Root Markers appears inconsistently**: It was visited in the second cycle (step 22)
+   but not in the first cycle. This suggests the TextList sub-focus state affects which
+   items are visited.
+3. **Only Features is sometimes skipped**: Appeared in cycle 2 but not cycle 1.
+4. **Button region consumes extra presses**: Steps 14–16 show 3 presses on buttons
+   (Save, Save, Delete) before wrapping, when there are only 3 buttons total.
 
-`input.rs:365–367` implements `Ctrl+Enter` as a save shortcut in the entry dialog.
-This is not documented in the status bar. Terminal compatibility is also a concern
-(`Ctrl+Enter` may not be captured by all terminal emulators).
+**Root Cause**: The auto-edit mode for Text fields (`input.rs:454–480`) is triggered
+by `KeyCode::Char`, but `Down` arrow while in edit mode calls
+`handle_entry_dialog_text_editing()` which handles Down differently (e.g., moving cursor
+in JSON editors, or navigating TextList items). This creates inconsistent behavior
+depending on whether the field auto-entered edit mode.
 
-### Observation C — Mouse Hover State Exists
-
-The entry dialog tracks `hover_item` and `hover_button` and renders hover highlights.
-This is a positive UX feature but doesn't compensate for broken keyboard navigation.
-
-### Observation D — Read-Only Field Handling Is Correct
-
-The `Key` field in Edit Value dialogs is properly marked read-only for existing entries
-and editable for new entries. Focus navigation correctly skips read-only items via
-`first_editable_index`.
+**Recommended Fix**:
+- Do NOT auto-enter edit mode from Down/Up arrow navigation — only from printable
+  character input.
+- Ensure `focus_next()` from a text field that is NOT in edit mode simply advances to
+  the next item without entering edit mode.
+- Add integration tests that assert the exact Down/Up cycle matches the expected item
+  order.
 
 ---
 
-## Part 4: Improvement Plan (Phased)
+### BUG C — Left/Right Arrow Exits Button Region (LOW)
 
-### Phase 1 — Critical Bug Fixes (P0)
+**Reproduction**: Tab to buttons → Left or Right arrow.
+
+**Observed**: Left/Right immediately jumps back to the items region instead of navigating
+between buttons (Save ↔ Delete ↔ Cancel).
+
+**Root Cause**: In `handle_entry_dialog_navigation()` (`input.rs:334–350`):
+```rust
+KeyCode::Left => {
+    if !dialog.focus_on_buttons {
+        dialog.decrement_number();
+    } else if dialog.focused_button > 0 {
+        dialog.focused_button -= 1;
+    }
+}
+KeyCode::Right => {
+    if !dialog.focus_on_buttons {
+        dialog.increment_number();
+    } else if dialog.focused_button + 1 < dialog.button_count() {
+        dialog.focused_button += 1;
+    }
+}
+```
+
+The Left handler on the first button (index 0) does nothing (correctly), but the Right
+handler should advance to the next button. However, testing shows that Right immediately
+returns to fields. This suggests `focus_on_buttons` is being reset somewhere, or the
+event is being consumed by a different handler path.
+
+**Recommended Fix**: Debug the event flow when focus is on buttons and Left/Right is
+pressed. Ensure `focus_on_buttons` remains true during button navigation.
+
+---
+
+## Part 4: Remaining Usability Issues
+
+### Issue 9 — Complex Types Still Rendered as Raw JSON
+
+`Process Limits`, `Except Features`, `Only Features`, and `Initialization Options` are
+still rendered as raw JSON text editors. This was not addressed in the rebase.
+
+### Issue 10 — No $PATH Validation for Command Field
+
+No autocomplete or validation for the `Command` field. Users can type any string.
+
+### Issue 11 — Advanced Section Not Collapsible
+
+The `── Advanced ──` separator is purely visual. All advanced fields are always visible
+and must be scrolled past. The separator cannot be toggled to collapse/expand the section.
+
+---
+
+## Part 5: Updated Improvement Plan (Phased)
+
+### Phase 1 — Critical: ObjectArray Navigation (P0)
 
 | # | Issue | File(s) | Effort |
 |---|-------|---------|--------|
-| 1 | Fix Down/Up navigation skipping items | `entry_dialog.rs` focus_next/focus_prev | Medium |
-| 2 | Make Tab toggle Fields↔Buttons regions | `input.rs` handle_entry_dialog_navigation | Small |
-| 3 | Auto-enter edit mode on character input | `input.rs` handle_entry_dialog_navigation | Small |
-| 4 | Add Ctrl+S save in entry dialog | `input.rs` handle_entry_dialog_input | Small |
-| 5 | Fix status bar to match actual keybindings | `render.rs` entry dialog help line | Small |
+| 1 | Restore ObjectArray sub-focus in `focus_next()`/`focus_prev()` | `entry_dialog.rs` | Medium |
+| 2 | Ensure `[+] Add new` is reachable in ALL ObjectArray controls | `entry_dialog.rs` | Medium |
+| 3 | Add test: verify python LSP → Add new server is reachable | Integration test | Small |
 
 **Acceptance Criteria**:
-- Every field in the Edit Item dialog is reachable via both Down and Up arrows.
-- Down and Up visit items in the same (reversed) order with no skips.
-- Tab toggles between item fields and button bar.
-- Typing on a text field immediately enters characters.
-- Ctrl+S saves and closes the entry dialog.
+- From the Edit Value dialog for any LSP language, Down arrow visits: existing
+  entries → `[+] Add new` → buttons.
+- Pressing Enter on `[+] Add new` opens the Add Item dialog.
+- A second LSP server can be added for Python entirely via keyboard.
 
-### Phase 2 — Display & Preview Improvements (P1)
+### Phase 2 — Navigation Polish (P1)
 
 | # | Issue | File(s) | Effort |
 |---|-------|---------|--------|
-| 6 | Show command preview instead of `[1 items]` | `map_input/mod.rs` get_display_value | Small |
-| 7 | Reorder fields by importance (not alphabetical) | `entry_dialog.rs` from_schema, `schema.rs` | Medium |
-| 8 | Add LSP icon to category list | `render.rs` category_icon | Trivial |
+| 4 | Fix text fields consuming extra Down press | `input.rs`, `entry_dialog.rs` | Medium |
+| 5 | Fix Left/Right arrow exiting button region | `input.rs` | Small |
+| 6 | Ensure consistent Down/Up cycle visits all items exactly once | `entry_dialog.rs` | Medium |
+| 7 | Add integration test for complete navigation cycle | Test file | Medium |
 
 ### Phase 3 — Information Architecture (P2)
 
 | # | Issue | File(s) | Effort |
 |---|-------|---------|--------|
-| 9 | Collapsible "Advanced" section in entry dialogs | New accordion widget, `entry_dialog.rs` | Large |
-| 10 | Structured editors for Process Limits | `items.rs`, schema changes | Medium |
-| 11 | Feature checklist for Only/Except Features | New checklist widget | Large |
+| 8 | Collapsible Advanced section (accordion) | New widget, `entry_dialog.rs` | Large |
+| 9 | Structured editors for Process Limits | `items.rs`, schema | Medium |
+| 10 | Feature checklist for Only/Except Features | New widget | Large |
 
-### Phase 4 — Polish & Discoverability (P3)
+### Phase 4 — Polish (P3)
 
 | # | Issue | File(s) | Effort |
 |---|-------|---------|--------|
-| 12 | Show Ctrl+S / Ctrl+Enter in entry dialog help bar | `render.rs` | Trivial |
-| 13 | Add `[type to edit]` hint on focused text fields | `render.rs` entry dialog items | Small |
-| 14 | Validate Command field against $PATH | New validation module | Medium |
-| 15 | Terminal resize handling for entry dialogs | `render.rs` dialog sizing | Small |
+| 11 | $PATH validation for Command field | New validation module | Medium |
+| 12 | Add visual hint when text field is in edit mode vs navigation | `render.rs` | Small |
 
 ---
 
-## Part 5: TUI UX Architecture Compliance Checklist
+## Part 6: TUI UX Architecture Compliance (Updated)
 
-| Principle | Current Status | Target |
-|-----------|---------------|--------|
-| **Dialog Modality** | ✅ Entry dialog isolates input | Maintain |
-| **Visual Hierarchy** | ✅ Rounded borders, padding | Maintain |
-| **Responsiveness (SIGWINCH)** | ⚠️ Dialog resizes but may clip | Add min-size warning |
-| **"Where Am I?" Focus Rule** | ❌ Focus lost in entry dialog | Fix navigation (Phase 1) |
-| **Strict Tab Loop** | ❌ Tab ≡ Down, never reaches buttons | Fix Tab semantics (Phase 1) |
-| **Read-Only Skip** | ✅ Read-only Key field skipped | Maintain |
-| **Composite Bypass** | ❌ Maps/TextLists disrupt navigation | Fix sub-focus interaction (Phase 1) |
-| **Esc = Abort Context** | ✅ Esc closes dialogs | Maintain |
-| **Global Save Shortcut** | ❌ Ctrl+S not wired in entry dialog | Add Ctrl+S (Phase 1) |
-| **Mnemonics (Alt+Key)** | ❌ Not implemented | Consider for Phase 4 |
-| **Collapsible Sections** | ❌ Not implemented | Phase 3 |
+| Principle | Status | Notes |
+|-----------|--------|-------|
+| **Dialog Modality** | ✅ Pass | Entry dialog isolates input |
+| **Visual Hierarchy** | ✅ Pass | Rounded borders, padding, Advanced separator |
+| **"Where Am I?" Focus Rule** | ⚠️ Partial | Focus indicator works but text auto-edit creates ambiguity |
+| **Strict Tab Loop** | ✅ Pass | Tab toggles Fields ↔ Buttons |
+| **Read-Only Skip** | ✅ Pass | Read-only Key field skipped |
+| **Composite Bypass** | ❌ Fail | ObjectArray sub-items unreachable |
+| **Esc = Abort Context** | ✅ Pass | Esc closes dialogs / exits edit mode |
+| **Global Save Shortcut** | ✅ Pass | Ctrl+S works in entry dialog |
+| **Collapsible Sections** | ⚠️ Partial | Separator exists but not collapsible |
 
 ---
 
@@ -370,27 +334,60 @@ and editable for new entries. Focus navigation correctly skips read-only items v
 
 | File | Role |
 |------|------|
-| `crates/fresh-editor/src/view/settings/entry_dialog.rs` | Entry dialog state, focus_next/prev, update_focus_states |
-| `crates/fresh-editor/src/view/settings/input.rs` | Input routing, entry dialog navigation/text handling |
-| `crates/fresh-editor/src/view/settings/render.rs` | All rendering including entry dialog and buttons |
+| `crates/fresh-editor/src/view/settings/entry_dialog.rs` | Entry dialog state, focus_next/prev, toggle_focus_region |
+| `crates/fresh-editor/src/view/settings/input.rs` | Input routing, entry dialog navigation/text/Ctrl+S handling |
+| `crates/fresh-editor/src/view/settings/render.rs` | All rendering including entry dialog, buttons, Advanced separator |
 | `crates/fresh-editor/src/view/settings/state.rs` | Main settings state, panel focus management |
 | `crates/fresh-editor/src/view/settings/schema.rs` | JSON schema parsing, x-display-field, x-section |
 | `crates/fresh-editor/src/view/settings/items.rs` | Schema → SettingItem/SettingControl conversion |
-| `crates/fresh-editor/src/view/controls/map_input/mod.rs` | MapState, get_display_value |
-| `crates/fresh-editor/plugins/config-schema.json` | LSP schema definition (LspLanguageConfig, LspServerConfig) |
+| `crates/fresh-editor/src/view/controls/map_input/mod.rs` | MapState, get_display_value (now shows command preview) |
+| `crates/fresh-editor/plugins/config-schema.json` | LSP schema (LspLanguageConfig array, LspServerConfig) |
 
-## Appendix B: Observed Navigation Trace (Entry Dialog)
+## Appendix B: Navigation Traces
+
+### Edit Value Dialog (python LSP) — Down Cycle
 
 ```
-# Down arrow cycle from the Edit Item dialog for bash LSP:
-Args → Command → Env → Initialization Options → Language Id Overrides →
-Name → Process Limits → [Save] → [Delete] → [Cancel] → Args → ...
+Value (ObjectArray) → [Save] → [Delete] → [Cancel] → Value (wrap) → ...
 
-# Skipped by Down: Auto Start, Enabled, Except Features, Only Features, Root Markers
-
-# Up arrow cycle (different path):
-... → Name → Process Limits → [Buttons] → Args → Command → Command →
-Env → Env → Except Features → Except Features → Initialization Options → ...
-
-# Some items visited twice (sub-focus), others still skipped
+MISSING: pylsp entry sub-focus, [+] Add new — never visited
 ```
+
+### Edit Item Dialog (pylsp) — Down Cycle (25 steps)
+
+```
+ 1: Command (auto-edit)     |  14: [Save]
+ 2: Command (exit edit)     |  15: [Save]
+ 3: Enabled                 |  16: [Delete]
+ 4: Name (auto-edit)        |  17: Command (wrap)
+ 5: Args                    |  18: Enabled
+ 6: Args (sub-focus)        |  19: Enabled
+ 7: Auto Start              |  20: Name
+ 8: Env                     |  21: Auto Start
+ 9: Language Id Overrides   |  22: Root Markers
+10: Language Id Overrides   |  23: Env
+11: Initialization Options  |  24: Env
+12: Except Features         |  25: Language Id Overrides
+13: Process Limits          |
+
+Note: Only Features and Root Markers appear inconsistently between cycles.
+Text fields consume an extra Down press due to auto-edit mode.
+```
+
+## Appendix C: Specific Test Case — Add New LSP Server for Python
+
+**Goal**: Add `pyright` as a second LSP server alongside `pylsp` for Python.
+
+**Expected flow**:
+1. Settings → General → scroll to LSP → python → Enter (Edit Value)
+2. Down to `[+] Add new` → Enter (opens Add Item dialog)
+3. Fill in Command: `pyright-langserver`, Args: `--stdio`, Enabled: ✓
+4. Ctrl+S to save
+
+**Actual result**: Step 2 fails — `[+] Add new` cannot be focused via keyboard.
+Down goes directly from the ObjectArray label to the Save button, skipping all
+internal entries and the Add new row.
+
+**Workaround**: None via keyboard. Users must either:
+- Use mouse to click `[+] Add new`
+- Manually edit the JSON settings file
