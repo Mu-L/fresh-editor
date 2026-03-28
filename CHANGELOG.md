@@ -1,5 +1,67 @@
 # Release Notes
 
+## 0.2.19
+
+### Features
+
+* **Multi-LSP Server Support**: Configure multiple LSP servers per language (e.g., pylsp + pyright for Python). Servers are routed by feature using `only_features`/`except_features` filters, completions are merged from all eligible servers, and diagnostics are tracked per-server. Per-server status is shown in the status bar.
+
+* **Per-Language Editor Settings**: `line_wrap`, `wrap_column`, `page_view`, and `page_width` can now be configured per-language. For example, wrap Markdown at 80 columns while keeping code unwrapped (#1371).
+
+* **Settings Deep Search**: Search now walks into Map entries, TextList items, and nested JSON values. Searching "python" finds the "python" key in language/LSP maps. Results show hierarchical breadcrumbs (e.g., "Languages > python") and auto-focus the matching entry.
+
+* **Diff Chunk Navigation Plugin**: New built-in plugin for navigating between diff chunks, merging git and saved-diff sources.
+
+### Improvements
+
+* **Faster Startup (~350ms → ~170ms)**: Syntax grammars are pre-compiled at build time, package loading moved from JavaScript to Rust, plugin I/O and transpilation run in parallel, and redundant grammar rebuilds are eliminated. Plugins can now declare dependencies via `import type` from `"fresh:plugin/..."` and are topologically sorted.
+
+* **Settings UI Overhaul**: Modernized visual design with wider modal (160 cols), rounded corner borders, Nerd Font category icons, styled `[✓]` toggles, and reverse-video key hints. Keyboard navigation rewritten: Tab cycles sequentially through all fields and buttons, composite controls (Map, ObjectArray, TextList) support internal navigation, entry dialogs have section headers with explicit field ordering, PageDown/PageUp work in the main panel, and TextList edits auto-accept on navigation. Focus indicator now highlights per-row in composite controls.
+
+* **Per-Language Workspace Root Detection**: New `root_markers` field on LSP server configs. The editor walks upward from the file's directory looking for configured markers (e.g., `Cargo.toml`, `package.json`), replacing the old cwd-based root (#1360).
+
+* **Page View Mode**: "Compose" mode renamed to "Page View". Can now auto-activate per language via `page_view: true` in language config. Old keybinding names continue to work.
+
+* **256-Color Contrast Enforcement**: When running in a 256-color terminal, foreground colors are automatically adjusted to meet WCAG 3.0:1 minimum contrast ratio against their background. Fixes illegible text in Solarized Dark, Nord, Dracula, and light themes under tmux without truecolor.
+
+* **LSP in Library Files**: Files in library paths (site-packages, node_modules, .cargo) now keep LSP enabled for Goto Definition, Hover, and Find References while remaining read-only (#1344).
+
+* **Goto Matching Bracket**: Works inside bracket bodies by searching backward for the nearest enclosing bracket, matching VS Code and JetBrains behavior. All bracket searches are bounded to prevent hangs on huge files (#1258).
+
+* **LSP Head-of-Line Blocking Fix**: LSP notifications (didClose, didChange, shutdown) are no longer blocked behind pending request responses.
+
+* **New Settings**: `show_tilde` to hide EOF tilde markers (#1290), `menu_bar_mnemonics` to disable Alt+key menu shortcuts (#1257).
+
+* **`getPluginDir()` Plugin API**: Plugins can now locate their own package directory to find bundled scripts or install local dependencies.
+
+### Bug Fixes
+
+* Fixed CSI u and xterm modifyOtherKeys key sequences inserted as literal text in terminal session mode (#1113).
+
+* Fixed word selection (Ctrl+W) stopping at accented/Unicode characters (#1332).
+
+* Fixed double-click backward drag losing the initial word selection (#1334).
+
+* Fixed block cursor invisible in zellij due to double cursor-inversion (#1338).
+
+* Fixed cursor visibility and command palette rendering in zellij (#1255).
+
+* Fixed undo incorrectly clearing the modified flag after hot exit recovery, which could cause data loss.
+
+* Fixed bulk edit (e.g., toggle comment) displacing inlay hints on subsequent lines (#1263). Displaced markers are now restored to exact positions on undo.
+
+* Fixed large file syntax highlighting lost when revisiting a file, caused by checkpoint offset drift during partial cache updates.
+
+* Fixed embedded language highlighting (e.g., CSS in HTML) breaking at large file offsets.
+
+* Fixed Enter key leaking into the markdown buffer when the file explorer panel is focused.
+
+* Fixed large file recovery saving the entire file as individual chunks instead of using the recovery format.
+
+* Fixed `file://` URI handling silently dropping `..` path components, which could cause LSP root mismatches.
+
+* Fixed read-only detection for files not owned by the current user (now checks effective uid/gid instead of file mode bits).
+
 ## 0.2.18
 
 ### Features
