@@ -80,8 +80,27 @@ pub fn run_gui(
     let show_file_explorer = file_locations.is_empty();
     let no_session_flag = no_session;
 
+    // Configure wgpu reset colors and ANSI color table based on theme.
+    // Load the theme to check its editor_bg luminance rather than relying
+    // on the theme name — this works for custom themes too.
+    let is_light = crate::view::theme::Theme::load_builtin(&loaded_config.theme)
+        .map_or(false, |t| t.is_light());
+    let gui_config = {
+        let mut cfg = GuiConfig::default();
+        if is_light {
+            cfg.reset_bg = ratatui::style::Color::White;
+            cfg.reset_fg = ratatui::style::Color::Black;
+            cfg.color_table = Some(fresh_gui::light_color_table());
+        } else {
+            cfg.reset_bg = ratatui::style::Color::Black;
+            cfg.reset_fg = ratatui::style::Color::White;
+            cfg.color_table = Some(fresh_gui::dark_color_table());
+        }
+        cfg
+    };
+
     // Move all captured state into the closure that creates the editor app.
-    fresh_gui::run(GuiConfig::default(), move |cols, rows| {
+    fresh_gui::run(gui_config, move |cols, rows| {
         // For GUI, we always have true color.
         let color_capability = crate::view::color_support::ColorCapability::TrueColor;
         let filesystem: Arc<dyn FileSystem + Send + Sync> = Arc::new(StdFileSystem);
@@ -123,9 +142,11 @@ pub fn run_gui(
             tracing::warn!("Failed to start recovery session: {}", e);
         }
 
+        let last_theme = editor.theme().name.clone();
         Ok(EditorApp {
             editor,
             workspace_enabled,
+            last_theme,
         })
     })
 }
@@ -137,6 +158,9 @@ pub fn run_gui(
 struct EditorApp {
     editor: Editor,
     workspace_enabled: bool,
+    /// Last theme name seen — used to detect theme switches and push
+    /// an updated ANSI color table to the wgpu backend.
+    last_theme: String,
 }
 
 impl GuiApplication for EditorApp {
@@ -217,6 +241,19 @@ impl GuiApplication for EditorApp {
             }
         } else {
             tracing::warn!("Unknown menu action: {}", action);
+        }
+    }
+
+    fn take_color_update(&mut self) -> Option<ratatui_wgpu::ColorTable> {
+        let current = &self.editor.theme().name;
+        if *current == self.last_theme {
+            return None;
+        }
+        self.last_theme = current.clone();
+        if self.editor.theme().is_light() {
+            Some(fresh_gui::light_color_table())
+        } else {
+            Some(fresh_gui::dark_color_table())
         }
     }
 }

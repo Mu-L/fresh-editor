@@ -1202,6 +1202,22 @@ impl From<Theme> for ThemeFile {
 }
 
 impl Theme {
+    /// Returns `true` when the theme has a light background.
+    ///
+    /// Uses the relative luminance of `editor_bg` (perceived brightness).
+    /// A threshold of 0.5 separates dark from light; for `Color::Reset` or
+    /// unresolvable colors, falls back to `false` (dark).
+    pub fn is_light(&self) -> bool {
+        if let Some((r, g, b)) = color_to_rgb(self.editor_bg) {
+            // sRGB relative luminance (ITU-R BT.709)
+            let lum =
+                0.2126 * (r as f64 / 255.0) + 0.7152 * (g as f64 / 255.0) + 0.0722 * (b as f64 / 255.0);
+            lum > 0.5
+        } else {
+            false
+        }
+    }
+
     /// Load a builtin theme by name (no I/O, uses embedded JSON).
     pub fn load_builtin(name: &str) -> Option<Self> {
         BUILTIN_THEMES
