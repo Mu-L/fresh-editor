@@ -62,6 +62,7 @@ pub mod lsp_multi_semantic_tokens;
 pub mod lsp_no_config;
 pub mod lsp_order;
 pub mod lsp_publish_diagnostics_capability;
+pub mod lsp_server_lifecycle_cleanup;
 pub mod lsp_toggle_desync;
 pub mod macros;
 pub mod margin;

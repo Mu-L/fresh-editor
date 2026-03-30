@@ -183,6 +183,52 @@ impl Editor {
 
         self.merge_and_apply_diagnostics(&uri);
     }
+
+    /// Clear all diagnostics originating from a specific server.
+    ///
+    /// Removes the server's entries from `stored_push_diagnostics`, then
+    /// re-merges and re-applies diagnostics for every affected URI so that
+    /// overlays on screen are updated immediately.
+    pub(crate) fn clear_diagnostics_for_server(&mut self, server_name: &str) {
+        // Collect URIs that have diagnostics from this server.
+        let affected_uris: Vec<String> = self
+            .stored_push_diagnostics
+            .iter()
+            .filter_map(|(uri, server_map)| {
+                if server_map.contains_key(server_name) {
+                    Some(uri.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if affected_uris.is_empty() {
+            return;
+        }
+
+        tracing::info!(
+            "Clearing diagnostics from server '{}' for {} URIs",
+            server_name,
+            affected_uris.len()
+        );
+
+        for uri in &affected_uris {
+            if let Some(server_map) = self.stored_push_diagnostics.get_mut(uri) {
+                server_map.remove(server_name);
+                if server_map.is_empty() {
+                    self.stored_push_diagnostics.remove(uri);
+                }
+            }
+
+            // Invalidate the diagnostic overlay cache so the re-merge actually
+            // updates on-screen overlays even if the resulting hash happens to
+            // match a previous state.
+            crate::services::lsp::diagnostics::invalidate_cache_for_file(uri);
+
+            self.merge_and_apply_diagnostics(uri);
+        }
+    }
 }
 
 // =============================================================================
@@ -820,6 +866,7 @@ impl Editor {
     ) {
         use crate::services::async_bridge::LspServerStatus;
 
+        let server_name_ref = server_name.clone();
         let key = (language.clone(), server_name);
 
         // Get old status for event
@@ -832,6 +879,18 @@ impl Editor {
         // Update warning domain for LSP status indicator
         self.update_lsp_warning_domain();
 
+        // When a server becomes ready, send didOpen for all open buffers of
+        // that language so the server can start providing diagnostics, etc.
+        // without waiting for the next user edit.
+        if status == LspServerStatus::Running {
+            let was_already_running = old_status
+                .as_ref()
+                .is_some_and(|s| matches!(s, LspServerStatus::Running));
+            if !was_already_running {
+                self.reopen_buffers_for_language(&language);
+            }
+        }
+
         // Handle server crash - trigger auto-restart
         if status == LspServerStatus::Error {
             let was_running = old_status
@@ -840,6 +899,10 @@ impl Editor {
                 .unwrap_or(false);
 
             if was_running {
+                // Clear stale diagnostics from the crashed server so they
+                // don't linger on screen while we wait for a restart.
+                self.clear_diagnostics_for_server(&server_name_ref);
+
                 if let Some(lsp) = self.lsp.as_mut() {
                     let message = lsp.handle_server_crash(&language);
                     self.status_message = Some(message);

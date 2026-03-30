@@ -1136,7 +1136,7 @@ impl Editor {
     ///
     /// Input format: `"language"` (stops all servers) or `"language/server_name"`
     /// (stops a specific server).
-    fn handle_stop_lsp_server(&mut self, input: &str) {
+    pub fn handle_stop_lsp_server(&mut self, input: &str) {
         let input = input.trim();
         if input.is_empty() {
             return;
@@ -1185,6 +1185,8 @@ impl Editor {
         } else if let Some(name) = server_name {
             // Send didClose only to the specific server being stopped
             self.send_did_close_to_server(language, name);
+            // Clear diagnostics published by this server and update overlays
+            self.clear_diagnostics_for_server(name);
         }
 
         // Now shut down the server (removes handles).
@@ -1239,7 +1241,7 @@ impl Editor {
     ///
     /// Input format: `"language"` (restarts all enabled servers) or
     /// `"language/server_name"` (restarts a specific server).
-    fn handle_restart_lsp_server(&mut self, input: &str) {
+    pub fn handle_restart_lsp_server(&mut self, input: &str) {
         let input = input.trim();
         if input.is_empty() {
             return;

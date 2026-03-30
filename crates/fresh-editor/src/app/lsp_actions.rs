@@ -108,9 +108,11 @@ impl Editor {
         }
     }
 
-    /// Re-send didOpen notifications for all buffers of a given language.
+    /// Send didOpen notifications for all buffers of a given language to any
+    /// server handles that haven't received them yet.
     ///
-    /// Called after LSP server restart to re-register open files.
+    /// Called after an LSP server starts or restarts so it immediately knows
+    /// about every open file (rather than waiting for the next user edit).
     pub(crate) fn reopen_buffers_for_language(&mut self, language: &str) {
         // Collect buffer info first to avoid borrow conflicts
         // Use buffer's stored language rather than detecting from path
@@ -146,14 +148,39 @@ impl Editor {
             if let Some(lsp) = self.lsp.as_mut() {
                 // Respect auto_start setting for this user action
                 use crate::services::lsp::manager::LspSpawnResult;
-                if lsp.try_spawn(&lang_id, Some(&buf_path)) == LspSpawnResult::Spawned {
-                    if let Some(handle) = lsp.get_handle_mut(&lang_id) {
-                        let handle_id = handle.id();
-                        if let Err(e) = handle.did_open(uri, content, lang_id) {
-                            tracing::warn!("LSP did_open failed: {}", e);
+                if lsp.try_spawn(&lang_id, Some(&buf_path)) != LspSpawnResult::Spawned {
+                    continue;
+                }
+
+                // Collect handles that need didOpen (not yet tracked in
+                // lsp_opened_with for this buffer).
+                let opened_with = self
+                    .buffer_metadata
+                    .get(&buffer_id)
+                    .map(|m| m.lsp_opened_with.clone())
+                    .unwrap_or_default();
+
+                let handles_needing_open: Vec<(String, u64)> = lsp
+                    .get_handles(&lang_id)
+                    .iter()
+                    .filter(|sh| !opened_with.contains(&sh.handle.id()))
+                    .map(|sh| (sh.name.clone(), sh.handle.id()))
+                    .collect();
+
+                // Send didOpen to each handle that hasn't seen this buffer yet
+                for (name, handle_id) in handles_needing_open {
+                    let sh = lsp
+                        .get_handles_mut(&lang_id)
+                        .iter_mut()
+                        .find(|s| s.handle.id() == handle_id);
+
+                    if let Some(sh) = sh {
+                        if let Err(e) =
+                            sh.handle
+                                .did_open(uri.clone(), content.clone(), lang_id.clone())
+                        {
+                            tracing::warn!("LSP did_open to '{}' failed: {}", name, e);
                         } else {
-                            // Mark buffer as opened with this handle so that
-                            // send_lsp_changes_for_buffer doesn't re-send didOpen
                             if let Some(metadata) = self.buffer_metadata.get_mut(&buffer_id) {
                                 metadata.lsp_opened_with.insert(handle_id);
                             }
