@@ -2251,11 +2251,28 @@ fn list_sessions_command() -> AnyhowResult<()> {
         println!("No active sessions.");
     } else {
         println!("Active sessions:");
-        for (id, display) in sessions {
-            println!("  {} ({})", display, id);
+        for (id, display) in &sessions {
+            if display != id {
+                // Working-directory session: show path and usable name
+                println!("  {}  (name: {})", display, id);
+            } else {
+                // Named session
+                println!("  {}", id);
+            }
         }
         println!();
-        println!("Attach with: fresh session attach [NAME]  or  fresh -a [NAME]");
+        // Show the most convenient attach form for each session type
+        if sessions.len() == 1 {
+            let (id, display) = &sessions[0];
+            if display != id {
+                println!("Attach with: fresh -a  (from that directory)");
+                println!("         or: fresh -a {}", id);
+            } else {
+                println!("Attach with: fresh -a {}", id);
+            }
+        } else {
+            println!("Attach with: fresh -a [NAME]");
+        }
     }
 
     Ok(())
@@ -2394,6 +2411,37 @@ fn run_server_command(args: &Args) -> AnyhowResult<()> {
     Ok(())
 }
 
+/// Resolve a session name to socket paths.
+///
+/// When `session_name` is `None`, uses the current working directory.
+/// When it looks like a filesystem path (absolute or `.`-relative), tries to
+/// resolve it as a working-directory session first, falling back to a literal
+/// named session.  This lets users pass paths like `/home/user/project` to
+/// target sessions that were started with `fresh -a` in that directory.
+fn resolve_session(session_name: Option<&str>) -> anyhow::Result<SocketPaths> {
+    let working_dir = std::env::current_dir()?;
+
+    match session_name {
+        None => Ok(SocketPaths::for_working_dir(&working_dir)?),
+        Some(name) => {
+            // If the name looks like a path, try working-dir resolution first.
+            let path = std::path::Path::new(name);
+            if path.is_absolute() || name.contains('/') || name.contains('\\') {
+                // Canonicalize so that e.g. `/home/user/project/` and
+                // `/home/user/project` both match.
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+                let by_dir = SocketPaths::for_working_dir(&canonical)?;
+                if by_dir.is_server_alive() {
+                    return Ok(by_dir);
+                }
+            }
+
+            // Fall back to literal session name lookup.
+            Ok(SocketPaths::for_session_name(name)?)
+        }
+    }
+}
+
 /// Open files in a running session without attaching
 fn run_open_files_command(
     session_name: Option<&str>,
@@ -2420,11 +2468,7 @@ fn run_open_files_command(
     }
 
     // Determine socket paths based on session name or working directory
-    let socket_paths = if let Some(name) = session_name {
-        SocketPaths::for_session_name(name)?
-    } else {
-        SocketPaths::for_working_dir(&working_dir)?
-    };
+    let socket_paths = resolve_session(session_name)?;
 
     // Clean up stale sockets if server is dead
     socket_paths.cleanup_if_stale();
@@ -2492,11 +2536,22 @@ fn run_open_files_command(
     conn.write_control(&msg)?;
 
     if server_was_started {
-        // We just started the server — drop this fire-and-forget connection
-        // and attach as a normal interactive client so the user can see the
-        // editor. --wait is ignored in this path; the user quits normally.
+        // We just started the server and already sent the OpenFiles command
+        // above.  If we have a controlling terminal, attach interactively so
+        // the user can see the editor.  Otherwise (pipes, scripts, non-tty
+        // contexts) just report success — the server is running headless and
+        // the files have been queued.
         drop(conn);
-        return run_attach(session_name, &[]);
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return run_attach(session_name, &[]);
+        } else {
+            eprintln!(
+                "Started new session and opened {} file(s). Attach with: fresh -a{}",
+                file_requests.len(),
+                session_name.map_or(String::new(), |n| format!(" {}", n)),
+            );
+            return Ok(());
+        }
     } else if wait {
         // Existing session — block until the server sends WaitComplete
         loop {
@@ -2551,11 +2606,7 @@ fn run_attach(session_name: Option<&str>, files: &[String]) -> AnyhowResult<()> 
     let working_dir = std::env::current_dir()?;
 
     // Determine socket paths based on session name or working directory
-    let socket_paths = if let Some(name) = session_name {
-        SocketPaths::for_session_name(name)?
-    } else {
-        SocketPaths::for_working_dir(&working_dir)?
-    };
+    let socket_paths = resolve_session(session_name)?;
 
     // Clean up stale sockets if server is dead
     if socket_paths.cleanup_if_stale() {
