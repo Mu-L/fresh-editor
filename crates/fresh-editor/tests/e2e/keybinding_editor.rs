@@ -489,7 +489,11 @@ fn test_add_new_binding() {
     harness.render().unwrap();
     harness.assert_screen_contains("Add Keybinding");
 
-    // Record a key: press Ctrl+K (the dialog starts in RecordingKey mode)
+    // Enter capture mode, then record Ctrl+K
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
     harness
         .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
         .unwrap();
@@ -729,7 +733,10 @@ fn test_unsaved_changes_confirm_dialog() {
         .unwrap();
     harness.render().unwrap();
 
-    // Record key
+    // Enter capture mode, then record key
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
         .unwrap();
@@ -775,6 +782,9 @@ fn test_confirm_dialog_cancel() {
         .send_key(KeyCode::Char('a'), KeyModifiers::NONE)
         .unwrap();
     harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
         .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
         .unwrap();
     harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
@@ -816,6 +826,9 @@ fn test_confirm_dialog_discard() {
     // Add a binding to create unsaved changes
     harness
         .send_key(KeyCode::Char('a'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
     harness
         .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
@@ -966,6 +979,9 @@ fn test_save_changes_with_ctrl_s() {
         .send_key(KeyCode::Char('a'), KeyModifiers::NONE)
         .unwrap();
     harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
         .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
         .unwrap();
     harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
@@ -1011,7 +1027,10 @@ fn test_action_field_autocomplete() {
         .unwrap();
     harness.render().unwrap();
 
-    // Record a key first
+    // Enter capture mode, then record a key
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(KeyCode::Char('k'), KeyModifiers::CONTROL)
         .unwrap();
@@ -1297,7 +1316,10 @@ fn test_deleted_binding_appears_as_unbound() {
     harness.render().unwrap();
     harness.assert_screen_contains("Add Keybinding");
 
-    // Record key: Ctrl+Shift+D
+    // Enter capture mode, then record key: Ctrl+Shift+D
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(
             KeyCode::Char('d'),
@@ -1433,7 +1455,10 @@ fn test_delete_binding_full_flow() {
     harness.render().unwrap();
     harness.assert_screen_contains("Add Keybinding");
 
-    // Record key: Ctrl+Shift+D
+    // Enter capture mode, then record key: Ctrl+Shift+D
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(
             KeyCode::Char('d'),
@@ -1647,7 +1672,10 @@ fn test_add_binding_conflict_warning_for_existing_key() {
     harness.render().unwrap();
     harness.assert_screen_contains("Add Keybinding");
 
-    // Record a key that is already in use: Ctrl+S (bound to "save" in the keymap)
+    // Enter capture mode, then record a key already in use: Ctrl+S (bound to "save")
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(KeyCode::Char('s'), KeyModifiers::CONTROL)
         .unwrap();
@@ -1745,7 +1773,10 @@ fn test_delete_shift_letter_binding_full_flow() {
     harness.render().unwrap();
     harness.assert_screen_contains("Add Keybinding");
 
-    // Record key: Shift+N (crossterm sends uppercase 'N' with SHIFT modifier)
+    // Enter capture mode, then record key: Shift+N (crossterm sends uppercase 'N' with SHIFT)
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
     harness
         .send_key(KeyCode::Char('N'), KeyModifiers::SHIFT)
         .unwrap();
@@ -2036,9 +2067,7 @@ fn test_key_not_recorded_without_capture_mode() {
     harness.assert_screen_contains("Add Keybinding");
 
     // Press Down arrow directly WITHOUT entering capture mode
-    harness
-        .send_key(KeyCode::Down, KeyModifiers::NONE)
-        .unwrap();
+    harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
 
     // The key field should still be empty — the arrow should NOT have been recorded

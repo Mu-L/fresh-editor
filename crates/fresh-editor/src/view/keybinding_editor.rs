@@ -1457,18 +1457,8 @@ fn handle_edit_dialog_input(
                     dialog.mode = EditMode::EditingAction;
                 }
                 _ => {
-                    // Record the key (but not modifier-only presses)
-                    match event.code {
-                        KeyCode::Modifier(_) => {}
-                        _ => {
-                            dialog.key_code = Some(event.code);
-                            dialog.modifiers = event.modifiers;
-                            dialog.key_display = format_keybinding(&event.code, &event.modifiers);
-                            // Check conflicts
-                            dialog.conflicts =
-                                editor.find_conflicts(event.code, event.modifiers, &dialog.context);
-                        }
-                    }
+                    // Keys are only recorded via capture mode (Enter then key).
+                    // Ignore everything else in the key field.
                 }
             }
         }
