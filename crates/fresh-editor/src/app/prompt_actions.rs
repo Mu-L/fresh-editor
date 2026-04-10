@@ -1125,7 +1125,7 @@ impl Editor {
         let has_server = self
             .lsp
             .as_ref()
-            .is_some_and(|lsp| !lsp.get_handles(language).is_empty());
+            .is_some_and(|lsp| lsp.has_handles(language));
 
         if !has_server {
             self.set_status_message(t!("lsp.server_not_found", language = language).to_string());
@@ -1139,7 +1139,7 @@ impl Editor {
             || self
                 .lsp
                 .as_ref()
-                .map(|lsp| lsp.get_handles(language).len() <= 1)
+                .map(|lsp| lsp.handle_count(language) <= 1)
                 .unwrap_or(true);
 
         if stopping_all {

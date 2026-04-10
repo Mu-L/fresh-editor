@@ -901,7 +901,21 @@ impl Editor {
                 .as_ref()
                 .is_some_and(|s| matches!(s, LspServerStatus::Running));
             if !was_already_running {
-                self.reopen_buffers_for_language(&language);
+                if language == "__universal__" {
+                    // Universal server just started — send didOpen for all open buffers
+                    let all_languages: Vec<String> = self
+                        .buffers
+                        .values()
+                        .map(|s| s.language.clone())
+                        .collect::<std::collections::HashSet<_>>()
+                        .into_iter()
+                        .collect();
+                    for lang in all_languages {
+                        self.reopen_buffers_for_language(&lang);
+                    }
+                } else {
+                    self.reopen_buffers_for_language(&language);
+                }
             }
         }
 
@@ -1332,7 +1346,8 @@ impl Editor {
                     if let Some(lsp) = self.lsp.as_mut() {
                         // Send didOpen to ALL handles for this language, not just the first.
                         // Each server needs its own didOpen notification.
-                        for sh in lsp.get_handles_mut(&lang_id) {
+                        let (lang_handles, universal_handles) = lsp.get_handles_split_mut(&lang_id);
+                        for sh in lang_handles.iter_mut().chain(universal_handles.iter_mut()) {
                             let handle_id = sh.handle.id();
                             if let Err(e) =
                                 sh.handle

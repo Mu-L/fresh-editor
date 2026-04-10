@@ -180,13 +180,8 @@ done
         log.contains("ACTION: initialized")
     })?;
 
-    // Verify LSP is running for rust (via the universal server)
-    let running = harness.editor().running_lsp_servers();
-    assert!(
-        running.contains(&"rust".to_string()),
-        "Universal LSP should be running for 'rust' language, but running servers are: {:?}",
-        running
-    );
+    // Verify the universal LSP is serving the rust language
+    harness.wait_until(|h| h.editor().is_lsp_server_ready("rust"))?;
 
     // --- Test Go-to-Definition ---
     // Move cursor to line 6 (0-indexed: 5), on "Point" in "let p = Point { x: 1.0 };"

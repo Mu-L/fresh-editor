@@ -1260,18 +1260,14 @@ impl Editor {
             lsp.set_language_configs(language.clone(), lsp_configs.as_slice().to_vec());
         }
 
-        // Append enabled universal LSP servers to every configured language
+        // Configure universal (global) LSP servers — spawned once, shared across languages
         let universal_servers: Vec<LspServerConfig> = config
             .universal_lsp
             .values()
             .flat_map(|lc| lc.as_slice().to_vec())
             .filter(|c| c.enabled)
             .collect();
-        if !universal_servers.is_empty() {
-            for language in lsp.configured_languages() {
-                lsp.append_language_configs(language, universal_servers.clone());
-            }
-        }
+        lsp.set_universal_configs(universal_servers);
 
         // Auto-detect Deno projects: if deno.json or deno.jsonc exists in the
         // workspace root, override JS/TS LSP to use `deno lsp` (#1191)
@@ -1985,7 +1981,8 @@ impl Editor {
     pub fn is_lsp_server_ready(&self, language: &str) -> bool {
         use crate::services::async_bridge::LspServerStatus;
         self.lsp_server_statuses.iter().any(|((lang, _), status)| {
-            lang == language && matches!(status, LspServerStatus::Running)
+            (lang == language || lang == "__universal__")
+                && matches!(status, LspServerStatus::Running)
         })
     }
 
@@ -2066,8 +2063,10 @@ impl Editor {
         self.lsp
             .as_ref()
             .map(|lsp| {
-                lsp.get_handles(language)
+                let (lang_handles, universal_handles) = lsp.get_handles_split(language);
+                lang_handles
                     .iter()
+                    .chain(universal_handles.iter())
                     .filter(|sh| sh.capabilities.initialized)
                     .count()
             })

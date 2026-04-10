@@ -521,10 +521,12 @@ fn test_universal_lsp_spawned_once_across_languages() -> anyhow::Result<()> {
     let spawn_count = log_content.lines().filter(|l| !l.is_empty()).count();
 
     assert_eq!(
-        spawn_count, 1,
+        spawn_count,
+        1,
         "Universal LSP should be spawned exactly once across all languages, \
          but was spawned {} times. PIDs: {}",
-        spawn_count, log_content.trim()
+        spawn_count,
+        log_content.trim()
     );
 
     Ok(())

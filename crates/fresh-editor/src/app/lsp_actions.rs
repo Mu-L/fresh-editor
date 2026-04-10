@@ -160,18 +160,20 @@ impl Editor {
                     .map(|m| m.lsp_opened_with.clone())
                     .unwrap_or_default();
 
-                let handles_needing_open: Vec<(String, u64)> = lsp
-                    .get_handles(&lang_id)
+                let (lang_handles, universal_handles) = lsp.get_handles_split(&lang_id);
+                let handles_needing_open: Vec<(String, u64)> = lang_handles
                     .iter()
+                    .chain(universal_handles.iter())
                     .filter(|sh| !opened_with.contains(&sh.handle.id()))
                     .map(|sh| (sh.name.clone(), sh.handle.id()))
                     .collect();
 
                 // Send didOpen to each handle that hasn't seen this buffer yet
                 for (name, handle_id) in handles_needing_open {
-                    let sh = lsp
-                        .get_handles_mut(&lang_id)
+                    let (lang_handles, universal_handles) = lsp.get_handles_split_mut(&lang_id);
+                    let sh = lang_handles
                         .iter_mut()
+                        .chain(universal_handles.iter_mut())
                         .find(|s| s.handle.id() == handle_id);
 
                     if let Some(sh) = sh {
@@ -601,7 +603,8 @@ impl Editor {
             .collect();
 
         if let Some(lsp) = self.lsp.as_mut() {
-            for sh in lsp.get_handles_mut(language) {
+            let (lang_handles, universal_handles) = lsp.get_handles_split_mut(language);
+            for sh in lang_handles.iter_mut().chain(universal_handles.iter_mut()) {
                 if sh.name == server_name {
                     for uri in &uris {
                         tracing::info!(
@@ -640,14 +643,14 @@ impl Editor {
                 .unwrap_or_default();
             if let Some(lsp) = self.lsp.as_mut() {
                 // Broadcast didClose to all handles for this language
-                let handles = lsp.get_handles_mut(&language);
-                if handles.is_empty() {
+                if !lsp.has_handles(&language) {
                     tracing::warn!(
                         "disable_lsp_for_buffer: no handle for language '{}'",
                         language
                     );
                 } else {
-                    for sh in handles {
+                    let (lang_handles, universal_handles) = lsp.get_handles_split_mut(&language);
+                    for sh in lang_handles.iter_mut().chain(universal_handles.iter_mut()) {
                         tracing::info!(
                             "Sending didClose for {} to '{}' (language: {})",
                             uri.as_str(),

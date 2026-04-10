@@ -200,6 +200,14 @@ pub struct LspManager {
     /// Configuration for each language (supports multiple servers per language)
     config: HashMap<String, Vec<LspServerConfig>>,
 
+    /// Universal (global) LSP server configs — spawned once per project,
+    /// shared across all languages.
+    universal_configs: Vec<LspServerConfig>,
+
+    /// Running universal LSP server handles — spawned once and included
+    /// in handle lookups for every language.
+    universal_handles: Vec<ServerHandle>,
+
     /// Default root URI for workspace (used if no per-language root is set)
     root_uri: Option<Uri>,
 
@@ -236,6 +244,8 @@ impl LspManager {
         Self {
             handles: HashMap::new(),
             config: HashMap::new(),
+            universal_configs: Vec::new(),
+            universal_handles: Vec::new(),
             root_uri,
             per_language_root_uris: HashMap::new(),
             runtime: None,
@@ -282,77 +292,103 @@ impl LspManager {
         mut capabilities: ServerCapabilitySummary,
     ) {
         capabilities.initialized = true;
+
+        // Check per-language handles first
         if let Some(handles) = self.handles.get_mut(language) {
             if let Some(sh) = handles.iter_mut().find(|sh| sh.name == server_name) {
                 sh.capabilities = capabilities;
+                return;
             }
+        }
+
+        // Check universal handles (they use "__universal__" as language)
+        if let Some(sh) = self
+            .universal_handles
+            .iter_mut()
+            .find(|sh| sh.name == server_name)
+        {
+            sh.capabilities = capabilities;
         }
     }
 
     /// Get the semantic token legend for a language from the first eligible server.
     pub fn semantic_tokens_legend(&self, language: &str) -> Option<&SemanticTokensLegend> {
-        self.handles.get(language)?.iter().find_map(|sh| {
-            if sh.feature_filter.allows(LspFeature::SemanticTokens)
-                && sh.has_capability(LspFeature::SemanticTokens)
-            {
-                sh.capabilities.semantic_tokens_legend.as_ref()
-            } else {
-                None
-            }
-        })
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .find_map(|sh| {
+                if sh.feature_filter.allows(LspFeature::SemanticTokens)
+                    && sh.has_capability(LspFeature::SemanticTokens)
+                {
+                    sh.capabilities.semantic_tokens_legend.as_ref()
+                } else {
+                    None
+                }
+            })
     }
 
     /// Check if any eligible server for the language supports full semantic tokens.
     pub fn semantic_tokens_full_supported(&self, language: &str) -> bool {
-        self.handles.get(language).is_some_and(|handles| {
-            handles.iter().any(|sh| {
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .any(|sh| {
                 sh.feature_filter.allows(LspFeature::SemanticTokens)
                     && sh.capabilities.semantic_tokens_full
             })
-        })
     }
 
     /// Check if any eligible server for the language supports full semantic token deltas.
     pub fn semantic_tokens_full_delta_supported(&self, language: &str) -> bool {
-        self.handles.get(language).is_some_and(|handles| {
-            handles.iter().any(|sh| {
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .any(|sh| {
                 sh.feature_filter.allows(LspFeature::SemanticTokens)
                     && sh.capabilities.semantic_tokens_full_delta
             })
-        })
     }
 
     /// Check if any eligible server for the language supports range semantic tokens.
     pub fn semantic_tokens_range_supported(&self, language: &str) -> bool {
-        self.handles.get(language).is_some_and(|handles| {
-            handles.iter().any(|sh| {
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .any(|sh| {
                 sh.feature_filter.allows(LspFeature::SemanticTokens)
                     && sh.capabilities.semantic_tokens_range
             })
-        })
     }
 
     /// Check if any eligible server for the language supports folding ranges.
     pub fn folding_ranges_supported(&self, language: &str) -> bool {
-        self.handles.get(language).is_some_and(|handles| {
-            handles.iter().any(|sh| {
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .any(|sh| {
                 sh.feature_filter.allows(LspFeature::FoldingRange) && sh.capabilities.folding_ranges
             })
-        })
     }
 
     /// Check if a character is a completion trigger for any running language server.
     pub fn is_completion_trigger_char(&self, ch: char, language: &str) -> bool {
         let ch_str = ch.to_string();
-        self.handles.get(language).is_some_and(|handles| {
-            handles.iter().any(|sh| {
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .any(|sh| {
                 sh.feature_filter.allows(LspFeature::Completion)
                     && sh
                         .capabilities
                         .completion_trigger_characters
                         .contains(&ch_str)
             })
-        })
     }
 
     /// Try to spawn an LSP server, checking auto_start configuration
@@ -369,20 +405,10 @@ impl LspManager {
     /// IMPORTANT: Callers should only call this when there is at least one buffer
     /// with a matching language. Do not call for languages with no open files.
     pub fn try_spawn(&mut self, language: &str, file_path: Option<&Path>) -> LspSpawnResult {
-        // If handles already exist for this language, return success
+        // If per-language handles already exist, just ensure universals are running too
         if self.handles.get(language).is_some_and(|v| !v.is_empty()) {
+            self.ensure_universal_servers_running(file_path);
             return LspSpawnResult::Spawned;
-        }
-
-        // Check if language is configured
-        let configs = match self.config.get(language) {
-            Some(configs) if !configs.is_empty() => configs,
-            _ => return LspSpawnResult::NotConfigured,
-        };
-
-        // Check if any config is enabled
-        if !configs.iter().any(|c| c.enabled) {
-            return LspSpawnResult::Failed;
         }
 
         // Check if we have runtime and bridge
@@ -390,14 +416,42 @@ impl LspManager {
             return LspSpawnResult::Failed;
         }
 
-        // Check if auto_start is enabled (on any config) or language was manually allowed
+        // Always try to start universal servers (they manage their own auto_start check)
+        self.ensure_universal_servers_running(file_path);
+
+        // Check if language is configured
+        let configs = match self.config.get(language) {
+            Some(configs) if !configs.is_empty() => configs,
+            _ => {
+                // No per-language config, but universal servers may be running
+                if !self.universal_handles.is_empty() {
+                    return LspSpawnResult::Spawned;
+                }
+                return LspSpawnResult::NotConfigured;
+            }
+        };
+
+        // Check if any per-language config is enabled
+        if !configs.iter().any(|c| c.enabled) {
+            if !self.universal_handles.is_empty() {
+                return LspSpawnResult::Spawned;
+            }
+            return LspSpawnResult::Failed;
+        }
+
+        // Check if auto_start is enabled (on any per-language config) or language was manually allowed
         let any_auto_start = configs.iter().any(|c| c.auto_start && c.enabled);
         if !any_auto_start && !self.allowed_languages.contains(language) {
+            if !self.universal_handles.is_empty() {
+                return LspSpawnResult::Spawned;
+            }
             return LspSpawnResult::NotAutoStart;
         }
 
-        // Spawn all enabled servers for this language
-        if self.force_spawn(language, file_path).is_some() {
+        // Spawn per-language servers
+        let spawned = self.force_spawn(language, file_path).is_some();
+
+        if spawned || !self.universal_handles.is_empty() {
             LspSpawnResult::Spawned
         } else {
             LspSpawnResult::Failed
@@ -425,6 +479,14 @@ impl LspManager {
     /// Append additional server configs to an existing language entry.
     pub fn append_language_configs(&mut self, language: String, configs: Vec<LspServerConfig>) {
         self.config.entry(language).or_default().extend(configs);
+    }
+
+    /// Set universal (global) LSP server configs.
+    ///
+    /// Universal servers are spawned once per project and shared across all
+    /// languages, rather than being duplicated into each language's config list.
+    pub fn set_universal_configs(&mut self, configs: Vec<LspServerConfig>) {
+        self.universal_configs = configs;
     }
 
     /// Return the list of currently configured language keys.
@@ -527,96 +589,149 @@ impl LspManager {
     }
 
     /// Get the primary (first) existing LSP handle for a language (no spawning).
+    /// Checks per-language handles first, then universal handles.
     pub fn get_handle(&self, language: &str) -> Option<&LspHandle> {
         self.handles
             .get(language)
             .and_then(|v| v.first())
+            .or_else(|| self.universal_handles.first())
             .map(|sh| &sh.handle)
     }
 
     /// Get the primary (first) mutable existing LSP handle for a language (no spawning).
+    /// Checks per-language handles first, then universal handles.
     pub fn get_handle_mut(&mut self, language: &str) -> Option<&mut LspHandle> {
-        self.handles
-            .get_mut(language)
-            .and_then(|v| v.first_mut())
-            .map(|sh| &mut sh.handle)
+        if self.handles.get(language).is_some_and(|v| !v.is_empty()) {
+            return self
+                .handles
+                .get_mut(language)
+                .and_then(|v| v.first_mut())
+                .map(|sh| &mut sh.handle);
+        }
+        self.universal_handles.first_mut().map(|sh| &mut sh.handle)
     }
 
-    /// Get all handles for a language (for broadcasting operations like didOpen/didChange).
-    pub fn get_handles(&self, language: &str) -> &[ServerHandle] {
-        self.handles
+    /// Get per-language and universal handles for a language.
+    ///
+    /// Returns two slices: (per-language handles, universal handles).
+    /// Callers should chain-iterate both for broadcasting operations.
+    pub fn get_handles_split(&self, language: &str) -> (&[ServerHandle], &[ServerHandle]) {
+        let lang = self
+            .handles
             .get(language)
             .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            .unwrap_or(&[]);
+        (lang, &self.universal_handles)
     }
 
-    /// Check if a server with the given name exists (across all languages).
+    /// Get mutable per-language and universal handles for a language.
+    ///
+    /// Returns two mutable slices: (per-language handles, universal handles).
+    /// Callers should chain-iterate both for broadcasting operations.
+    pub fn get_handles_split_mut(
+        &mut self,
+        language: &str,
+    ) -> (&mut [ServerHandle], &mut [ServerHandle]) {
+        let lang = self
+            .handles
+            .get_mut(language)
+            .map(|v| v.as_mut_slice())
+            .unwrap_or(&mut []);
+        (lang, &mut self.universal_handles)
+    }
+
+    /// Check if any handles (per-language or universal) exist for a language.
+    pub fn has_handles(&self, language: &str) -> bool {
+        self.handles.get(language).is_some_and(|v| !v.is_empty())
+            || !self.universal_handles.is_empty()
+    }
+
+    /// Count all handles (per-language + universal) for a language.
+    pub fn handle_count(&self, language: &str) -> usize {
+        self.handles.get(language).map(|v| v.len()).unwrap_or(0) + self.universal_handles.len()
+    }
+
+    /// Check if a server with the given name exists (across all languages and universals).
     pub fn has_server_named(&self, server_name: &str) -> bool {
         self.handles
             .values()
             .any(|handles| handles.iter().any(|sh| sh.name == server_name))
-    }
-
-    /// Get all mutable handles for a language.
-    pub fn get_handles_mut(&mut self, language: &str) -> &mut [ServerHandle] {
-        self.handles
-            .get_mut(language)
-            .map(|v| v.as_mut_slice())
-            .unwrap_or(&mut [])
+            || self
+                .universal_handles
+                .iter()
+                .any(|sh| sh.name == server_name)
     }
 
     /// Get the first handle for a language that allows a given feature (for exclusive features).
     /// For capability-gated features (semantic tokens, folding ranges), this also checks
     /// that the server actually reported the capability during initialization.
+    /// Checks per-language handles first, then universal handles.
     /// Returns `None` if no handle matches.
     pub fn handle_for_feature(&self, language: &str, feature: LspFeature) -> Option<&ServerHandle> {
-        self.handles
-            .get(language)?
+        let lang_handles = self
+            .handles
+            .get(language)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let predicate =
+            |sh: &&ServerHandle| sh.feature_filter.allows(feature) && sh.has_capability(feature);
+        lang_handles
             .iter()
-            .find(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+            .find(predicate)
+            .or_else(|| self.universal_handles.iter().find(predicate))
     }
 
     /// Get the first mutable handle for a language that allows a given feature.
     /// For capability-gated features, this also checks the server's actual capabilities.
+    /// Checks per-language handles first, then universal handles.
     pub fn handle_for_feature_mut(
         &mut self,
         language: &str,
         feature: LspFeature,
     ) -> Option<&mut ServerHandle> {
-        self.handles
-            .get_mut(language)?
-            .iter_mut()
-            .find(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+        let has_lang_match = self.handles.get(language).is_some_and(|v| {
+            v.iter()
+                .any(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+        });
+
+        if has_lang_match {
+            self.handles.get_mut(language).and_then(|v| {
+                v.iter_mut()
+                    .find(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+            })
+        } else {
+            self.universal_handles
+                .iter_mut()
+                .find(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+        }
     }
 
     /// Get all handles for a language that allow a given feature (for merged features).
     /// Like `handle_for_feature`, also checks per-server capabilities.
+    /// Includes both per-language and universal handles.
     pub fn handles_for_feature(&self, language: &str, feature: LspFeature) -> Vec<&ServerHandle> {
-        self.handles
-            .get(language)
-            .map(|v| {
-                v.iter()
-                    .filter(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
-                    .collect()
-            })
-            .unwrap_or_default()
+        let (lang_handles, universal_handles) = self.get_handles_split(language);
+        lang_handles
+            .iter()
+            .chain(universal_handles.iter())
+            .filter(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+            .collect()
     }
 
     /// Get all mutable handles for a language that allow a given feature.
     /// Like `handle_for_feature_mut`, also checks per-server capabilities.
+    /// Includes both per-language and universal handles.
     pub fn handles_for_feature_mut(
         &mut self,
         language: &str,
         feature: LspFeature,
     ) -> Vec<&mut ServerHandle> {
-        self.handles
-            .get_mut(language)
-            .map(|v| {
-                v.iter_mut()
-                    .filter(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
-                    .collect()
-            })
-            .unwrap_or_default()
+        let (lang_handles, universal_handles) = self.get_handles_split_mut(language);
+        lang_handles
+            .iter_mut()
+            .chain(universal_handles.iter_mut())
+            .filter(|sh| sh.feature_filter.allows(feature) && sh.has_capability(feature))
+            .collect()
     }
 
     /// Force spawn LSP server(s) for a language.
@@ -787,12 +902,99 @@ impl LspManager {
             .map(|sh| &mut sh.handle)
     }
 
+    /// Spawn universal LSP servers if they aren't already running.
+    ///
+    /// Called from `try_spawn` — universal servers are spawned once and shared
+    /// across all languages. Only servers with `enabled=true` and
+    /// `auto_start=true` are started automatically.
+    fn ensure_universal_servers_running(&mut self, file_path: Option<&Path>) {
+        if !self.universal_handles.is_empty() || self.universal_configs.is_empty() {
+            return;
+        }
+
+        let runtime = match self.runtime.as_ref() {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let async_bridge = match self.async_bridge.as_ref() {
+            Some(b) => b.clone(),
+            None => return,
+        };
+
+        let mut spawned = Vec::new();
+        for config in &self.universal_configs {
+            if !config.enabled || !config.auto_start {
+                continue;
+            }
+            if config.command.is_empty() {
+                continue;
+            }
+
+            let server_name = config.display_name();
+            tracing::info!("Spawning universal LSP server '{}'", server_name);
+
+            match LspHandle::spawn(
+                &runtime,
+                &config.command,
+                &config.args,
+                config.env.clone(),
+                "__universal__".to_string(),
+                server_name.clone(),
+                &async_bridge,
+                config.process_limits.clone(),
+                config.language_id_overrides.clone(),
+            ) {
+                Ok(handle) => {
+                    let effective_root = self.resolve_root_uri("__universal__", file_path);
+                    if let Err(e) =
+                        handle.initialize(effective_root, config.initialization_options.clone())
+                    {
+                        tracing::error!(
+                            "Failed to initialize universal LSP server '{}': {}",
+                            server_name,
+                            e
+                        );
+                        continue;
+                    }
+                    tracing::info!(
+                        "Universal LSP server '{}' initialization started",
+                        server_name
+                    );
+                    spawned.push(ServerHandle {
+                        name: server_name,
+                        handle,
+                        feature_filter: config.feature_filter(),
+                        capabilities: ServerCapabilitySummary::default(),
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to spawn universal LSP server '{}': {}",
+                        server_name,
+                        e
+                    );
+                }
+            }
+        }
+
+        self.universal_handles = spawned;
+    }
+
     /// Handle a server crash by scheduling a restart with exponential backoff
     ///
     /// Returns a message describing the action taken (for UI notification)
     #[allow(clippy::let_underscore_must_use)] // shutdown() is best-effort cleanup of a crashed server
     pub fn handle_server_crash(&mut self, language: &str) -> String {
-        // Remove all handles for this language
+        // Universal servers use "__universal__" as their language key
+        if language == "__universal__" {
+            for sh in self.universal_handles.drain(..) {
+                let _ = sh.handle.shutdown();
+            }
+            // Universal servers will be re-spawned on next try_spawn call
+            return "Universal LSP server crashed. It will restart on next file open.".to_string();
+        }
+
+        // Remove all per-language handles
         if let Some(handles) = self.handles.remove(language) {
             for sh in handles {
                 let _ = sh.handle.shutdown(); // Best-effort cleanup
@@ -1091,10 +1293,13 @@ impl LspManager {
 
     /// Get the names of all running servers for a given language
     pub fn server_names_for_language(&self, language: &str) -> Vec<String> {
-        self.handles
+        let mut names: Vec<String> = self
+            .handles
             .get(language)
             .map(|handles| handles.iter().map(|sh| sh.name.clone()).collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        names.extend(self.universal_handles.iter().map(|sh| sh.name.clone()));
+        names
     }
 
     /// Check if any LSP server for a language is running and ready to serve requests
@@ -1107,6 +1312,10 @@ impl LspManager {
                     .any(|sh| sh.handle.state().can_send_requests())
             })
             .unwrap_or(false)
+            || self
+                .universal_handles
+                .iter()
+                .any(|sh| sh.handle.state().can_send_requests())
     }
 
     /// Shutdown a single server by name for a specific language.
@@ -1176,7 +1385,7 @@ impl LspManager {
         }
     }
 
-    /// Shutdown all language servers
+    /// Shutdown all language servers (including universal servers)
     #[allow(clippy::let_underscore_must_use)]
     pub fn shutdown_all(&mut self) {
         for (language, handles) in self.handles.iter() {
@@ -1186,6 +1395,11 @@ impl LspManager {
             }
         }
         self.handles.clear();
+        for sh in &self.universal_handles {
+            tracing::info!("Shutting down universal LSP server '{}'", sh.name);
+            let _ = sh.handle.shutdown();
+        }
+        self.universal_handles.clear();
     }
 }
 
