@@ -2,23 +2,59 @@
 
 ## 0.2.24
 
+### Features
+
+* **Review Diff Rewrite**: Files list and diff are now one scrollable unified buffer. Use `n` / `p` to jump to       z next/previous hunk. You can collapse per-file, and stage or unstage content on the cursor row (hunk, whole file, or a line-level visual selection). **Review comments now persist per-repo** across sessions, and a dedicated Comments panel makes them navigable. Two new entry points: `Review: Commit Range` for any `A..B` / `A...B` range, and `Review: PR Branch` for walking a branch's commits with a live `git show` side-by-side. In the future I plan to make a new UX for picking the diff target (PR, branch, etc.)
+
+* **Git Log Rewrite**: Live-preview right panel updates as you move through the log, clickable toolbar, theme-aware colours, aligned columns, wrapped commit messages.
+
+* **Rendering Performance Improvements**: see the bugfix section below.
+
 ### Improvements
 
-* **Preview Tabs in File Explorer**: Single-clicking a file in the explorer now opens it in an ephemeral "preview" tab that is replaced by the next single-click instead of accumulating tabs (#1403). Preview tabs are promoted to a permanent tab when the user edits the buffer, double-clicks or presses Enter on the file in the explorer, clicks the tab itself, or performs a layout action (split, move tab, close split, focus a different pane). At most one preview tab exists editor-wide, and it's anchored to the split it was opened in — moving focus to another pane commits the previous preview. **Config:** enabled by default; disable via Settings UI (File Explorer -> Preview Tabs or use search).
+* **Preview Tabs in File Explorer** (#1403): Single-clicking a file opens it in an ephemeral "preview" tab that the next single-click replaces, instead of accumulating tabs. Any real commitment — editing, double-click / Enter, clicking the tab, or a layout action — promotes the preview to a permanent tab. Enabled by default; disable via Settings UI.
 
-* **LSP Status Bar Indicator**: Redesigned to a stable-width `LSP (on/off/error)` status indicator with a spinner while a server is starting or working — no more status bar noise as progress messages arrive. Configured-but-dormant servers are now visible as `LSP (off)` so you can see at a glance that an LSP is available to start. Clicking opens a popup with per-server status and live progress under the server name.
+* **LSP**:
+    - **LSP status-bar indicator** with a spinner during start-up and indexing (no more jitter as progress messages arrive); configured-but-dormant servers show as `LSP (off)`. Clicking opens a popup with per-server status, live progress, a "binary not in PATH" label for missing servers like `pylsp` / `gopls` (so they don't spawn failing processes), and a per-language mute option.
+    - The LSP hover popup now fuses any overlapping diagnostic (severity-coloured, source-tagged like `rustc` / `clippy` / `clangd`) above the hover body.
+    - `.h` files in C++ projects now route to the C++ LSP when there's a real signal (sibling `.cpp` / `.hpp` / `.hxx`).
+    - **LSP Correctness fixes**: inlay hints re-request after every edit, anchor correctly at end of line (#1572), vanish when their anchor is deleted, track theme changes, and populate on every open buffer when the server becomes quiescent (previously only one); fold indicators no longer drift after edits around a fold (#1571); and diagnostic / inlay-hint refresh no longer pulls from buffers of the wrong language.
 
-* **LSP Indicator: missing-binary detection and dismissable pill**: The LSP popup now probes each configured server's binary up-front, so opening the popup for a language like Python or Go on a system without `pylsp`/`gopls` installed labels the server "binary not in PATH" and replaces the actionable "Start" row with a disabled "Install … to enable" advisory — no more starting a server only to watch it fail. The popup also offers a "Disable LSP pill for {language}" row that mutes the indicator without touching your on-disk config (re-enable it from the same popup; dismissal is session-scoped). Plugins receive the same information through an extended `lsp_status_clicked` hook payload (`missing_servers`, `user_dismissed`).
+* **Markdown Table Frames**: Tables in Page View now render full box borders — top and bottom frames plus a separator between every data row.
 
-* **Diagnostics in Hover Popup**: When the cursor sits on a symbol that also carries an error, warning, or hint, the hover popup prepends the overlapping diagnostic (severity and source like `rustc`/`clippy`/`clangd`) above the hover body.
+* **Read-only state persists across sessions**: Buffers marked read-only stay read-only after restart.
 
-* **C++ Header Detection**: Added heuristics to assign an `.h` files the C++ rather than C language. You can change it manually by clicking on the language in the status bar.
+* **Narrow-terminal status bar**: The right side drops low-priority elements (palette hint, warning counts, encoding, …) in order so the filename and cursor position stay visible.
 
-* **Review Diff**: Clicking a file in the files panel now selects it (previously clicks were ignored), and keyboard navigation auto-scrolls the files panel to keep the selected entry visible.
+* **Shift+Mouse-wheel** now scrolls horizontally even when the currently visible lines fit the viewport (previously required a long line to have been rendered first).
+
+* **Explorer auto-expands on first open** (#1569): `Ctrl+B` with a nested file active now reveals the file on the first toggle — no more double-toggle.
+
+* **Grammar / language fixes**: Bare-filename scripts (`Gemfile`, `Rakefile`, `Makefile`) highlight correctly; `.jsx` / `.mjs` / `.cjs` route to JavaScript; TypeScript chosen via Set Language now highlights and appears in `fresh --cmd grammar list`.
+
+* **Plugin API**: Virtual lines accept theme keys for `fg` / `bg` and follow theme changes live. Plugin modes can inherit Normal-mode bindings instead of redeclaring motions. The `mouse_click` hook payload now carries buffer coordinates.
 
 ### Bug Fixes
 
-* Fixed LSP workspace diagnostic refresh and inlay-hint refresh occasionally pulling from buffers of the wrong language (e.g. asking the Rust server about `package.json`, producing `file not found` errors).
+* Fixed scrolling in heavily wrapped buffers (#1574): Up/Down no longer drifts the viewport one row per keystroke, and mouse-wheel scroll in Page View on long markdown lists now reaches EOF reliably.
+
+* Fixed multi-byte / grapheme handling in the view pipeline: fullwidth and CJK text, ZWJ emoji families (`👨‍👩‍👧‍👦`), and long combining-mark clusters now render, advance by cursor, and participate in Home/End as a single unit (#1577). Note: different terminals handle ZWJ differently, I recommend ghostty if you need these characters for some reason...
+
+* Fixed `Format Buffer` hanging on formatters that emit more than ~64KB — stdout / stderr are now drained concurrently with the write (#1573).
+
+* Fixed arrow keys with an active selection (#1566): Left/Right now collapse to the selection's start/end edge (matching VSCode, Sublime, IntelliJ); Up/Down start from the appropriate edge.
+
+* Fixed `Shift+Backspace` now behaves like Backspace (previously silently dropped on many terminals) (#1588).
+
+* Fixed session-restored folds landing on unrelated lines after external edits — they now relocate by header text or are dropped (#1568).
+
+* Fixed project-wide Search & Replace: replace is now undoable with a confirm prompt, repeated `Alt+Enter` no longer corrupts files, the file-watch mtime is refreshed after save, and the 100% CPU hang on large-repo scans is fixed (#1575).
+
+* Fixed 100% CPU when a fold hid thousands of lines — fold-indicator detection no longer scans the whole buffer per visible row.
+
+* Fixed plugin-panel buffers (audit mode, git log, review diff): cursor positions preserved across tab switches, clicks on scrollable panels register, `q` closes the group from any panel, and the active tab in an inactive split is now visible under the high-contrast theme.
+
+* Fixed cursor being able to land on plugin-virtual rows (markdown table borders, gutters) when moving up/down.
 
 ## 0.2.23
 
