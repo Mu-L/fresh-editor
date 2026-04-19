@@ -1482,9 +1482,10 @@ fn initialize_app(args: &Args) -> AnyhowResult<SetupState> {
             .as_ref()
             .cloned()
             .unwrap_or_else(|| effective_working_dir.clone());
-        if let Some(detected) =
-            fresh::services::devcontainer::detect_devcontainer(&detect_dir, authority.filesystem.as_ref())
-        {
+        if let Some(detected) = fresh::services::devcontainer::detect_devcontainer(
+            &detect_dir,
+            authority.filesystem.as_ref(),
+        ) {
             tracing::info!(
                 "Devcontainer config detected: {}",
                 detected.config_path.display()
