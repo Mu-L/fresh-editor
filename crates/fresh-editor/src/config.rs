@@ -1452,16 +1452,26 @@ impl ExplorerWidth {
     /// Default width when none is configured.
     pub const DEFAULT: Self = Self::Percent(30);
 
+    /// Hard minimum for the *rendered* explorer width. Configured values
+    /// smaller than this are accepted (so a hand-edited config round-trips
+    /// cleanly) but the render path always gives the panel at least this
+    /// many columns, preventing a 0- or 1-column explorer where the border
+    /// stacks on itself and the drag-to-resize grip is unreachable.
+    pub const MIN_COLS: u16 = 5;
+
     /// Convert to terminal columns.
     ///
     /// `Percent` multiplies `terminal_width` by the percent; `Columns`
-    /// returns the requested count, clamped against `terminal_width`
-    /// so callers never receive a value larger than the window.
+    /// returns the requested count. The result is then clamped to
+    /// `MIN_COLS..=terminal_width` so it's always renderable and always
+    /// usable. On terminals narrower than `MIN_COLS` the `terminal_width`
+    /// cap wins and we return whatever fits.
     pub fn to_cols(self, terminal_width: u16) -> u16 {
-        match self {
+        let raw = match self {
             Self::Percent(pct) => ((terminal_width as u32 * pct as u32) / 100) as u16,
-            Self::Columns(cols) => cols.min(terminal_width),
-        }
+            Self::Columns(cols) => cols,
+        };
+        raw.max(Self::MIN_COLS).min(terminal_width)
     }
 }
 
@@ -6244,6 +6254,7 @@ mod tests {
     fn test_to_cols_percent() {
         assert_eq!(ExplorerWidth::Percent(30).to_cols(100), 30);
         assert_eq!(ExplorerWidth::Percent(25).to_cols(120), 30);
+        // Zero-width terminal is degenerate; min-clamp can't fit, cap wins.
         assert_eq!(ExplorerWidth::Percent(30).to_cols(0), 0);
         assert_eq!(ExplorerWidth::Percent(100).to_cols(200), 200);
     }
@@ -6252,7 +6263,48 @@ mod tests {
     fn test_to_cols_columns_clamps_to_terminal() {
         assert_eq!(ExplorerWidth::Columns(24).to_cols(100), 24);
         assert_eq!(ExplorerWidth::Columns(999).to_cols(80), 80);
-        assert_eq!(ExplorerWidth::Columns(0).to_cols(100), 0);
+    }
+
+    /// `to_cols` enforces a floor of `MIN_COLS` so the panel is always
+    /// renderable, regardless of what the config/workspace asked for.
+    #[test]
+    fn test_to_cols_enforces_min_width() {
+        // Tiny or zero configured values get bumped up to MIN_COLS.
+        assert_eq!(
+            ExplorerWidth::Columns(0).to_cols(100),
+            ExplorerWidth::MIN_COLS
+        );
+        assert_eq!(
+            ExplorerWidth::Columns(1).to_cols(100),
+            ExplorerWidth::MIN_COLS
+        );
+        assert_eq!(
+            ExplorerWidth::Columns(4).to_cols(100),
+            ExplorerWidth::MIN_COLS
+        );
+        assert_eq!(
+            ExplorerWidth::Percent(0).to_cols(100),
+            ExplorerWidth::MIN_COLS
+        );
+        // 3% of 100 = 3, bumped up to MIN_COLS.
+        assert_eq!(
+            ExplorerWidth::Percent(3).to_cols(100),
+            ExplorerWidth::MIN_COLS
+        );
+        // Just above the floor: pass through.
+        assert_eq!(
+            ExplorerWidth::Columns(ExplorerWidth::MIN_COLS + 1).to_cols(100),
+            ExplorerWidth::MIN_COLS + 1
+        );
+    }
+
+    /// On very narrow terminals the `MIN_COLS` floor can't fit; the
+    /// terminal-width cap wins and we return whatever columns exist.
+    #[test]
+    fn test_to_cols_min_floor_yields_to_narrow_terminal() {
+        assert_eq!(ExplorerWidth::Columns(10).to_cols(3), 3);
+        assert_eq!(ExplorerWidth::Percent(100).to_cols(2), 2);
+        assert_eq!(ExplorerWidth::Columns(1).to_cols(0), 0);
     }
 
     // --- load_from_file regression ------------------------------------

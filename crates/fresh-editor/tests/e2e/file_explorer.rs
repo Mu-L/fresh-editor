@@ -3045,3 +3045,33 @@ fn test_file_explorer_git_markers_clear_after_external_commit() {
         "file2.txt should not have an M marker after external commit"
     );
 }
+
+/// The rendered file explorer panel has a hard minimum width of 5 columns,
+/// independent of whatever the config or the restored workspace tries to
+/// set it to. A 0/1/2-column explorer has no room for a readable tree and
+/// leaves the drag border stuck against the screen edge; clamping here
+/// keeps the UI recoverable even if a user hand-edits their config to a
+/// near-zero value.
+#[test]
+fn test_file_explorer_minimum_render_width_is_5_cols() {
+    use fresh::config::{Config, ExplorerWidth};
+    let mut config = Config::default();
+    config.file_explorer.width = ExplorerWidth::Columns(1);
+
+    let mut harness = EditorTestHarness::with_config(100, 40, config).unwrap();
+
+    harness
+        .send_key(KeyCode::Char('e'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness.wait_for_file_explorer().unwrap();
+    harness.render().unwrap();
+    assert!(harness.editor().file_explorer_visible());
+
+    let cols = find_explorer_border_col(&harness) + 1;
+    assert_eq!(
+        cols, 5,
+        "explorer must never render narrower than 5 cols regardless of config; got {}.\nScreen:\n{}",
+        cols,
+        harness.screen_to_string()
+    );
+}
