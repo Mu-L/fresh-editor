@@ -1,5 +1,7 @@
 # Devcontainers
 
+> **Palette:** `Dev Container: Attach`, `Dev Container: Rebuild`, `Dev Container: Detach`, `Dev Container: Show Info`. A "Dev Container Detected" prompt also appears on startup for any project with a `.devcontainer/devcontainer.json`.
+
 Fresh detects projects that ship a `.devcontainer/devcontainer.json` and offers to **Attach** or **Rebuild** the container. When attached, the embedded terminal runs *inside* the container, and filesystem and process operations target the container instead of your host.
 
 ## Requirements
@@ -26,4 +28,8 @@ Use **Dev Container: Detach** to return to host filesystem and process authority
 
 ## Related
 
-Attach, SSH remotes, and the host all use the same [Authority](../plugins/api/) slot under the hood, so the rest of the editor behaves the same regardless of where your files and processes actually live.
+- [Remote Editing (SSH)](./ssh.md) — same Authority mechanism pointed at a remote host instead of a container.
+- [Session Persistence](./session-persistence.md) — detach/reattach model that works well alongside containerized development.
+- [Authority](../plugins/api/) — the underlying plugin-API slot that makes all three remote-editing modes interchangeable.
+
+See it in action: [What's New in 0.2.26 → Devcontainers](/blog/fresh-0.2.26/#devcontainers).

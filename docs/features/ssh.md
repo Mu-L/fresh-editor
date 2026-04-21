@@ -1,5 +1,7 @@
 # Remote Editing (Experimental)
 
+> **Activation:** command-line only — no palette command or settings toggle. Launch Fresh with a remote path as the first argument (see forms below).
+
 Fresh supports editing files on remote machines via SSH. Two wire
 forms are accepted and do the same thing — pick whichever is easier
 to type:

@@ -34,7 +34,7 @@ When the LSP server provides `foldingRange`, fold indicators appear in the gutte
 
 ## Multi-Server Support
 
-You can configure multiple LSP servers for the same language (e.g., pylsp + pyright for Python). Configure this in the Settings UI (command palette → "Open Settings" → LSP section).
+You can configure multiple LSP servers for the same language (e.g., pylsp + pyright for Python). Configure this in the Settings UI (run **Open Settings** from the palette) under the **LSP** section.
 
 Each server can opt into or out of specific features using `only_features` / `except_features` — for example, route completions to one server and diagnostics to another. Fresh merges completions from every eligible server and tracks diagnostics per-server. Servers configured for all languages are spawned once per project rather than once per language.
 
@@ -44,7 +44,7 @@ When you open a `.h` file, Fresh routes to the C++ LSP if there's a clear signal
 
 ## Workspace Root Detection
 
-By default, Fresh uses the working directory as the LSP workspace root. You can configure `root_markers` on an LSP server entry (e.g., `Cargo.toml`, `package.json`) so the editor walks upward from the file's directory to find the project root. Configure this in the Settings UI under the LSP section.
+By default, Fresh uses the working directory as the LSP workspace root. You can configure `root_markers` on an LSP server entry (e.g., `Cargo.toml`, `package.json`) so the editor walks upward from the file's directory to find the project root. Configure this in the Settings UI (run **Open Settings** from the palette) under the **LSP** section.
 
 ## Built-in LSP Support
 
@@ -151,7 +151,7 @@ For example, to add C# support:
 }
 ```
 
-The language name (e.g., `"csharp"`) must match in both sections. The `grammar` field must be a valid grammar name — run `fresh --cmd grammar list` to see all available grammars. Fresh includes built-in language definitions for many languages, visible in the Settings UI (command palette → "Open Settings" → Languages section).
+The language name (e.g., `"csharp"`) must match in both sections. The `grammar` field must be a valid grammar name — run `fresh --cmd grammar list` to see all available grammars. Fresh includes built-in language definitions for many languages, visible in the Settings UI (run **Open Settings** from the palette) under the **Languages** section.
 
 ### Environment Variables
 
@@ -196,7 +196,7 @@ Use "Switch Rust Analyzer Mode" from the command palette to toggle between Full 
 
 You can also configure language detection using the Settings UI instead of editing `config.json` directly:
 
-1. **Open Settings**: Use **Edit → Settings...** or the command palette (`Ctrl+P`) and search for "Settings"
+1. **Open Settings**: Run **Open Settings** from the palette (or **Edit → Settings...** from the menu bar).
 2. **Navigate to Languages**: Go to the **Languages** section
 3. **Add or Edit a Language**: Click on an existing language to edit it, or add a new one
 4. **Configure Detection**: Set the following fields:

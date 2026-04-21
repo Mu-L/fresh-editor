@@ -71,3 +71,5 @@ if (editor.getEnv("FRESH_PROFILE") === "writing") {
 - **`fresh --no-init`** (alias `--safe`) skips loading for a single launch — useful if the file errors out.
 
 The full API surface is the same as plugins — see the [Plugin API reference](/plugins/api/).
+
+See it in action: [What's New in 0.2.26 → init.ts](/blog/fresh-0.2.26/#init-ts-a-startup-script).

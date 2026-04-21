@@ -2,7 +2,11 @@
 
 > **Warning**: This feature is experimental. The API and behavior may change.
 
+> **Palette:** `Detach`. **CLI:** `fresh -a`, `fresh --cmd session list|new|kill`. **Config:** `hot_exit`.
+
 Detach from Fresh and reattach later, similar to tmux. Your editor state persists even after closing the terminal.
+
+See also: [Remote Editing (SSH)](./ssh.md) for pairing session persistence with remote hosts, and [Devcontainers](./devcontainer.md) for routing through a container.
 
 ## Hot Exit
 

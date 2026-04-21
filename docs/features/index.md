@@ -12,6 +12,6 @@
 - [Encoding](./encoding.md) - Text encoding detection and conversion
 - [Remote Editing (SSH)](./ssh.md) - Edit files on remote machines via SSH
 - [Devcontainers](./devcontainer.md) - Attach to a project's devcontainer
-- [Dashboard](./dashboard.md) - Startup dashboard with weather, git, PRs, disk
 - [Session Persistence](./session-persistence.md) - Detach and reattach to sessions (Experimental)
 - [Keybinding Editor](./keybinding-editor.md) - Visual keybinding browser and editor
+- [Dashboard](./dashboard.md) - Startup dashboard with weather, git, PRs, disk

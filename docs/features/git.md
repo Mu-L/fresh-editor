@@ -1,6 +1,13 @@
 # Git
 
-Fresh has built-in tooling for reviewing diffs, navigating git history, and jumping between changes. Everything here lives in the command palette — run **Keybinding Editor** from the palette to see or change the keys for any of these commands.
+> **Palette:** `Review Diff`, `Review: Commit Range`, `Review: PR Branch`, `Git Log`, `Next Diff Chunk`, `Previous Diff Chunk`. Run **Keybinding Editor** to see or change the keys.
+
+Fresh has built-in tooling for reviewing diffs, navigating git history, and jumping between changes. Everything here is driven from the command palette.
+
+*   **Review Diff** — unified buffer of working-tree hunks, with stage / unstage / discard on the cursor row.
+*   **Review: Commit Range / PR Branch** — same buffer against an arbitrary range or a branch's commits.
+*   **Git Log** — magit-style log with a live-preview diff panel on the right.
+*   **Diff Chunk Navigation** — jump between hunks from git *or* saved diff files with the same commands.
 
 ## Review Diff
 
@@ -8,7 +15,7 @@ Fresh has built-in tooling for reviewing diffs, navigating git history, and jump
 
 Entry points (all in the command palette):
 
-- **Review: Working Tree** — everything staged, unstaged, and untracked right now.
+- **Review Diff** — everything staged, unstaged, and untracked in the working tree right now.
 - **Review: Commit Range** — any range expression, e.g. `main..feature` or `HEAD~5...HEAD`.
 - **Review: PR Branch** — walk a branch's commits, with a side-by-side `git show` for the currently selected commit.
 
@@ -25,3 +32,5 @@ Inside a review:
 ## Diff Chunk Navigation
 
 The built-in **Diff Chunk Navigation** plugin merges two sources of hunks — the active git diff and any saved diff files — so you can jump between changes the same way in either context. It adds commands like **Next Diff Chunk** and **Previous Diff Chunk** to the palette.
+
+See it in action: [Review Diff](/blog/fresh-0.2.26/#review-diff-rewrite) and [Git Log](/blog/fresh-0.2.26/#git-log) in the 0.2.26 blog post.

@@ -1,6 +1,7 @@
 # Configuration
 
 - [Overview](./) - Layered configuration system
+- [Startup Script (init.ts)](./init.md) - Run TypeScript at startup for environment-dependent setup
 - [Keyboard](./keyboard.md) - Keyboard shortcuts and keybinding configuration
 
 ---
@@ -76,6 +77,8 @@ The `languages` map uses **deep merging with field-level override**:
 ```
 
 ### LSP Map (deep merge)
+
+> For the LSP feature itself (multi-server config, root markers, formatters, `only_features` / `except_features`, etc.), see [LSP Integration](../features/lsp.md). This section only covers how the `lsp` map is merged across config layers.
 
 The `lsp` map uses **deep merging with field-level override**:
 - Entries from all layers are combined
@@ -251,7 +254,7 @@ If the target directory doesn't exist when you save a file, Fresh prompts to cre
 
 ## Editor Settings Reference
 
-All settings can be changed via the Settings UI (command palette → "Open Settings").
+All settings can be changed via the Settings UI (run **Open Settings** from the palette).
 
 ### Display
 
