@@ -20,7 +20,7 @@ When it is disabled (the default), no windowing or GPU crates are compiled.
 ## Commit Hygiene
 
 - Commit messages must describe the **motivation / goal** of each commit, not just what changed
-- Separate bug fixes from new functionality into distinct commits
+- Prefer separate commits for unrelated bug fixes and new functionality when it's cheap to split; don't force a split when the fix is tightly coupled to the feature
 - If your change touches GUI code, also verify: `cargo check --all-targets --features gui`
 - Individual commits should pass `cargo check --all-targets`, `cargo fmt`, and `cargo clippy` (the crate denies several lints that `check` alone misses)
 - If ignoring a return value (let _ = ... pattern), be sure it's legit in that specific case, and that the return value indeed can be safely ignored.
