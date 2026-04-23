@@ -1,6 +1,6 @@
 # Release Notes
 
-## 0.2.26
+## 0.3.0
 
 This version brings major features and many quality-of-life improvements and bug fixes:
 
