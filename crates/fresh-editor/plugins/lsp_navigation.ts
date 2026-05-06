@@ -91,8 +91,6 @@ async function navigateToSymbol(bufferId: number, sym: SymbolItem): Promise<void
 }
 
 async function loadSymbols(filePath: string, language: string): Promise<SymbolItem[]> {
-  editor.setStatus("Loading symbols...");
-
   try {
     const uri = editor.pathToFileUri(filePath);
     const result = await editor.sendLspRequest(
@@ -105,16 +103,12 @@ async function loadSymbols(filePath: string, language: string): Promise<SymbolIt
 
     const symbols = parseSymbols(result);
 
-    editor.setStatus(`${symbols.length} symbols found`);
-
     if (symbols.length > 0 && cachedBufferId !== null) {
       await navigateToSymbol(cachedBufferId, symbols[0]);
     }
 
     return symbols;
   } catch (err) {
-    editor.setStatus(`Error: ${err}`);
-
     return [];
   }
 }
@@ -169,24 +163,18 @@ async function openSymbolsListHandler(): Promise<void> {
   cachedBufferId = editor.getActiveBufferId();
 
   if (cachedBufferId === null) {
-    editor.setStatus("No active buffer");
-
     return;
   }
 
   cachedLanguage = editor.getBufferInfo(cachedBufferId)?.language;
 
   if (!cachedLanguage) {
-    editor.setStatus("Language is not detected");
-
     return;
   }
 
   cachedFilePath = editor.getBufferPath(cachedBufferId);
 
   if (!cachedFilePath) {
-    editor.setStatus("Buffer has no file path");
-
     return;
   }
 
@@ -251,8 +239,8 @@ function parseSymbols(result: unknown): SymbolItem[] {
 }
 
 editor.registerCommand(
-  "Go to LSP Symbol",
-  "List document symbols from LSP and navigate to selected",
+  "%cmd.goto_lsp_symbol",
+  "%cmd.goto_lsp_symbol_desc",
   "goto_lsp_symbol",
 );
 
