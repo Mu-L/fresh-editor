@@ -1,5 +1,15 @@
 /// <reference path="./lib/fresh.d.ts" />
 
+class MyClass {
+  constructor() {
+    return true;
+  }
+
+  myMethod(a: number): number {
+    return a;
+  }
+}
+
 import { Finder, FilterSource, defaultFuzzyFilter } from "./lib/finder.ts";
 
 interface SymbolItem {
@@ -28,7 +38,7 @@ function getKindLabel(kind: number): string {
     case 8:
       return "field";
     case 9:
-      return "new";
+      return "construct";
     case 10:
       return "enum";
     case 11:
