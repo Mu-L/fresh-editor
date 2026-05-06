@@ -1,5 +1,21 @@
 # Release Notes
 
+## 0.3.5
+
+### Improvements
+
+* **Live Grep overlay polish**: Surrounding editor is now visibly dimmed; shortcut hints and the active provider moved into a toolbar row with plainer labels; match cap raised from 100 to 1000 (with a `1000+ matches` indicator); provider errors render as a disabled result entry instead of a silent "0 matches"; `ripgrep` provider renamed to `rg`.
+
+### Bug Fixes
+
+* **Live Grep on Windows returned no results**: `git grep` outputs `\r\n`; splitting on `\n` left a trailing `\r` that broke the result regex. Split on `\r?\n` instead.
+
+* **Plain `grep` provider was broken**: `--column` is a ripgrep-only flag and was being passed unconditionally. Removed.
+
+### Under the Hood
+
+* **Plugin API: `setPromptTitle` takes styled segments** (`{ text, style? }[]`) instead of a single string, so plugins control hint colouring directly instead of the renderer guessing structure from punctuation.
+
 ## 0.3.4
 
 ### Features
