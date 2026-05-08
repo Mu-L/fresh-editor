@@ -1862,7 +1862,7 @@ pub enum PluginCommand {
     /// Unregister a command by name
     UnregisterCommand { name: String },
 
-/// Create a new editor session rooted at `root`.
+    /// Create a new editor session rooted at `root`.
     ///
     /// `root` must be an absolute path; relative paths are rejected
     /// rather than silently joined onto the active session's root —
@@ -3215,7 +3215,7 @@ pub enum PluginCommand {
     /// Unix per `tokio::process::Child::start_kill`; children of the
     /// killed process may leak (see Q-C2 in
     /// `DEVCONTAINER_SPEC_GAP_PLAN.md`).
-KillHostProcess { process_id: u64 },
+    KillHostProcess { process_id: u64 },
 
     /// Mount a declarative widget panel inside an existing virtual
     /// buffer. The host renders the `WidgetSpec` and writes the
