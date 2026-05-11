@@ -1,9 +1,12 @@
-//! Active-buffer / active-split focus management on `Editor`.
+//! Active-buffer / active-split focus management.
 //!
-//! `set_active_buffer` and `focus_split` are the centralized methods for
-//! switching what the user is looking at. Both fire several invariants:
-//! split manager updates, tab list updates, file-explorer sync, terminal
-//! buffer resume, semantic-token cleanup for deleted buffers, etc.
+//! `set_active_buffer` and `focus_split` are the centralized methods
+//! for switching what the user is looking at. The Window-side methods
+//! own the per-window state mutation (split manager, view states, tab
+//! list, terminal-mode toggles, focus history); the thin `impl Editor`
+//! wrappers orchestrate the editor-scoped side-effects that can't yet
+//! be expressed without an `Editor` reference (terminal-buffer sync,
+//! file-explorer follow, plugin state snapshot, plugin hook).
 //!
 //! ## Pane-buffer invariant
 //!
@@ -14,78 +17,139 @@
 //! (notably `apply_event_to_active_buffer`) index one using the other
 //! without re-validating.
 //!
-//! All writes to this fact MUST go through [`Editor::set_pane_buffer`]
+//! All writes to this fact MUST go through [`Window::set_pane_buffer`]
 //! (or the higher-level wrappers `set_active_buffer` / `focus_split`
 //! that call it). Raw `split_manager.set_split_buffer` /
 //! `split_manager.set_active_buffer_id` calls updated only one side,
 //! which caused issue #1620 (a `None.unwrap()` panic when clicking
 //! after a buffer was closed from another split).
 
+use super::window::Window;
 use super::*;
 
-impl Editor {
-    // `set_pane_buffer` moved to `impl Window`. Editor callers reach
-    // it via `self.active_window_mut().set_pane_buffer(...)`.
+/// Result of [`Window::set_active_buffer`] describing the side-effects
+/// the Editor orchestrator must apply after the per-window state has
+/// already been mutated.
+///
+/// The Window method drains all the per-window work (focus loss, prompt
+/// cancel, split/view-state updates, terminal-mode toggles, tab
+/// visibility) directly. The fields below flag deferred cross-cutting
+/// effects that the Editor wrapper handles, since they reach state
+/// outside the Window (filesystem, plugin runtime, file-explorer
+/// follow target).
+#[must_use]
+pub(super) struct ActiveBufferChange {
+    pub buffer_id: BufferId,
+    /// Switched to a terminal buffer in read-only view mode (i.e.
+    /// not resuming live terminal input). The Editor must sync the
+    /// terminal's backing file into the buffer.
+    pub sync_terminal_readonly: bool,
+    /// Caller should ask the file explorer to follow the new active
+    /// file. Already gated by `file_explorer_visible`,
+    /// `config.file_explorer.follow_active_buffer`, and "key context
+    /// isn't the file explorer itself."
+    pub sync_file_explorer: bool,
+}
 
-    /// Set the active buffer and trigger all necessary side effects
+/// Result of [`Window::focus_split`].
+#[must_use]
+pub(super) enum FocusSplitOutcome {
+    /// Click was on a non-scrollable buffer-group panel, or the
+    /// inner-leaf focus path completed without changing the active
+    /// pane-buffer. No further work for Editor.
+    Handled,
+    /// "Same split, different buffer" — fall through to the full
+    /// active-buffer orchestration so the deferred deps (terminal
+    /// sync, file-explorer follow, plugin snapshot/hook) fire.
+    DelegateToActiveBuffer(BufferId),
+}
+
+impl Editor {
+    /// Set the active buffer and trigger all necessary side effects.
     ///
-    /// This is the centralized method for switching buffers. It:
-    /// - Updates split manager (single source of truth for active buffer)
-    /// - Adds buffer to active split's tabs (if not already there)
-    /// - Syncs file explorer to the new active file (if visible)
-    ///
-    /// Use this instead of directly calling split_manager.set_active_buffer_id()
-    /// to ensure all side effects happen consistently.
+    /// This is the centralized method for switching buffers. Window-side
+    /// state mutation lives in [`Window::set_active_buffer`]; this thin
+    /// wrapper handles the editor-scoped follow-ups.
     pub(super) fn set_active_buffer(&mut self, buffer_id: BufferId) {
+        let Some(change) = self.active_window_mut().set_active_buffer(buffer_id) else {
+            return;
+        };
+        self.apply_active_buffer_change(change);
+    }
+
+    fn apply_active_buffer_change(&mut self, change: ActiveBufferChange) {
+        if change.sync_terminal_readonly {
+            self.sync_terminal_to_buffer(change.buffer_id);
+        }
+        if change.sync_file_explorer {
+            self.sync_file_explorer_to_active_file();
+        }
+        // Update plugin state snapshot BEFORE firing the hook so that
+        // the handler sees the new active buffer, not the old one.
+        #[cfg(feature = "plugins")]
+        self.update_plugin_state_snapshot();
+        self.plugin_manager.read().unwrap().run_hook(
+            "buffer_activated",
+            crate::services::plugins::hooks::HookArgs::BufferActivated {
+                buffer_id: change.buffer_id,
+            },
+        );
+    }
+
+    /// Focus a split and its buffer, handling all side effects including
+    /// terminal mode. Window-side body in [`Window::focus_split`].
+    pub(super) fn focus_split(&mut self, split_id: LeafId, buffer_id: BufferId) {
+        match self.active_window_mut().focus_split(split_id, buffer_id) {
+            FocusSplitOutcome::Handled => {}
+            FocusSplitOutcome::DelegateToActiveBuffer(target) => {
+                self.set_active_buffer(target);
+            }
+        }
+    }
+}
+
+impl Window {
+    /// Window-side body of `set_active_buffer`. Mutates per-window state
+    /// (focus loss, prompt cancel, split manager, view-state, terminal
+    /// mode toggle, tab visibility) and returns an [`ActiveBufferChange`]
+    /// describing the deferred Editor-side side-effects, or `None` if
+    /// the requested buffer is already active.
+    pub(super) fn set_active_buffer(&mut self, buffer_id: BufferId) -> Option<ActiveBufferChange> {
         if self.active_buffer() == buffer_id {
-            return; // No change
+            return None;
         }
 
         // Dismiss transient popups and clear hover state when switching buffers
-        self.active_window_mut().on_editor_focus_lost();
+        self.on_editor_focus_lost();
 
         // Cancel search/replace prompts when switching buffers
         // (they are buffer-specific and don't make sense across buffers)
-        self.active_window_mut().cancel_search_prompt_if_active();
+        self.cancel_search_prompt_if_active();
 
         // Track the previous buffer for "Switch to Previous Tab" command
         let previous = self.active_buffer();
 
         // If leaving a terminal buffer while in terminal mode, remember it should resume
-        if self.active_window().terminal_mode && self.active_window().is_terminal_buffer(previous) {
-            self.active_window_mut()
-                .terminal_mode_resume
-                .insert(previous);
-            self.active_window_mut().terminal_mode = false;
-            self.active_window_mut().key_context = crate::input::keybindings::KeyContext::Normal;
+        if self.terminal_mode && self.is_terminal_buffer(previous) {
+            self.terminal_mode_resume.insert(previous);
+            self.terminal_mode = false;
+            self.key_context = crate::input::keybindings::KeyContext::Normal;
         }
 
         // Capture the previous focus target BEFORE set_pane_buffer runs,
         // so the LRU records the right thing.
-        let active_split = self
-            .windows
-            .get(&self.active_window)
-            .and_then(|w| w.splits.as_ref())
-            .map(|(mgr, _)| mgr)
-            .expect("active window must have a populated split layout")
-            .active_split();
-        let previous_target = self
-            .windows
-            .get(&self.active_window)
-            .and_then(|w| w.splits.as_ref())
-            .map(|(_, vs)| vs)
-            .expect("active window must have a populated split layout")
-            .get(&active_split)
-            .map(|vs| vs.active_target());
+        let (mgr, vs) = self
+            .splits
+            .as_ref()
+            .expect("active window must have a populated split layout");
+        let active_split = mgr.active_split();
+        let previous_target = vs.get(&active_split).map(|vs| vs.active_target());
 
         // Atomic pane-buffer update: tree + SVS in lockstep.
-        self.active_window_mut()
-            .set_pane_buffer(active_split, buffer_id);
+        self.set_pane_buffer(active_split, buffer_id);
 
         if let Some(view_state) = self
-            .windows
-            .get_mut(&self.active_window)
-            .and_then(|w| w.split_view_states_mut())
+            .split_view_states_mut()
             .expect("active window must have a populated split layout")
             .get_mut(&active_split)
         {
@@ -98,18 +162,12 @@ impl Editor {
         }
 
         // If switching to a terminal buffer that should resume terminal mode, re-enter it
-        if self
-            .active_window()
-            .terminal_mode_resume
-            .contains(&buffer_id)
-            && self.active_window().is_terminal_buffer(buffer_id)
-        {
-            self.active_window_mut().terminal_mode = true;
-            self.active_window_mut().key_context = crate::input::keybindings::KeyContext::Terminal;
-        } else if self.active_window().is_terminal_buffer(buffer_id) {
-            // Switching to terminal in read-only mode - sync buffer to show current terminal content
-            // This ensures the backing file content and cursor position are up to date
-            self.sync_terminal_to_buffer(buffer_id);
+        let resume_terminal_mode =
+            self.terminal_mode_resume.contains(&buffer_id) && self.is_terminal_buffer(buffer_id);
+        let sync_terminal_readonly = !resume_terminal_mode && self.is_terminal_buffer(buffer_id);
+        if resume_terminal_mode {
+            self.terminal_mode = true;
+            self.key_context = crate::input::keybindings::KeyContext::Terminal;
         }
 
         // Window resize events only resize terminals that are currently the
@@ -118,53 +176,41 @@ impl Editor {
         // sees the new size, so its PTY child keeps reporting stale
         // dimensions when the user switches back. Re-running the visible
         // resize here picks up the now-revealed terminal. Issue #1795.
-        if self.active_window().is_terminal_buffer(buffer_id) {
-            self.active_window_mut().resize_visible_terminals();
+        if self.is_terminal_buffer(buffer_id) {
+            self.resize_visible_terminals();
         }
 
         // Ensure the newly active tab is visible
-        let tabs_width = self.active_window().effective_tabs_width();
-        self.active_window_mut()
-            .ensure_active_tab_visible(active_split, buffer_id, tabs_width);
+        let tabs_width = self.effective_tabs_width();
+        self.ensure_active_tab_visible(active_split, buffer_id, tabs_width);
 
-        if self.file_explorer_visible()
-            && self.config.file_explorer.follow_active_buffer
-            && self.active_window_mut().key_context
-                != crate::input::keybindings::KeyContext::FileExplorer
-        {
-            self.sync_file_explorer_to_active_file();
-        }
+        let sync_file_explorer = self.file_explorer_visible
+            && self.resources.config.file_explorer.follow_active_buffer
+            && self.key_context != crate::input::keybindings::KeyContext::FileExplorer;
 
-        // Update plugin state snapshot BEFORE firing the hook so that
-        // the handler sees the new active buffer, not the old one.
-        #[cfg(feature = "plugins")]
-        self.update_plugin_state_snapshot();
-
-        // Emit buffer_activated hook for plugins
-        self.plugin_manager.read().unwrap().run_hook(
-            "buffer_activated",
-            crate::services::plugins::hooks::HookArgs::BufferActivated { buffer_id },
-        );
+        Some(ActiveBufferChange {
+            buffer_id,
+            sync_terminal_readonly,
+            sync_file_explorer,
+        })
     }
 
-    /// Focus a split and its buffer, handling all side effects including terminal mode.
-    ///
-    /// This is the primary method for switching focus between splits via mouse clicks.
-    /// It handles:
-    /// - Exiting terminal mode when leaving a terminal buffer
-    /// - Updating split manager state
-    /// - Managing tab state and previous buffer tracking
-    /// - Syncing file explorer
-    ///
-    /// Use this instead of calling set_active_split directly when switching focus.
-    pub(super) fn focus_split(&mut self, split_id: LeafId, buffer_id: BufferId) {
+    /// Window-side body of `focus_split`. Returns a [`FocusSplitOutcome`]
+    /// indicating whether the caller should fall through to the full
+    /// active-buffer orchestration (for the "same split, different
+    /// buffer" branch which needs the deferred Editor side-effects).
+    pub(super) fn focus_split(
+        &mut self,
+        split_id: LeafId,
+        buffer_id: BufferId,
+    ) -> FocusSplitOutcome {
         // Fixed buffer-group panels (toolbars, headers, footers) aren't focus
         // targets: focusing them would route keyboard input at an invisible
         // cursor. Plugins can still detect clicks via the mouse_click hook,
         // which fires in the click handlers before reaching here. Scrollable
         // panels still receive focus even with a hidden cursor.
-        if self.active_window().is_non_scrollable_buffer(buffer_id) {
-            return;
+        if self.is_non_scrollable_buffer(buffer_id) {
+            return FocusSplitOutcome::Handled;
         }
 
         // Clicking a buffer pane (e.g. a tab) explicitly moves focus to
@@ -173,18 +219,15 @@ impl Editor {
         // subsequent keystrokes target the buffer. The terminal branch
         // below can still upgrade to KeyContext::Terminal when needed.
         // Issue #1540.
-        if self.active_window_mut().key_context
-            == crate::input::keybindings::KeyContext::FileExplorer
-        {
-            self.active_window_mut().key_context = crate::input::keybindings::KeyContext::Normal;
+        if self.key_context == crate::input::keybindings::KeyContext::FileExplorer {
+            self.key_context = crate::input::keybindings::KeyContext::Normal;
         }
 
         let previous_split = self
-            .windows
-            .get(&self.active_window)
-            .and_then(|w| w.splits.as_ref())
-            .map(|(mgr, _)| mgr)
+            .splits
+            .as_ref()
             .expect("active window must have a populated split layout")
+            .0
             .active_split();
         let previous_buffer = self.active_buffer(); // Get BEFORE changing split
         let split_changed = previous_split != split_id;
@@ -192,8 +235,7 @@ impl Editor {
         // Preview is anchored to the split it was opened in. Moving focus to
         // a different split commits the preview — walking away is commitment.
         if split_changed {
-            self.active_window_mut()
-                .promote_preview_if_not_in_split(split_id);
+            self.promote_preview_if_not_in_split(split_id);
         }
 
         // If `split_id` is not in the main split tree, it must be an inner
@@ -202,19 +244,17 @@ impl Editor {
         // split remains active). Instead, find the host split and update
         // its `focused_group_leaf` marker so `active_buffer()` routes to
         // the clicked inner panel buffer.
-        if !self
-            .windows
-            .get(&self.active_window)
-            .and_then(|w| w.splits.as_ref())
-            .map(|(mgr, _)| mgr)
+        let in_main_tree = self
+            .splits
+            .as_ref()
             .expect("active window must have a populated split layout")
+            .0
             .root()
             .leaf_split_ids()
-            .contains(&split_id)
-        {
+            .contains(&split_id);
+        if !in_main_tree {
             // Find which group contains this inner leaf.
-            let host_split = self
-                .active_window()
+            let group_leaf_id = self
                 .grouped_subtrees
                 .iter()
                 .find(|(_, node)| {
@@ -224,29 +264,24 @@ impl Editor {
                         false
                     }
                 })
-                .map(|(group_leaf_id, _)| *group_leaf_id)
-                .and_then(|group_leaf_id| {
-                    // Find the split whose open_buffers has this group tab.
-                    self.windows
-                        .get(&self.active_window)
-                        .and_then(|w| w.splits.as_ref())
-                        .map(|(_, vs)| vs)
-                        .expect("active window must have a populated split layout")
-                        .iter()
-                        .find(|(_, vs)| vs.has_group(group_leaf_id))
-                        .map(|(sid, _)| (*sid, group_leaf_id))
-                });
+                .map(|(group_leaf_id, _)| *group_leaf_id);
+            let host_split = group_leaf_id.and_then(|group_leaf_id| {
+                // Find the split whose open_buffers has this group tab.
+                self.splits
+                    .as_ref()
+                    .expect("active window must have a populated split layout")
+                    .1
+                    .iter()
+                    .find(|(_, vs)| vs.has_group(group_leaf_id))
+                    .map(|(sid, _)| (*sid, group_leaf_id))
+            });
 
             if let Some((host, group_leaf_id)) = host_split {
-                self.windows
-                    .get_mut(&self.active_window)
-                    .and_then(|w| w.split_manager_mut())
+                self.split_manager_mut()
                     .expect("active window must have a populated split layout")
                     .set_active_split(host);
                 if let Some(vs) = self
-                    .windows
-                    .get_mut(&self.active_window)
-                    .and_then(|w| w.split_view_states_mut())
+                    .split_view_states_mut()
                     .expect("active window must have a populated split layout")
                     .get_mut(&host)
                 {
@@ -254,17 +289,14 @@ impl Editor {
                     vs.focused_group_leaf = Some(split_id);
                 }
                 if let Some(inner_vs) = self
-                    .windows
-                    .get_mut(&self.active_window)
-                    .and_then(|w| w.split_view_states_mut())
+                    .split_view_states_mut()
                     .expect("active window must have a populated split layout")
                     .get_mut(&split_id)
                 {
                     inner_vs.switch_buffer(buffer_id);
                 }
-                self.active_window_mut().key_context =
-                    crate::input::keybindings::KeyContext::Normal;
-                return;
+                self.key_context = crate::input::keybindings::KeyContext::Normal;
+                return FocusSplitOutcome::Handled;
             }
             // Fall through: we couldn't find the group; the original path
             // will set_active_split which will fail silently.
@@ -272,18 +304,13 @@ impl Editor {
 
         if split_changed {
             // Switching to a different split - exit terminal mode if active
-            if self.active_window().terminal_mode
-                && self.active_window().is_terminal_buffer(previous_buffer)
-            {
-                self.active_window_mut().terminal_mode = false;
-                self.active_window_mut().key_context =
-                    crate::input::keybindings::KeyContext::Normal;
+            if self.terminal_mode && self.is_terminal_buffer(previous_buffer) {
+                self.terminal_mode = false;
+                self.key_context = crate::input::keybindings::KeyContext::Normal;
             }
 
             // Update split manager to focus this split
-            self.windows
-                .get_mut(&self.active_window)
-                .and_then(|w| w.split_manager_mut())
+            self.split_manager_mut()
                 .expect("active window must have a populated split layout")
                 .set_active_split(split_id);
 
@@ -291,30 +318,23 @@ impl Editor {
             // the previous pair of split_manager.set_active_buffer_id +
             // view_state.switch_buffer that could desync if either leg
             // silently no-op'd (issue #1620).
-            self.active_window_mut()
-                .set_pane_buffer(split_id, buffer_id);
+            self.set_pane_buffer(split_id, buffer_id);
 
             // Set key context based on target buffer type
-            if self.active_window().is_terminal_buffer(buffer_id) {
-                self.active_window_mut().terminal_mode = true;
-                self.active_window_mut().key_context =
-                    crate::input::keybindings::KeyContext::Terminal;
+            if self.is_terminal_buffer(buffer_id) {
+                self.terminal_mode = true;
+                self.key_context = crate::input::keybindings::KeyContext::Terminal;
             } else {
                 // Ensure key context is Normal when focusing a non-terminal buffer
                 // This handles the case of clicking on editor from FileExplorer context
-                self.active_window_mut().key_context =
-                    crate::input::keybindings::KeyContext::Normal;
+                self.key_context = crate::input::keybindings::KeyContext::Normal;
             }
 
             // Handle buffer change side effects
             if previous_buffer != buffer_id {
-                self.active_window_mut()
-                    .position_history
-                    .commit_pending_movement();
+                self.position_history.commit_pending_movement();
                 if let Some(view_state) = self
-                    .windows
-                    .get_mut(&self.active_window)
-                    .and_then(|w| w.split_view_states_mut())
+                    .split_view_states_mut()
                     .expect("active window must have a populated split layout")
                     .get_mut(&split_id)
                 {
@@ -324,9 +344,13 @@ impl Editor {
                 // Note: We don't sync file explorer here to avoid flicker during split focus changes.
                 // File explorer syncs when explicitly focused via focus_file_explorer().
             }
+            FocusSplitOutcome::Handled
         } else {
-            // Same split, different buffer (tab switch) - use set_active_buffer for terminal resume
-            self.set_active_buffer(buffer_id);
+            // Same split, different buffer (tab switch) — defer to the
+            // full set_active_buffer orchestration so the deferred deps
+            // (terminal sync, file-explorer follow, plugin snapshot/hook)
+            // run.
+            FocusSplitOutcome::DelegateToActiveBuffer(buffer_id)
         }
     }
 }

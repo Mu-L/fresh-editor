@@ -952,7 +952,6 @@ impl Editor {
         Ok(())
     }
 
-
     /// Total number of open buffers across the workspace. Test
     /// support for `EditorTestApi::buffer_count` (Phase 7 of the
     /// scenario migration).

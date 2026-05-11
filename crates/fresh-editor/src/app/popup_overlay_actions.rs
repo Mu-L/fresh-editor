@@ -176,7 +176,6 @@ impl Editor {
         }
     }
 
-
     /// Clear all popups
     pub fn clear_popups(&mut self) {
         let event = Event::ClearPopups;
@@ -597,7 +596,9 @@ impl Window {
         // reach back through `Editor::apply_event_to_active_buffer`.
         if let Some(handle) = self.hover.take_symbol_overlay() {
             let state = self.active_state_mut();
-            state.overlays.remove_by_handle(&handle, &mut state.marker_list);
+            state
+                .overlays
+                .remove_by_handle(&handle, &mut state.marker_list);
         }
         self.hover.set_symbol_range(None);
 

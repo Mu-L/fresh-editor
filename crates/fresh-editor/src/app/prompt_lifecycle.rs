@@ -386,7 +386,6 @@ impl Editor {
         }
     }
 
-
     /// Pre-fill the Open File prompt input with the current buffer directory
     pub(super) fn prefill_open_file_prompt(&mut self) {
         // With the native file browser, the directory is shown from file_open_state.current_dir
