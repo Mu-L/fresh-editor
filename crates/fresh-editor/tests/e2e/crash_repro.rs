@@ -862,132 +862,76 @@ fn test_review_diff_empty_repo_then_type_does_not_panic() {
         .unwrap();
 }
 
-/// Panic repro: issue #1939 — `fresh .` panics at render.rs:841:58 with
-/// "called `Option::unwrap()` on a `None` value".
+/// Panic repro: issue #1939.
 ///
-/// The crash site is `self.windows.get_mut(&self.active_window).unwrap()`
-/// in the `previous_viewports` update block — the active-window pointer
-/// references an id missing from the `windows` map. The reporter noticed
-/// the crash after some git manipulation in the project dir; the most
-/// plausible trigger is a stale or inconsistent `.fresh/windows.json`
-/// that the boot path tries to honor.
+/// The reporter ran `fresh 0.3.5` (post-v0.3.4 dev) and saw:
 ///
-/// These tests pin the boot-then-render path against the inconsistent
-/// shapes that can land on disk:
+///     thread 'main' panicked at crates/fresh-editor/src/app/render.rs:841:58:
+///     called `Option::unwrap()` on a `None` value
 ///
-///   1. `active` points to an id that isn't in `windows`.
-///   2. `windows` is empty but `active` is non-zero.
-///   3. The persisted active window's root no longer exists (the user's
-///      git rebase removed it).
+/// At v0.3.4, render.rs:841 is the status-bar context construction —
 ///
-/// Each case must boot the editor and run a render without panicking;
-/// the loader is expected to fall back to a fresh base window
-/// (`WindowId(1)` + process cwd) when the persisted envelope doesn't
-/// validate.
+///     state: self.buffers.get_mut(&active_buf).unwrap(),
+///
+/// — and column 58 lands on `.unwrap()`. The failing call is
+/// `self.buffers.get_mut(&active_buf)`, meaning `active_buffer()`
+/// returned a `BufferId` that isn't in `self.buffers`.
+///
+/// At HEAD the same site lives at `render.rs:1039` after buffers
+/// moved onto `Window`:
+///
+///     let __state = __win.buffers.get_mut(&active_buf).unwrap();
+///
+/// — same `.unwrap()`, same invariant hole. (My initial pass
+/// misread the panic location as `windows.get_mut(&self.active_window).unwrap()`
+/// and chased a workspace-restore-windows bug; that was wrong. This
+/// is a stale active-*buffer* id, not a stale active-*window* id.)
+///
+/// Root cause is the fallback branch of `Window::effective_active_pair`
+/// (`window.rs` around line 1725):
+///
+///     let outer_buf = mgr
+///         .active_buffer_id()
+///         .expect("Editor always has at least one buffer");
+///     (active_split, outer_buf)
+///
+/// — it returns `outer_buf` without checking
+/// `self.buffers.contains_key(&outer_buf)`. The group-tab branch right
+/// above it does validate (`self.buffers.contains_key(&inner_buf) &&
+/// inner_vs.keyed_states.contains_key(&inner_buf)`); the outer fallback
+/// does not. Whenever the split manager's active leaf points at a
+/// `BufferId` that's been removed from the window's `buffers` map, the
+/// next render unwraps `None` in the status-bar block.
+///
+/// This test puts the editor into that state directly (remove the
+/// active buffer from `window.buffers` while leaving the split manager's
+/// pointer untouched) and calls `render()`. Marked `#[should_panic]`
+/// because the bug is **not fixed at HEAD**: the test demonstrates that
+/// the panic still reproduces. Once `effective_active_pair`'s fallback
+/// is hardened to validate the id (or callers learn to keep the two
+/// maps in lock-step), drop `#[should_panic]` and the inverted message.
 #[test]
-fn test_issue_1939_persisted_active_id_missing_from_windows_list() {
-    let temp_dir = TempDir::new().unwrap();
-    let project_dir = temp_dir.path().join("project");
-    fs::create_dir(&project_dir).unwrap();
+#[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+fn test_issue_1939_active_buffer_id_missing_from_window_buffers() {
+    let mut harness = EditorTestHarness::with_temp_project(80, 24).unwrap();
 
-    // Hand-write a `.fresh/windows.json` whose `active` references an
-    // id absent from the `windows` list. This is the on-disk shape the
-    // production loader has to survive without panicking.
-    let fresh_dir = project_dir.join(".fresh");
-    fs::create_dir(&fresh_dir).unwrap();
-    let windows_json = serde_json::json!({
-        "active": 42,
-        "next_id": 43,
-        "windows": [
-            { "id": 7, "label": "stale", "root": project_dir.to_str().unwrap() }
-        ]
-    });
-    fs::write(
-        fresh_dir.join("windows.json"),
-        serde_json::to_vec_pretty(&windows_json).unwrap(),
-    )
-    .unwrap();
+    // The seed scratch buffer is active at boot; the split manager's
+    // active leaf points at its id. Removing it from `window.buffers`
+    // leaves the split manager unchanged — exactly the inconsistency
+    // `effective_active_pair`'s fallback can't tolerate.
+    let active_buf = harness.editor().active_buffer();
+    let removed = harness
+        .editor_mut()
+        .active_window_mut()
+        .buffers
+        .remove(&active_buf);
+    assert!(
+        removed.is_some(),
+        "precondition: active buffer must have been in window.buffers"
+    );
 
-    let mut harness = EditorTestHarness::with_config_and_working_dir(
-        80,
-        24,
-        Config::default(),
-        project_dir.clone(),
-    )
-    .expect("harness must boot despite corrupt windows.json");
-
-    // The render is what panicked in production (render.rs:841:58).
-    harness
-        .render()
-        .expect("render must not panic when persisted active id is missing");
-}
-
-#[test]
-fn test_issue_1939_persisted_windows_list_empty_with_nonzero_active() {
-    let temp_dir = TempDir::new().unwrap();
-    let project_dir = temp_dir.path().join("project");
-    fs::create_dir(&project_dir).unwrap();
-
-    let fresh_dir = project_dir.join(".fresh");
-    fs::create_dir(&fresh_dir).unwrap();
-    let windows_json = serde_json::json!({
-        "active": 3,
-        "next_id": 4,
-        "windows": []
-    });
-    fs::write(
-        fresh_dir.join("windows.json"),
-        serde_json::to_vec_pretty(&windows_json).unwrap(),
-    )
-    .unwrap();
-
-    let mut harness = EditorTestHarness::with_config_and_working_dir(
-        80,
-        24,
-        Config::default(),
-        project_dir.clone(),
-    )
-    .expect("harness must boot with empty persisted windows list");
-
-    harness
-        .render()
-        .expect("render must not panic when persisted windows list is empty");
-}
-
-#[test]
-fn test_issue_1939_persisted_active_root_does_not_exist() {
-    // Mirrors the reporter's situation: a previous Fresh session
-    // persisted a window rooted at a path that no longer exists (the
-    // branch was renamed / deleted via git). Boot must still succeed.
-    let temp_dir = TempDir::new().unwrap();
-    let project_dir = temp_dir.path().join("project");
-    fs::create_dir(&project_dir).unwrap();
-
-    let fresh_dir = project_dir.join(".fresh");
-    fs::create_dir(&fresh_dir).unwrap();
-    let stale_root = temp_dir.path().join("gone-after-rebase");
-    let windows_json = serde_json::json!({
-        "active": 2,
-        "next_id": 3,
-        "windows": [
-            { "id": 2, "label": "stale", "root": stale_root.to_str().unwrap() }
-        ]
-    });
-    fs::write(
-        fresh_dir.join("windows.json"),
-        serde_json::to_vec_pretty(&windows_json).unwrap(),
-    )
-    .unwrap();
-
-    let mut harness = EditorTestHarness::with_config_and_working_dir(
-        80,
-        24,
-        Config::default(),
-        project_dir.clone(),
-    )
-    .expect("harness must boot when persisted active window root is gone");
-
-    harness
-        .render()
-        .expect("render must not panic when persisted root no longer exists");
+    // The render panics at `__win.buffers.get_mut(&active_buf).unwrap()`
+    // (HEAD: render.rs:1039) — the same `.unwrap()` site reported as
+    // render.rs:841:58 at v0.3.4.
+    let _ = harness.render();
 }
