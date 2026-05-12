@@ -5304,93 +5304,90 @@ impl Window {
         }
 
         // Update cursor information for active buffer.
-        // Single &mut split across self.splits + self.buffers via direct
-        // field access (both are sibling fields on Window, so disjoint).
         let active_buf_id = snapshot.active_buffer_id;
-        let (buffers_mut, splits_mut) = self.buffers.parts_mut();
-        let (mgr_mut, vs_mut): (
-            &crate::view::split::SplitManager,
-            &std::collections::HashMap<LeafId, crate::view::split::SplitViewState>,
-        ) = splits_mut
-            .map(|(m, vs)| (&*m, &*vs))
+        let active_split_id = self
+            .buffers
+            .split_manager()
+            .map(|m| m.active_split())
             .expect("active window must have a populated split layout");
-        let active_split_id = mgr_mut.active_split();
-        if let Some(active_vs) = vs_mut.get(&active_split_id) {
-            // Primary cursor (from SplitViewState)
-            let active_cursors = &active_vs.cursors;
-            let primary = active_cursors.primary();
-            let primary_position = primary.position;
-            let primary_selection = primary.selection_range();
+        self.buffers
+            .with_all_mut(|buffers_mut, mgr, vs_map| {
+                let _ = mgr; // active_split_id was computed above
+                if let Some(active_vs) = vs_map.get(&active_split_id) {
+                    // Primary cursor (from SplitViewState)
+                    let active_cursors = &active_vs.cursors;
+                    let primary = active_cursors.primary();
+                    let primary_position = primary.position;
+                    let primary_selection = primary.selection_range();
 
-            snapshot.primary_cursor = Some(CursorInfo {
-                position: primary_position,
-                selection: primary_selection.clone(),
-            });
+                    snapshot.primary_cursor = Some(CursorInfo {
+                        position: primary_position,
+                        selection: primary_selection.clone(),
+                    });
 
-            // All cursors
-            snapshot.all_cursors = active_cursors
-                .iter()
-                .map(|(_, cursor)| CursorInfo {
-                    position: cursor.position,
-                    selection: cursor.selection_range(),
-                })
-                .collect();
+                    snapshot.all_cursors = active_cursors
+                        .iter()
+                        .map(|(_, cursor)| CursorInfo {
+                            position: cursor.position,
+                            selection: cursor.selection_range(),
+                        })
+                        .collect();
 
-            // Selected text from primary cursor (for clipboard plugin)
-            if let Some(range) = primary_selection {
-                if let Some(active_state) = buffers_mut.get_mut(&active_buf_id) {
-                    snapshot.selected_text =
-                        Some(active_state.get_text_range(range.start, range.end));
-                }
-            }
+                    // Selected text from primary cursor (for clipboard plugin)
+                    if let Some(range) = primary_selection {
+                        if let Some(active_state) = buffers_mut.get_mut(&active_buf_id) {
+                            snapshot.selected_text =
+                                Some(active_state.get_text_range(range.start, range.end));
+                        }
+                    }
 
-            // Viewport - get from SplitViewState (the authoritative source)
-            let top_line = buffers_mut.get(&active_buf_id).and_then(|state| {
-                if state.buffer.line_count().is_some() {
-                    Some(state.buffer.get_line_number(active_vs.viewport.top_byte))
+                    // Viewport — get from SplitViewState (the authoritative source)
+                    let top_line = buffers_mut.get(&active_buf_id).and_then(|state| {
+                        if state.buffer.line_count().is_some() {
+                            Some(state.buffer.get_line_number(active_vs.viewport.top_byte))
+                        } else {
+                            None
+                        }
+                    });
+                    snapshot.viewport = Some(ViewportInfo {
+                        top_byte: active_vs.viewport.top_byte,
+                        top_line,
+                        left_column: active_vs.viewport.left_column,
+                        width: active_vs.viewport.width,
+                        height: active_vs.viewport.height,
+                    });
                 } else {
-                    None
+                    snapshot.primary_cursor = None;
+                    snapshot.all_cursors.clear();
+                    snapshot.viewport = None;
+                    snapshot.selected_text = None;
                 }
-            });
-            snapshot.viewport = Some(ViewportInfo {
-                top_byte: active_vs.viewport.top_byte,
-                top_line,
-                left_column: active_vs.viewport.left_column,
-                width: active_vs.viewport.width,
-                height: active_vs.viewport.height,
-            });
-        } else {
-            snapshot.primary_cursor = None;
-            snapshot.all_cursors.clear();
-            snapshot.viewport = None;
-            snapshot.selected_text = None;
-        }
 
-        // Per-split snapshot — every split's active buffer + viewport
-        // so plugins (multi-split flash labels, sync decorations, etc.)
-        // can iterate every visible buffer instead of only the active one.
-        snapshot.splits.clear();
-        for (leaf_id, vs) in vs_mut {
-            let buf_id = vs.active_buffer;
-            let top_line = buffers_mut.get(&buf_id).and_then(|state| {
-                if state.buffer.line_count().is_some() {
-                    Some(state.buffer.get_line_number(vs.viewport.top_byte))
-                } else {
-                    None
+                // Per-split snapshot
+                snapshot.splits.clear();
+                for (leaf_id, vs) in vs_map.iter() {
+                    let buf_id = vs.active_buffer;
+                    let top_line = buffers_mut.get(&buf_id).and_then(|state| {
+                        if state.buffer.line_count().is_some() {
+                            Some(state.buffer.get_line_number(vs.viewport.top_byte))
+                        } else {
+                            None
+                        }
+                    });
+                    snapshot.splits.push(fresh_core::api::SplitSnapshot {
+                        split_id: leaf_id.0 .0,
+                        buffer_id: buf_id,
+                        viewport: ViewportInfo {
+                            top_byte: vs.viewport.top_byte,
+                            top_line,
+                            left_column: vs.viewport.left_column,
+                            width: vs.viewport.width,
+                            height: vs.viewport.height,
+                        },
+                    });
                 }
-            });
-            snapshot.splits.push(fresh_core::api::SplitSnapshot {
-                split_id: leaf_id.0 .0,
-                buffer_id: buf_id,
-                viewport: ViewportInfo {
-                    top_byte: vs.viewport.top_byte,
-                    top_line,
-                    left_column: vs.viewport.left_column,
-                    width: vs.viewport.width,
-                    height: vs.viewport.height,
-                },
-            });
-        }
+            })
+            .expect("active window must have a populated split layout");
 
         // Mirror the active session's plugin_state into the snapshot
         // so getWindowState reads cheaply. Cloning is fine here: the
@@ -5428,12 +5425,15 @@ impl Window {
         }
 
         // Merge from Rust-side plugin_state (source of truth for persisted state)
-        if let Some(active_vs) = vs_mut.get(&active_split_id) {
-            for (buffer_id, buf_state) in &active_vs.keyed_states {
-                if !buf_state.plugin_state.is_empty() {
-                    let entry = snapshot.plugin_view_states.entry(*buffer_id).or_default();
-                    for (key, value) in &buf_state.plugin_state {
-                        entry.entry(key.clone()).or_insert_with(|| value.clone());
+        if let Some(vs_map) = self.buffers.split_view_states() {
+            if let Some(active_vs) = vs_map.get(&active_split_id) {
+                for (buffer_id, buf_state) in &active_vs.keyed_states {
+                    if !buf_state.plugin_state.is_empty() {
+                        let entry =
+                            snapshot.plugin_view_states.entry(*buffer_id).or_default();
+                        for (key, value) in &buf_state.plugin_state {
+                            entry.entry(key.clone()).or_insert_with(|| value.clone());
+                        }
                     }
                 }
             }

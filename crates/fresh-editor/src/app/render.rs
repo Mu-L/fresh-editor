@@ -381,109 +381,108 @@ impl Editor {
                     .windows
                     .get_mut(&__active_id)
                     .expect("active window must exist");
-                let (__bufs, __sp) = __win.buffers.parts_mut();
-                if let Some(state) = __bufs.get_mut(&buffer_id) {
-                    // Fire render_start hook once per buffer
-                    self.plugin_manager.read().unwrap().run_hook(
-                        "render_start",
-                        crate::services::plugins::hooks::HookArgs::RenderStart { buffer_id },
-                    );
-
-                    // Fire view_transform_request hook with base tokens
-                    // This allows plugins to transform the view (e.g., soft breaks for markdown)
-                    let visible_count = split_area.height as usize;
-                    let is_binary = state.buffer.is_binary();
-                    let line_ending = state.buffer.line_ending();
-                    let base_tokens =
-                        crate::view::ui::split_rendering::SplitRenderer::build_base_tokens_for_hook(
-                            &mut state.buffer,
-                            viewport_top_byte,
-                            self.config.editor.estimated_line_length,
-                            visible_count,
-                            is_binary,
-                            line_ending,
+                // Take a disjoint mut borrow on `seen_byte_ranges` (a sibling
+                // field on Window, not part of WindowBuffers) so the closure
+                // below can update it alongside the buffer + view-state
+                // mutations.
+                let seen_ranges_for_win = &mut __win.seen_byte_ranges;
+                let plugin_manager = &self.plugin_manager;
+                let estimated_line_length = self.config.editor.estimated_line_length;
+                let added = __win
+                    .buffers
+                    .with_buffer_and_view_states(buffer_id, |state, vs_map| {
+                        plugin_manager.read().unwrap().run_hook(
+                            "render_start",
+                            crate::services::plugins::hooks::HookArgs::RenderStart { buffer_id },
                         );
-                    let viewport_start = viewport_top_byte;
-                    let viewport_end = base_tokens
-                        .last()
-                        .and_then(|t| t.source_offset)
-                        .unwrap_or(viewport_start);
-                    let __vs_map = &mut __sp
-                        .expect("active window must have a populated split layout")
-                        .1;
-                    let cursor_positions: Vec<usize> = __vs_map
-                        .get(&split_id)
-                        .map(|vs| vs.cursors.iter().map(|(_, c)| c.position).collect())
-                        .unwrap_or_default();
-                    self.plugin_manager.read().unwrap().run_hook(
-                        "view_transform_request",
-                        crate::services::plugins::hooks::HookArgs::ViewTransformRequest {
-                            buffer_id,
-                            split_id: split_id.into(),
-                            viewport_start,
-                            viewport_end,
-                            tokens: base_tokens,
-                            cursor_positions,
-                        },
-                    );
 
-                    // We just sent fresh base tokens to the plugin, so any
-                    // future SubmitViewTransform from this request will be valid.
-                    // Clear the stale flag so the response will be accepted.
-                    if let Some(vs) = __vs_map.get_mut(&split_id) {
-                        vs.view_transform_stale = false;
-                    }
-
-                    // Use the split area height as visible line count
-                    let visible_count = split_area.height as usize;
-                    let top_byte = viewport_top_byte;
-
-                    // Get or create the seen byte ranges set for this buffer.
-                    // Use direct __win field access (not active_window_mut())
-                    // because __win is already held above; re-locking via the
-                    // accessor would re-borrow self.windows.
-                    let seen_byte_ranges = __win.seen_byte_ranges.entry(buffer_id).or_default();
-
-                    // Collect only NEW lines (not seen before based on byte range)
-                    let mut new_lines: Vec<crate::services::plugins::hooks::LineInfo> = Vec::new();
-                    let mut line_number = state.buffer.get_line_number(top_byte);
-                    let mut iter = state
-                        .buffer
-                        .line_iterator(top_byte, self.config.editor.estimated_line_length);
-
-                    for _ in 0..visible_count {
-                        if let Some((line_start, line_content)) = iter.next_line() {
-                            let byte_end = line_start + line_content.len();
-                            let byte_range = (line_start, byte_end);
-
-                            // Only add if this byte range hasn't been seen before
-                            if !seen_byte_ranges.contains(&byte_range) {
-                                new_lines.push(crate::services::plugins::hooks::LineInfo {
-                                    line_number,
-                                    byte_start: line_start,
-                                    byte_end,
-                                    content: line_content,
-                                });
-                                seen_byte_ranges.insert(byte_range);
-                            }
-                            line_number += 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    // Send batched hook if there are new lines
-                    if !new_lines.is_empty() {
-                        total_new_lines += new_lines.len();
-                        self.plugin_manager.read().unwrap().run_hook(
-                            "lines_changed",
-                            crate::services::plugins::hooks::HookArgs::LinesChanged {
+                        let visible_count = split_area.height as usize;
+                        let is_binary = state.buffer.is_binary();
+                        let line_ending = state.buffer.line_ending();
+                        let base_tokens =
+                            crate::view::ui::split_rendering::SplitRenderer::build_base_tokens_for_hook(
+                                &mut state.buffer,
+                                viewport_top_byte,
+                                estimated_line_length,
+                                visible_count,
+                                is_binary,
+                                line_ending,
+                            );
+                        let viewport_start = viewport_top_byte;
+                        let viewport_end = base_tokens
+                            .last()
+                            .and_then(|t| t.source_offset)
+                            .unwrap_or(viewport_start);
+                        let cursor_positions: Vec<usize> = vs_map
+                            .get(&split_id)
+                            .map(|vs| vs.cursors.iter().map(|(_, c)| c.position).collect())
+                            .unwrap_or_default();
+                        plugin_manager.read().unwrap().run_hook(
+                            "view_transform_request",
+                            crate::services::plugins::hooks::HookArgs::ViewTransformRequest {
                                 buffer_id,
-                                lines: new_lines,
+                                split_id: split_id.into(),
+                                viewport_start,
+                                viewport_end,
+                                tokens: base_tokens,
+                                cursor_positions,
                             },
                         );
-                    }
-                }
+
+                        // Plugin saw fresh base tokens; future
+                        // SubmitViewTransform from this request is valid.
+                        if let Some(vs) = vs_map.get_mut(&split_id) {
+                            vs.view_transform_stale = false;
+                        }
+
+                        let top_byte = viewport_top_byte;
+                        let seen_byte_ranges =
+                            seen_ranges_for_win.entry(buffer_id).or_default();
+
+                        let mut new_lines: Vec<
+                            crate::services::plugins::hooks::LineInfo,
+                        > = Vec::new();
+                        let mut line_number = state.buffer.get_line_number(top_byte);
+                        let mut iter = state
+                            .buffer
+                            .line_iterator(top_byte, estimated_line_length);
+
+                        for _ in 0..visible_count {
+                            if let Some((line_start, line_content)) = iter.next_line() {
+                                let byte_end = line_start + line_content.len();
+                                let byte_range = (line_start, byte_end);
+
+                                if !seen_byte_ranges.contains(&byte_range) {
+                                    new_lines.push(
+                                        crate::services::plugins::hooks::LineInfo {
+                                            line_number,
+                                            byte_start: line_start,
+                                            byte_end,
+                                            content: line_content,
+                                        },
+                                    );
+                                    seen_byte_ranges.insert(byte_range);
+                                }
+                                line_number += 1;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        let count = new_lines.len();
+                        if !new_lines.is_empty() {
+                            plugin_manager.read().unwrap().run_hook(
+                                "lines_changed",
+                                crate::services::plugins::hooks::HookArgs::LinesChanged {
+                                    buffer_id,
+                                    lines: new_lines,
+                                },
+                            );
+                        }
+                        count
+                    })
+                    .unwrap_or(0);
+                total_new_lines += added;
             }
             let hooks_elapsed = hooks_start.elapsed();
             tracing::trace!(
@@ -1027,46 +1026,44 @@ impl Editor {
                 .windows
                 .get_mut(&__active_id)
                 .expect("active window must exist");
-            let (__bufs_sb, __sp_sb) = __win.buffers.parts_mut();
-            let __state = __bufs_sb.get_mut(&active_buf).unwrap();
-            let status_cursors = __sp_sb
-                .as_ref()
-                .map(|(_, vs)| vs)
-                .and_then(|vs| vs.get(&active_split))
-                .map(|vs| &vs.cursors)
-                .unwrap_or(&default_cursors);
-            let mut status_ctx = crate::view::ui::status_bar::StatusBarContext {
-                state: __state,
-                cursors: status_cursors,
-                status_message: &status_message,
-                plugin_status_message: &plugin_status_message,
-                lsp_status: &lsp_status,
-                lsp_indicator_state,
-                theme: &theme,
-                display_name: &display_name,
-                keybindings: &keybindings_cloned,
-                chord_state: &chord_state_cloned,
-                update_available: update_available.as_deref(),
-                warning_level,
-                general_warning_count,
-                hover: status_bar_hover,
-                remote_connection: remote_connection.as_deref(),
-                session_name: session_name.as_deref(),
-                read_only: is_read_only,
-                remote_state_override: self.remote_indicator_override.as_ref(),
-                is_synthetic_placeholder,
-                // Filled in by `render_status` from the user's
-                // status_bar config; the value here is just a
-                // safe default for the rare path that builds the
-                // ctx but doesn't run `render_status`.
-                remote_indicator_on_bar: false,
-            };
-            let status_bar_layout = StatusBarRenderer::render_status_bar(
-                frame,
-                main_chunks[status_bar_idx],
-                &mut status_ctx,
-                &self.config.editor.status_bar,
-            );
+            let status_bar_layout = __win
+                .buffers
+                .with_buffer_mut_and_split_ref(active_buf, active_split, |state, vs| {
+                    let cursors = vs.map(|v| &v.cursors).unwrap_or(&default_cursors);
+                    let mut status_ctx = crate::view::ui::status_bar::StatusBarContext {
+                        state,
+                        cursors,
+                        status_message: &status_message,
+                        plugin_status_message: &plugin_status_message,
+                        lsp_status: &lsp_status,
+                        lsp_indicator_state,
+                        theme: &theme,
+                        display_name: &display_name,
+                        keybindings: &keybindings_cloned,
+                        chord_state: &chord_state_cloned,
+                        update_available: update_available.as_deref(),
+                        warning_level,
+                        general_warning_count,
+                        hover: status_bar_hover,
+                        remote_connection: remote_connection.as_deref(),
+                        session_name: session_name.as_deref(),
+                        read_only: is_read_only,
+                        remote_state_override: self.remote_indicator_override.as_ref(),
+                        is_synthetic_placeholder,
+                        // Filled in by `render_status` from the user's
+                        // status_bar config; the value here is just a
+                        // safe default for the rare path that builds the
+                        // ctx but doesn't run `render_status`.
+                        remote_indicator_on_bar: false,
+                    };
+                    StatusBarRenderer::render_status_bar(
+                        frame,
+                        main_chunks[status_bar_idx],
+                        &mut status_ctx,
+                        &self.config.editor.status_bar,
+                    )
+                })
+                .expect("active buffer must be present");
 
             // Store status bar layout for click detection
             let status_bar_area = main_chunks[status_bar_idx];
@@ -1994,10 +1991,7 @@ impl Editor {
         let __preview_event_logs = &mut __win_for_preview.event_logs;
         let __preview_composite_buffers = &mut __win_for_preview.composite_buffers;
         let __preview_composite_view_states = &mut __win_for_preview.composite_view_states;
-        let (__preview_buffers, __preview_sp) = __win_for_preview.buffers.parts_mut();
-        let Some((mgr, view_states)) = __preview_sp.map(|(m, vs)| (m, vs)) else {
-            return;
-        };
+        let preview_tab_bar_visible = __win_for_preview.tab_bar_visible;
 
         // Per-call scratch — keeps the preview pass from
         // clobbering the active editor area's hit-testing /
@@ -2010,46 +2004,50 @@ impl Editor {
             crate::view::split::SplitNode,
         > = std::collections::HashMap::new();
 
-        let _ = crate::view::ui::SplitRenderer::render_content(
-            frame,
-            inner,
-            &*mgr,
-            __preview_buffers,
-            __preview_metadata,
-            __preview_event_logs,
-            __preview_composite_buffers,
-            __preview_composite_view_states,
-            theme,
-            self.ansi_background.as_ref(),
-            self.background_fade,
-            lsp_waiting,
-            self.config.editor.large_file_threshold_bytes,
-            self.config.editor.line_wrap,
-            self.config.editor.estimated_line_length,
-            self.config.editor.highlight_context_bytes,
-            Some(view_states),
-            &no_grouped_subtrees,
-            true, // hide_cursor — the active session owns the hardware caret
-            None, // no tab-hover routing in the preview
-            None,
-            None,
-            false, // not maximized
-            self.config.editor.relative_line_numbers,
-            __win_for_preview.tab_bar_visible,
-            self.config.editor.use_terminal_bg,
-            self.session_mode || !self.software_cursor_only,
-            self.software_cursor_only,
-            // Scrollbars are noisy in a small preview rect; the
-            // active session's chrome is the source of truth.
-            false,
-            false,
-            self.config.editor.diagnostics_inline_text,
-            false, // hide tilde markers in the preview
-            self.config.editor.highlight_current_column,
-            &mut scratch_cell_theme_map,
-            inner.width,
-            &mut scratch_pending_cursor,
-        );
+        __win_for_preview
+            .buffers
+            .with_all_mut(|preview_buffers, mgr, view_states| {
+                let _ = crate::view::ui::SplitRenderer::render_content(
+                    frame,
+                    inner,
+                    &*mgr,
+                    preview_buffers,
+                    __preview_metadata,
+                    __preview_event_logs,
+                    __preview_composite_buffers,
+                    __preview_composite_view_states,
+                    theme,
+                    self.ansi_background.as_ref(),
+                    self.background_fade,
+                    lsp_waiting,
+                    self.config.editor.large_file_threshold_bytes,
+                    self.config.editor.line_wrap,
+                    self.config.editor.estimated_line_length,
+                    self.config.editor.highlight_context_bytes,
+                    Some(view_states),
+                    &no_grouped_subtrees,
+                    true, // hide_cursor — the active session owns the hardware caret
+                    None, // no tab-hover routing in the preview
+                    None,
+                    None,
+                    false, // not maximized
+                    self.config.editor.relative_line_numbers,
+                    preview_tab_bar_visible,
+                    self.config.editor.use_terminal_bg,
+                    self.session_mode || !self.software_cursor_only,
+                    self.software_cursor_only,
+                    // Scrollbars are noisy in a small preview rect; the
+                    // active session's chrome is the source of truth.
+                    false,
+                    false,
+                    self.config.editor.diagnostics_inline_text,
+                    false, // hide tilde markers in the preview
+                    self.config.editor.highlight_current_column,
+                    &mut scratch_cell_theme_map,
+                    inner.width,
+                    &mut scratch_pending_cursor,
+                );
+            });
     }
 
     fn prepare_overlay_preview(&mut self) {
@@ -3278,29 +3276,32 @@ impl Editor {
             .windows
             .get_mut(&active_window_id)
             .expect("active window must exist");
-        let (__buffers_l, __sp_l) = __win_l.buffers.parts_mut();
-        let (m, vs) = __sp_l.expect("active window must have a populated split layout");
-        let split_mgr_l: &crate::view::split::SplitManager = m;
-        let split_view_states_l = vs;
-        let view_line_mappings = SplitRenderer::compute_content_layout(
-            editor_content_area,
-            split_mgr_l,
-            __buffers_l,
-            split_view_states_l,
-            &*self.theme.read().unwrap(),
-            false, // lsp_waiting — not relevant for layout
-            self.config.editor.estimated_line_length,
-            self.config.editor.highlight_context_bytes,
-            self.config.editor.relative_line_numbers,
-            self.config.editor.use_terminal_bg,
-            self.session_mode || !self.software_cursor_only,
-            self.software_cursor_only,
-            __win_l.tab_bar_visible,
-            self.config.editor.show_vertical_scrollbar,
-            self.config.editor.show_horizontal_scrollbar,
-            self.config.editor.diagnostics_inline_text,
-            self.config.editor.show_tilde,
-        );
+        let tab_bar_visible = __win_l.tab_bar_visible;
+        let theme = self.theme.read().unwrap().clone();
+        let view_line_mappings = __win_l
+            .buffers
+            .with_all_mut(|buffers, mgr, vs_map| {
+                SplitRenderer::compute_content_layout(
+                    editor_content_area,
+                    &*mgr,
+                    buffers,
+                    vs_map,
+                    &theme,
+                    false, // lsp_waiting — not relevant for layout
+                    self.config.editor.estimated_line_length,
+                    self.config.editor.highlight_context_bytes,
+                    self.config.editor.relative_line_numbers,
+                    self.config.editor.use_terminal_bg,
+                    self.session_mode || !self.software_cursor_only,
+                    self.software_cursor_only,
+                    tab_bar_visible,
+                    self.config.editor.show_vertical_scrollbar,
+                    self.config.editor.show_horizontal_scrollbar,
+                    self.config.editor.diagnostics_inline_text,
+                    self.config.editor.show_tilde,
+                )
+            })
+            .expect("active window must have a populated split layout");
 
         self.active_layout_mut().view_line_mappings = view_line_mappings;
     }

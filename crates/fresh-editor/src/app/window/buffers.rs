@@ -250,6 +250,29 @@ impl WindowBuffers {
         Some(f(vs, buffer_map))
     }
 
+    /// Run `f` with a buffer state (mutable) and a read-only view of
+    /// the named split, if present. The status-bar render needs
+    /// `&mut state` plus the split's cursor positions to build its
+    /// context — splitting the access this way keeps the keyspace
+    /// invariant intact (the closure can't insert / remove buffers
+    /// while it holds the split ref).
+    pub fn with_buffer_mut_and_split_ref<F, R>(
+        &mut self,
+        buf: BufferId,
+        split: LeafId,
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnOnce(&mut EditorState, Option<&SplitViewState>) -> R,
+    {
+        let state = self.map.get_mut(&buf)?;
+        let vs = self
+            .splits
+            .as_ref()
+            .and_then(|(_, vs_map)| vs_map.get(&split));
+        Some(f(state, vs))
+    }
+
     /// Run `f` with mutable refs to the buffer map, the split
     /// manager, and the per-leaf view state map. The render path
     /// and per-frame plugin-state snapshot need all three live at
@@ -267,25 +290,6 @@ impl WindowBuffers {
         Some(f(buffer_map, mgr, vs_map))
     }
 
-    /// Escape hatch: disjoint mutable refs to the buffer map and
-    /// the split tree as a returned tuple. Required for a handful
-    /// of legacy sites (render's per-buffer hook loop, the plugin
-    /// snapshot's all-windows pass, LSP didChange's keyed-state
-    /// fan-out) whose control flow is too entangled to wrap in a
-    /// single closure without large surgery on the surrounding
-    /// function. **Do not use at new call sites** — use the
-    /// `with_*` methods above. The plan is to migrate the
-    /// remaining callers off this method and delete it; until
-    /// then, every use is one bug-class violation away from
-    /// becoming issue #1939 redux.
-    pub fn parts_mut(
-        &mut self,
-    ) -> (
-        &mut HashMap<BufferId, EditorState>,
-        Option<&mut Splits>,
-    ) {
-        (&mut self.map, self.splits.as_mut())
-    }
 }
 
 impl Default for WindowBuffers {

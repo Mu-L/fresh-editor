@@ -2620,143 +2620,140 @@ impl Editor {
             .windows
             .get_mut(&self.active_window)
             .expect("active window must exist");
-        let (__bufs, __sp) = __win.buffers.parts_mut();
-        let __vs_map = &mut __sp
-            .expect("active window must have a populated split layout")
-            .1;
-        let state = __bufs
-            .get_mut(&buffer_id)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Buffer not found"))?;
+        let bulk_edit = __win
+            .buffers
+            .with_buffer_and_view_states(buffer_id, |state, vs_map| -> AnyhowResult<Event> {
+                // Snapshot buffer state for undo (piece tree + buffers)
+                let old_snapshot = state.buffer.snapshot_buffer_state();
 
-        // Snapshot buffer state for undo (piece tree + buffers)
-        let old_snapshot = state.buffer.snapshot_buffer_state();
-
-        // Convert events to edit tuples: (position, delete_len, insert_text)
-        let mut edits: Vec<(usize, usize, String)> = Vec::new();
-        for event in &events {
-            match event {
-                Event::Insert { position, text, .. } => {
-                    edits.push((*position, 0, text.clone()));
+                // Convert events to edit tuples: (position, delete_len, insert_text)
+                let mut edits: Vec<(usize, usize, String)> = Vec::new();
+                for event in &events {
+                    match event {
+                        Event::Insert { position, text, .. } => {
+                            edits.push((*position, 0, text.clone()));
+                        }
+                        Event::Delete { range, .. } => {
+                            edits.push((range.start, range.len(), String::new()));
+                        }
+                        _ => {}
+                    }
                 }
-                Event::Delete { range, .. } => {
-                    edits.push((range.start, range.len(), String::new()));
+
+                // Sort edits by position descending (required by apply_bulk_edits)
+                edits.sort_by(|a, b| b.0.cmp(&a.0));
+
+                // Convert to references for apply_bulk_edits
+                let edit_refs: Vec<(usize, usize, &str)> = edits
+                    .iter()
+                    .map(|(pos, del, text)| (*pos, *del, text.as_str()))
+                    .collect();
+
+                // Snapshot displaced markers before edits so undo can restore them exactly.
+                let displaced_markers = state.capture_displaced_markers_bulk(&edits);
+
+                // Apply bulk edits - O(n) instead of O(n²)
+                let _delta = state.buffer.apply_bulk_edits(&edit_refs);
+
+                // Calculate new cursor positions based on edits
+                let mut position_deltas: Vec<(usize, isize)> = Vec::new();
+                for (pos, del_len, text) in &edits {
+                    let delta = text.len() as isize - *del_len as isize;
+                    position_deltas.push((*pos, delta));
                 }
-                _ => {}
-            }
-        }
+                position_deltas.sort_by_key(|(pos, _)| *pos);
 
-        // Sort edits by position descending (required by apply_bulk_edits)
-        edits.sort_by(|a, b| b.0.cmp(&a.0));
+                let calc_shift = |original_pos: usize| -> isize {
+                    let mut shift: isize = 0;
+                    for (edit_pos, delta) in &position_deltas {
+                        if *edit_pos < original_pos {
+                            shift += delta;
+                        }
+                    }
+                    shift
+                };
 
-        // Convert to references for apply_bulk_edits
-        let edit_refs: Vec<(usize, usize, &str)> = edits
-            .iter()
-            .map(|(pos, del, text)| (*pos, *del, text.as_str()))
-            .collect();
+                // Calculate new cursor positions
+                let buffer_len = state.buffer.len();
+                let new_cursors: Vec<(CursorId, usize, Option<usize>)> = old_cursors
+                    .iter()
+                    .map(|(id, pos, anchor)| {
+                        let shift = calc_shift(*pos);
+                        let new_pos =
+                            ((*pos as isize + shift).max(0) as usize).min(buffer_len);
+                        let new_anchor = anchor.map(|a| {
+                            let anchor_shift = calc_shift(a);
+                            ((a as isize + anchor_shift).max(0) as usize).min(buffer_len)
+                        });
+                        (*id, new_pos, new_anchor)
+                    })
+                    .collect();
 
-        // Snapshot displaced markers before edits so undo can restore them exactly.
-        let displaced_markers = state.capture_displaced_markers_bulk(&edits);
+                // Snapshot buffer state after edits (for redo)
+                let new_snapshot = state.buffer.snapshot_buffer_state();
 
-        // Apply bulk edits - O(n) instead of O(n²)
-        let _delta = state.buffer.apply_bulk_edits(&edit_refs);
+                // Invalidate syntax highlighting
+                state.highlighter.invalidate_all();
 
-        // Calculate new cursor positions based on edits
-        let mut position_deltas: Vec<(usize, isize)> = Vec::new();
-        for (pos, del_len, text) in &edits {
-            let delta = text.len() as isize - *del_len as isize;
-            position_deltas.push((*pos, delta));
-        }
-        position_deltas.sort_by_key(|(pos, _)| *pos);
-
-        let calc_shift = |original_pos: usize| -> isize {
-            let mut shift: isize = 0;
-            for (edit_pos, delta) in &position_deltas {
-                if *edit_pos < original_pos {
-                    shift += delta;
+                // Apply new cursor positions to split view state
+                if let Some(vs) = vs_map.get_mut(&split_id_for_cursors) {
+                    if let Some(bvs) = vs.keyed_states.get_mut(&buffer_id) {
+                        for (cursor_id, new_pos, new_anchor) in &new_cursors {
+                            if let Some(cursor) = bvs.cursors.get_mut(*cursor_id) {
+                                cursor.position = *new_pos;
+                                cursor.anchor = *new_anchor;
+                            }
+                        }
+                    }
                 }
-            }
-            shift
-        };
 
-        // Calculate new cursor positions
-        let buffer_len = state.buffer.len();
-        let new_cursors: Vec<(CursorId, usize, Option<usize>)> = old_cursors
-            .iter()
-            .map(|(id, pos, anchor)| {
-                let shift = calc_shift(*pos);
-                let new_pos = ((*pos as isize + shift).max(0) as usize).min(buffer_len);
-                let new_anchor = anchor.map(|a| {
-                    let anchor_shift = calc_shift(a);
-                    ((a as isize + anchor_shift).max(0) as usize).min(buffer_len)
-                });
-                (*id, new_pos, new_anchor)
+                // Convert edit list to lengths-only for undo/redo marker replay.
+                // Merge edits at the same position into a single replacement.
+                let edit_lengths: Vec<(usize, usize, usize)> = {
+                    let mut lengths: Vec<(usize, usize, usize)> = Vec::new();
+                    for (pos, del_len, text) in &edits {
+                        if let Some(last) = lengths.last_mut() {
+                            if last.0 == *pos {
+                                last.1 += del_len;
+                                last.2 += text.len();
+                                continue;
+                            }
+                        }
+                        lengths.push((*pos, *del_len, text.len()));
+                    }
+                    lengths
+                };
+
+                // Adjust markers using merged net-delta
+                for &(pos, del_len, ins_len) in &edit_lengths {
+                    if del_len > 0 && ins_len > 0 {
+                        if ins_len > del_len {
+                            state.marker_list.adjust_for_insert(pos, ins_len - del_len);
+                            state.margins.adjust_for_insert(pos, ins_len - del_len);
+                        } else if del_len > ins_len {
+                            state.marker_list.adjust_for_delete(pos, del_len - ins_len);
+                            state.margins.adjust_for_delete(pos, del_len - ins_len);
+                        }
+                    } else if del_len > 0 {
+                        state.marker_list.adjust_for_delete(pos, del_len);
+                        state.margins.adjust_for_delete(pos, del_len);
+                    } else if ins_len > 0 {
+                        state.marker_list.adjust_for_insert(pos, ins_len);
+                        state.margins.adjust_for_insert(pos, ins_len);
+                    }
+                }
+
+                Ok(Event::BulkEdit {
+                    old_snapshot: Some(old_snapshot),
+                    new_snapshot: Some(new_snapshot),
+                    old_cursors,
+                    new_cursors,
+                    description,
+                    edits: edit_lengths,
+                    displaced_markers,
+                })
             })
-            .collect();
-
-        // Snapshot buffer state after edits (for redo)
-        let new_snapshot = state.buffer.snapshot_buffer_state();
-
-        // Invalidate syntax highlighting
-        state.highlighter.invalidate_all();
-
-        // Apply new cursor positions to split view state
-        if let Some(vs) = __vs_map.get_mut(&split_id_for_cursors) {
-            if let Some(bvs) = vs.keyed_states.get_mut(&buffer_id) {
-                for (cursor_id, new_pos, new_anchor) in &new_cursors {
-                    if let Some(cursor) = bvs.cursors.get_mut(*cursor_id) {
-                        cursor.position = *new_pos;
-                        cursor.anchor = *new_anchor;
-                    }
-                }
-            }
-        }
-
-        // Convert edit list to lengths-only for undo/redo marker replay.
-        // Merge edits at the same position into a single replacement.
-        let edit_lengths: Vec<(usize, usize, usize)> = {
-            let mut lengths: Vec<(usize, usize, usize)> = Vec::new();
-            for (pos, del_len, text) in &edits {
-                if let Some(last) = lengths.last_mut() {
-                    if last.0 == *pos {
-                        last.1 += del_len;
-                        last.2 += text.len();
-                        continue;
-                    }
-                }
-                lengths.push((*pos, *del_len, text.len()));
-            }
-            lengths
-        };
-
-        // Adjust markers using merged net-delta (same logic as apply_events_as_bulk_edit)
-        for &(pos, del_len, ins_len) in &edit_lengths {
-            if del_len > 0 && ins_len > 0 {
-                if ins_len > del_len {
-                    state.marker_list.adjust_for_insert(pos, ins_len - del_len);
-                    state.margins.adjust_for_insert(pos, ins_len - del_len);
-                } else if del_len > ins_len {
-                    state.marker_list.adjust_for_delete(pos, del_len - ins_len);
-                    state.margins.adjust_for_delete(pos, del_len - ins_len);
-                }
-            } else if del_len > 0 {
-                state.marker_list.adjust_for_delete(pos, del_len);
-                state.margins.adjust_for_delete(pos, del_len);
-            } else if ins_len > 0 {
-                state.marker_list.adjust_for_insert(pos, ins_len);
-                state.margins.adjust_for_insert(pos, ins_len);
-            }
-        }
-
-        // Create BulkEdit event for undo log
-        let bulk_edit = Event::BulkEdit {
-            old_snapshot: Some(old_snapshot),
-            new_snapshot: Some(new_snapshot),
-            old_cursors,
-            new_cursors,
-            description,
-            edits: edit_lengths,
-            displaced_markers,
-        };
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Buffer not found"))??;
 
         // Add to event log
         if let Some(event_log) = self.active_window_mut().event_logs.get_mut(&buffer_id) {
