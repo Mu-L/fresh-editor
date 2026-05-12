@@ -1,27 +1,7 @@
-//! Per-window buffer storage with the underlying map encapsulated.
-//!
-//! `WindowBuffers` wraps the `HashMap<BufferId, EditorState>` that
-//! used to be a `pub` field on `Window`. The inner map is private to
-//! this module — meaning *no other code in the crate*, including
-//! other `impl Window` blocks across `window/mod.rs`,
-//! `window_actions.rs`, and the various `impl Editor` blocks that
-//! reach in via `self.windows.get_mut(&id)`, can mutate the storage
-//! except through the methods below. That funnels every add / remove
-//! through one auditable surface, which is the prerequisite for
-//! enforcing invariants like "every `BufferId` reachable from the
-//! split tree is present in `WindowBuffers`" (issue #1939 root cause).
-//!
-//! The API is deliberately narrow. Reads and writes against a single
-//! `BufferId` go through [`get`](WindowBuffers::get) /
-//! [`get_mut`](WindowBuffers::get_mut) / [`insert`](WindowBuffers::insert) /
-//! [`remove`](WindowBuffers::remove). Bulk iteration uses
-//! `IntoIterator` for `&WindowBuffers` and `&mut WindowBuffers`.
-//! Everything else — searches over the keyspace, summary statistics,
-//! domain rollups like "every open file path" or "every distinct
-//! language" — is exposed as a semantic method rather than letting
-//! callers reach for `keys()` / `values()` / `iter()` chains. That
-//! keeps the surface small (callers describe intent, not storage
-//! shape) and gives us one place to add invariants as they're needed.
+//! Per-window buffer storage. The inner map is module-private so
+//! every add/remove goes through this surface — that's the seam where
+//! the "every BufferId reachable from the split tree is in here"
+//! invariant (issue #1939) will eventually be enforced.
 
 use fresh_core::BufferId;
 use std::collections::{HashMap, HashSet};
@@ -29,7 +9,6 @@ use std::path::PathBuf;
 
 use crate::state::EditorState;
 
-/// Per-window storage of live `EditorState`s, keyed by `BufferId`.
 pub struct WindowBuffers {
     map: HashMap<BufferId, EditorState>,
 }
@@ -40,8 +19,6 @@ impl WindowBuffers {
             map: HashMap::new(),
         }
     }
-
-    // -- single-buffer access --------------------------------------------
 
     pub fn get(&self, id: &BufferId) -> Option<&EditorState> {
         self.map.get(id)
@@ -71,18 +48,12 @@ impl WindowBuffers {
         self.map.iter()
     }
 
-    // -- keyspace queries -------------------------------------------------
-
-    /// Snapshot of every buffer id, useful when the caller needs an
-    /// owned set so it can mutate `self` while iterating.
+    /// Owned snapshot of every buffer id — for callers that need to
+    /// mutate `self` while iterating.
     pub fn ids(&self) -> Vec<BufferId> {
         self.map.keys().copied().collect()
     }
 
-    /// First `BufferId` whose state satisfies `predicate`, or `None`.
-    /// Iteration order is unspecified; pass a `|_, _| true` predicate
-    /// to grab any live buffer (the defensive fallback in
-    /// `Window::effective_active_pair`).
     pub fn find_id<F>(&self, mut predicate: F) -> Option<BufferId>
     where
         F: FnMut(BufferId, &EditorState) -> bool,
@@ -93,7 +64,6 @@ impl WindowBuffers {
             .map(|(id, _)| *id)
     }
 
-    /// Count of buffers whose state satisfies `predicate`.
     pub fn count_where<F>(&self, mut predicate: F) -> usize
     where
         F: FnMut(BufferId, &EditorState) -> bool,
@@ -104,10 +74,6 @@ impl WindowBuffers {
             .count()
     }
 
-    // -- domain rollups ---------------------------------------------------
-
-    /// Owned paths of every file-backed buffer in this window. Used
-    /// by auto-revert to decide which files to poll.
     pub fn paths(&self) -> Vec<PathBuf> {
         self.map
             .values()
@@ -115,8 +81,6 @@ impl WindowBuffers {
             .collect()
     }
 
-    /// Distinct language identifiers across every buffer. Used by the
-    /// universal-LSP reattach path to drive a per-language reopen.
     pub fn languages(&self) -> HashSet<String> {
         self.map
             .values()
@@ -124,10 +88,6 @@ impl WindowBuffers {
             .collect()
     }
 
-    /// Whether any buffer's semantic-highlight debounce window has
-    /// elapsed and is asking for a redraw. The whole "iterate every
-    /// state looking for a needs-redraw signal" pattern lives here so
-    /// callers don't reach in for the iterator.
     pub fn any_needs_semantic_redraw(&self) -> bool {
         self.map.values().any(|state| {
             state

@@ -115,16 +115,10 @@ pub struct Window {
     /// with an empty dock and rebuilds on demand.
     pub panel_ids: HashMap<String, BufferId>,
 
-    /// Buffers attached to this window. Each window owns the
-    /// `EditorState` for its buffers outright; closing the window
-    /// drops them. Opening the same file in two windows produces
-    /// two independent buffers.
-    ///
-    /// `WindowBuffers` (in the [`buffers`] submodule) keeps the
-    /// underlying map private — every add / remove goes through one
-    /// auditable surface. The hashmap-shaped methods (`get`,
-    /// `get_mut`, `insert`, `remove`, `iter`, …) are preserved so
-    /// call sites read the same as before.
+    /// Buffers attached to this window. Each window owns its
+    /// `EditorState`s outright; closing the window drops them.
+    /// Opening the same file in two windows produces two independent
+    /// buffers.
     pub buffers: WindowBuffers,
 
     /// Per-buffer metadata (display name, file path / LSP URI,
