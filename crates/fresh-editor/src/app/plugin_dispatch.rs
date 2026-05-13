@@ -3604,6 +3604,7 @@ impl Editor {
         let out = crate::widgets::render_spec(&spec, &prev, &prev_focus, panel_width);
         let focus_cursor = out.focus_cursor;
         let entries = out.entries;
+        let embeds = out.embeds;
         if self
             .widget_registry
             .update(
@@ -3624,6 +3625,7 @@ impl Editor {
                 if fwp.panel_id == panel_id {
                     fwp.entries = entries;
                     fwp.focus_cursor = focus_cursor;
+                    fwp.embeds = embeds;
                 }
             }
             return;
@@ -4922,6 +4924,7 @@ impl Editor {
             height_pct,
             entries: Vec::new(),
             focus_cursor: None,
+            embeds: Vec::new(),
             last_inner_rect: None,
         });
         let prev = std::collections::HashMap::new();
@@ -4930,6 +4933,7 @@ impl Editor {
         let out = crate::widgets::render_spec(&spec, &prev, &prev_focus, panel_width);
         let focus_cursor = out.focus_cursor;
         let entries = out.entries;
+        let embeds = out.embeds;
         self.widget_registry.mount(
             panel_id,
             FLOATING_PANEL_BUFFER_ID,
@@ -4942,6 +4946,7 @@ impl Editor {
         if let Some(fwp) = self.floating_widget_panel.as_mut() {
             fwp.entries = entries;
             fwp.focus_cursor = focus_cursor;
+            fwp.embeds = embeds;
         }
         tracing::debug!(
             "Mounted floating widget panel {} ({}%x{}%)",
@@ -4976,6 +4981,7 @@ impl Editor {
         let out = crate::widgets::render_spec(&spec, &prev, &prev_focus, panel_width);
         let focus_cursor = out.focus_cursor;
         let entries = out.entries;
+        let embeds = out.embeds;
         if self
             .widget_registry
             .update(
@@ -4997,6 +5003,7 @@ impl Editor {
         if let Some(fwp) = self.floating_widget_panel.as_mut() {
             fwp.entries = entries;
             fwp.focus_cursor = focus_cursor;
+            fwp.embeds = embeds;
         }
     }
 
