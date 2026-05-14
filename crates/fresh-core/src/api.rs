@@ -5244,6 +5244,7 @@ mod tests {
             action_name: String::new(),
             plugin_name: String::new(),
             custom_contexts: Vec::new(),
+            terminal_bypass: false,
         }
     }
 
