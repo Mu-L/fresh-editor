@@ -14,17 +14,19 @@ use super::super::spans::{
     push_debug_tag, push_span_with_map, span_color_at, span_info_at, DebugSpanTracker,
     SpanAccumulator,
 };
-use super::super::style::dim_color_for_tilde;
 use super::contexts::{DecorationContext, SelectionContext};
 use super::overlay_sweep::OverlayActiveSet;
 use super::selection_sweep::SelectionActiveSet;
 use super::tail_fill::{resolve_tail_fill, TailFillInput};
+use trailing::{fill_eof_rows, render_implicit_trailing_line, PostRowAccumulator, PostRowContext};
+
+mod trailing;
 use crate::app::types::ViewLineMapping;
 use crate::primitives::ansi::AnsiParser;
 use crate::primitives::display_width::char_width;
 use crate::state::EditorState;
 use crate::view::overlay::Overlay;
-use crate::view::theme::{Theme, TokenColorExt};
+use crate::view::theme::Theme;
 use crate::view::ui::view_pipeline::{should_show_line_number, LineStart, ViewLine};
 use crate::view::virtual_text::VirtualTextPosition;
 use ratatui::layout::Rect;
@@ -1190,180 +1192,39 @@ pub(crate) fn render_view_lines(input: LineRenderInput<'_>) -> LineRenderOutput 
         }
     }
 
-    // If the last line ended with a newline, render an implicit empty line after it.
-    // This shows the line number for the cursor position after the final newline.
-    // Skip this if the ViewLineIterator already produced the trailing empty line.
-    if let Some(ref end) = last_line_end {
-        if end.terminated_with_newline
-            && lines_rendered < visible_line_count
-            && !trailing_empty_line_rendered
-        {
-            // Render the implicit line after the newline
-            let mut implicit_line_spans = Vec::new();
-            // The implicit trailing line is at buffer.len()
-            let implicit_line_byte = state.buffer.len();
-            let implicit_gutter_num = if byte_offset_mode {
-                implicit_line_byte
-            } else {
-                last_gutter_num.map_or(0, |n| n + 1)
-            };
+    // Implicit trailing empty line (when the last content line ended
+    // with a newline) and its `ViewLineMapping` fallback — see
+    // `trailing::render_implicit_trailing_line` for the contract.
+    render_implicit_trailing_line(
+        last_line_end.as_ref(),
+        &PostRowContext {
+            state,
+            theme,
+            render_area,
+            gutter_width,
+            decorations,
+            cursor_line_start_byte,
+            primary_cursor_position,
+            byte_offset_mode,
+            show_line_numbers,
+            highlight_current_line,
+            is_active,
+            last_gutter_num,
+            visible_line_count,
+            trailing_empty_line_rendered,
+        },
+        &mut PostRowAccumulator {
+            lines: &mut lines,
+            view_line_mappings: &mut view_line_mappings,
+            lines_rendered: &mut lines_rendered,
+            cursor_screen_x: &mut cursor_screen_x,
+            cursor_screen_y: &mut cursor_screen_y,
+            have_cursor: &mut have_cursor,
+        },
+    );
 
-            let implicit_is_cursor_line = implicit_line_byte == cursor_line_start_byte;
-            let implicit_cursor_bg =
-                if implicit_is_cursor_line && highlight_current_line && is_active {
-                    Some(theme.current_line_bg)
-                } else {
-                    None
-                };
-
-            if state.margins.left_config.enabled {
-                // Indicator column: check for diagnostic markers on this implicit line
-                if decorations.diagnostic_lines.contains(&implicit_line_byte) {
-                    let mut style = Style::default().fg(ratatui::style::Color::Red);
-                    if let Some(bg) = implicit_cursor_bg {
-                        style = style.bg(bg);
-                    }
-                    implicit_line_spans.push(Span::styled("●", style));
-                } else {
-                    let mut style = Style::default();
-                    if let Some(bg) = implicit_cursor_bg {
-                        style = style.bg(bg);
-                    }
-                    implicit_line_spans.push(Span::styled(" ", style));
-                }
-
-                // Line number (or byte offset in byte_offset_mode)
-                let rendered_text = if byte_offset_mode && show_line_numbers {
-                    format!(
-                        "{:>width$}",
-                        implicit_gutter_num,
-                        width = state.margins.left_config.width
-                    )
-                } else {
-                    let estimated_lines = state.buffer.line_count().unwrap_or(
-                        (state.buffer.len() / state.buffer.estimated_line_length()).max(1),
-                    );
-                    let margin_content = state.margins.render_line(
-                        implicit_gutter_num,
-                        crate::view::margin::MarginPosition::Left,
-                        estimated_lines,
-                        show_line_numbers,
-                    );
-                    margin_content.render(state.margins.left_config.width).0
-                };
-                let mut margin_style = Style::default().fg(theme.line_number_fg);
-                if let Some(bg) = implicit_cursor_bg {
-                    margin_style = margin_style.bg(bg);
-                }
-                implicit_line_spans.push(Span::styled(rendered_text, margin_style));
-
-                // Separator
-                if state.margins.left_config.show_separator {
-                    let mut sep_style = Style::default().fg(theme.line_number_fg);
-                    if let Some(bg) = implicit_cursor_bg {
-                        sep_style = sep_style.bg(bg);
-                    }
-                    implicit_line_spans.push(Span::styled(
-                        state.margins.left_config.separator.to_string(),
-                        sep_style,
-                    ));
-                }
-            }
-
-            // Fill remaining width with current_line_bg for cursor line
-            if let Some(bg) = implicit_cursor_bg {
-                let gutter_w = if state.margins.left_config.enabled {
-                    state.margins.left_total_width()
-                } else {
-                    0
-                };
-                let content_width = render_area.width.saturating_sub(gutter_w as u16) as usize;
-                if content_width > 0 {
-                    implicit_line_spans.push(Span::styled(
-                        " ".repeat(content_width),
-                        Style::default().bg(bg),
-                    ));
-                }
-            }
-
-            let implicit_y = lines.len() as u16;
-            lines.push(Line::from(implicit_line_spans));
-            lines_rendered += 1;
-
-            // Add mapping for implicit line
-            // It has no content, so map is empty (gutter is handled by offset in screen_to_buffer_position)
-            let buffer_len = state.buffer.len();
-
-            view_line_mappings.push(ViewLineMapping {
-                char_source_bytes: Vec::new(),
-                visual_to_char: Vec::new(),
-                line_end_byte: buffer_len,
-                is_plugin_virtual: false,
-            });
-
-            // NOTE: We intentionally do NOT update last_line_end here.
-            // The implicit empty line is a visual display aid, not an actual content line.
-            // last_line_end should track the last actual content line for cursor placement logic.
-
-            // If primary cursor is at EOF (after the newline), set cursor on this line
-            if primary_cursor_position == state.buffer.len() && !have_cursor {
-                cursor_screen_x = gutter_width as u16;
-                cursor_screen_y = implicit_y;
-                have_cursor = true;
-            }
-        }
-    }
-
-    // Even when there was no screen room to render the implicit trailing
-    // empty line, we must still add a ViewLineMapping for it.  Without
-    // the mapping, move_visual_line (Down key) thinks the last rendered
-    // row is the boundary and returns None — preventing the cursor from
-    // reaching the trailing empty line (which would trigger a viewport
-    // scroll on the next render).
-    if let Some(ref end) = last_line_end {
-        if end.terminated_with_newline {
-            let last_mapped_byte = view_line_mappings
-                .last()
-                .map(|m| m.line_end_byte)
-                .unwrap_or(0);
-            let near_buffer_end = last_mapped_byte + 2 >= state.buffer.len();
-            let already_mapped = view_line_mappings.last().is_some_and(|m| {
-                m.char_source_bytes.is_empty() && m.line_end_byte == state.buffer.len()
-            });
-            if near_buffer_end && !already_mapped {
-                view_line_mappings.push(ViewLineMapping {
-                    char_source_bytes: Vec::new(),
-                    visual_to_char: Vec::new(),
-                    line_end_byte: state.buffer.len(),
-                    is_plugin_virtual: false,
-                });
-            }
-        }
-    }
-
-    // Fill remaining rows past EOF. Two orthogonal visual cues are applied:
-    //   - `show_tilde` draws a vim-style `~` at column 0 of each row.
-    //   - `theme.after_eof_bg` is applied as the row background, giving a
-    //     subtle shade that distinguishes post-EOF space from buffer content
-    //     (see https://github.com/sinelaw/fresh/issues/779).
-    // Always emitting filled lines here also ensures proper clearing in
-    // differential rendering; see https://github.com/ratatui/ratatui/issues/1606.
-    //
-    // NOTE: We use a computed darker color instead of Modifier::DIM because the DIM
-    // modifier can bleed through to overlays (like menus) rendered on top of these
-    // lines due to how terminal escape sequences are output.
-    // See: https://github.com/sinelaw/fresh/issues/458
-    let eof_fg = dim_color_for_tilde(theme.line_number_fg);
-    let eof_style = Style::default().fg(eof_fg).bg(theme.after_eof_bg);
-    while lines.len() < render_area.height as usize {
-        let width = render_area.width as usize;
-        let eof_line = if show_tilde && width > 0 {
-            format!("~{}", " ".repeat(width.saturating_sub(1)))
-        } else {
-            " ".repeat(width)
-        };
-        lines.push(Line::styled(eof_line, eof_style));
-    }
+    // Pad the bottom of the viewport with `~` / after_eof_bg shading.
+    fill_eof_rows(&mut lines, theme, render_area, show_tilde);
 
     LineRenderOutput {
         lines,
