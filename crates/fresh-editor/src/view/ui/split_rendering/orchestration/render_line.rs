@@ -434,12 +434,18 @@ pub(crate) fn render_view_lines(input: LineRenderInput<'_>) -> LineRenderOutput 
         let mut first_line_byte_pos: Option<usize> = None;
         let mut last_line_byte_pos: Option<usize> = None;
         line_touched_overlays.clear();
-        // Overlays still active from a previous visual row of the same
-        // wrapped source line span into this row's bytes too — seed
-        // `line_touched_overlays` with them so the extend_to_line_end
-        // fill paints the trailing whitespace on continuation rows, not
-        // just the row where the overlay first activated.
-        line_touched_overlays.extend(active.iter().map(|(_, idx, _)| *idx));
+        // For wrap continuations, overlays still active from a previous
+        // visual row of the same source line span into this row's bytes
+        // too — seed `line_touched_overlays` with them so the
+        // extend_to_line_end fill paints trailing whitespace on
+        // continuation rows. NOT for new source lines: an overlay whose
+        // range was bumped past the newline (e.g. live-diff's empty-line
+        // `end = start + 1` trick) can still be in `active` when the
+        // next source line begins, and seeding it there would bleed the
+        // previous line's bg fill onto the next line's trailing edge.
+        if matches!(current_view_line.line_start, LineStart::AfterBreak) {
+            line_touched_overlays.extend(active.iter().map(|(_, idx, _)| *idx));
+        }
 
         let chars_iterator = line_content.chars().peekable();
         for ch in chars_iterator {
