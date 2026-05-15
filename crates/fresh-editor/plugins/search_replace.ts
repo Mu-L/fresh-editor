@@ -978,6 +978,24 @@ let streamingFileIndexByPath: Map<string, number> | null = null;
  *  flood the queue.  Reset at the start of each search. */
 let pendingMatches: GrepMatch[] = [];
 
+/** Pending tree-append delta that hasn't been flushed to the host yet.
+ *  Each pump chunk pushes its `FlatItem[]` here; the loop coalesces
+ *  several chunks worth before firing one `appendTreeNodes` IPC, so
+ *  the host's main thread isn't pinned servicing ~20 ms IPCs back to
+ *  back during a long streaming search. */
+let pendingTreeDeltaItems: FlatItem[] = [];
+/** Parallel pending list of new file-row keys whose expansion state
+ *  must be pushed to the host on the next flush. */
+let pendingNewExpandedKeys: string[] = [];
+/** Wall-clock ms of the last UI flush (the last appendTreeNodes IPC).
+ *  Compared against UI_FLUSH_INTERVAL_MS to decide when to flush. */
+let lastUiFlush = 0;
+/** Don't flush more often than this. */
+const UI_FLUSH_INTERVAL_MS = 200;
+/** Force a flush if the pending delta grows beyond this many items
+ *  (regardless of the time interval) to bound memory + visible lag. */
+const UI_FLUSH_MAX_DELTA = 2000;
+
 /**
  * Perform a streaming search using a pull-based handle. The host writes
  * matches at full speed into shared state; this loop drains them via
@@ -1002,6 +1020,9 @@ async function performSearch(pattern: string, silent?: boolean): Promise<SearchR
   lastStreamingFlatCount = 0;
   streamingFileIndexByPath = new Map();
   pendingMatches = [];
+  pendingTreeDeltaItems = [];
+  pendingNewExpandedKeys = [];
+  lastUiFlush = 0;
   // Reset accumulating state so a re-search (debounce from typing,
   // toggle flip, scope change) starts from empty rather than
   // appending to the previous run's results.
@@ -1095,49 +1116,66 @@ async function performSearch(pattern: string, silent?: boolean): Promise<SearchR
         deltaItems.push({ type: "match", fileIndex: fileIdx, matchIndex: matchIdx });
       }
       panel.searchResults = allResults;
-
-      // Streaming updates use `appendTreeNodes` on the matchTree
-      // widget rather than re-emitting the full panel spec. Without
-      // this, a project-wide grep for a common word (thousands of
-      // matches across hundreds of files) re-serializes the entire
-      // ~5000-row Tree on every 50 ms pump tick — multi-MB IPC traffic
-      // that pins the host main thread, so Tab / Esc / typing the user
-      // fires mid-search wait seconds for the pump to finish.
-      if (deltaItems.length > 0 && panel.widgetPanel && lastStreamingFlatCount > 0) {
+      // Coalesce the per-chunk delta into a pending buffer. Each
+      // `appendTreeNodes` IPC costs ~20 ms on the host (spec mutation
+      // + Tree-visible-rows recompute + virtual-buffer repaint).
+      // Flushing every 250-match chunk means 20+ IPCs over a 5 000-
+      // match search — that pile of host main-thread work is exactly
+      // when queued Tab / typed-key events sit waiting. Flush only
+      // every UI_FLUSH_INTERVAL_MS so the user sees the result list
+      // grow at a steady ~5 Hz while leaving the host free to dispatch
+      // input events between flushes.
+      for (const it of deltaItems) pendingTreeDeltaItems.push(it);
+      for (const k of newExpandedKeys) pendingNewExpandedKeys.push(k);
+      const nowMs = Date.now();
+      const producerFinished = batchDone && pendingMatches.length === 0;
+      const dueToFlush =
+        producerFinished ||
+        pendingTreeDeltaItems.length >= UI_FLUSH_MAX_DELTA ||
+        nowMs - lastUiFlush >= UI_FLUSH_INTERVAL_MS;
+      if (
+        dueToFlush &&
+        pendingTreeDeltaItems.length > 0 &&
+        panel.widgetPanel &&
+        lastStreamingFlatCount > 0
+      ) {
         const W = Math.max(MIN_WIDTH, panel.viewportWidth - 2);
-        const newItemKeys = deltaItems.map(flatItemKey);
-        const newNodes = flatItemsToTreeNodes(deltaItems, newItemKeys, W);
+        const flushed = pendingTreeDeltaItems;
+        const flushedNewExp = pendingNewExpandedKeys;
+        pendingTreeDeltaItems = [];
+        pendingNewExpandedKeys = [];
+        const newItemKeys = flushed.map(flatItemKey);
+        const newNodes = flatItemsToTreeNodes(flushed, newItemKeys, W);
         panel.widgetPanel.appendTreeNodes("matchTree", newNodes, newItemKeys);
-        lastStreamingFlatCount += deltaItems.length;
-        // Only re-push expansion state when *new* file rows appeared this
-        // batch — and only those new keys need to be in the set, since
-        // the host preserves prior expansion. We still send the full
-        // list because `setExpandedKeys` is "replace", but only when
-        // something actually changed.
-        if (newExpandedKeys.length > 0) {
+        lastStreamingFlatCount += flushed.length;
+        lastUiFlush = nowMs;
+        if (flushedNewExp.length > 0) {
           panel.widgetPanel.setExpandedKeys(
             "matchTree",
             [...panel.expandedFileKeys],
           );
         }
-      } else if (deltaItems.length > 0) {
-        // First streaming render or no tree mounted yet — emit the full
-        // spec so the Tree exists for subsequent appends to target.
+      } else if (lastStreamingFlatCount === 0 && panel.fileGroups.length > 0) {
+        // First time we have any results — mount the Tree via a full
+        // panel update. Subsequent batches use the cheap append path.
+        // Also drain the pending buffer into the spec since
+        // updatePanelContent rebuilds from `panel.fileGroups` directly.
+        pendingTreeDeltaItems = [];
+        pendingNewExpandedKeys = [];
         updatePanelContent();
         lastStreamingFlatCount = panel.fileGroups.length + panel.searchResults.length;
+        lastUiFlush = nowMs;
       }
-      // Only declare the producer finished when we have nothing left
-      // to process AND the most recent take() told us there's nothing
-      // more coming. While the queue still has carryover from a big
-      // batch, keep iterating.
-      const producerFinished = batchDone && pendingMatches.length === 0;
       if (producerFinished) {
         // Final flush — full spec re-emit so the matchStats line,
         // file-row counts, and separator label all reflect the
         // final state (rather than the last-streaming snapshot).
         updatePanelContent();
         lastStreamingFlatCount = 0;
+        pendingTreeDeltaItems = [];
+        pendingNewExpandedKeys = [];
       }
+
       if (producerFinished) {
         truncated = batchTruncated;
         producerError = batchError;

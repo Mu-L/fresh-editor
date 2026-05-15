@@ -231,6 +231,40 @@ impl WidgetRegistry {
         }
     }
 
+    /// Update side-effects (hits, instance_states, focus_key, tabbable)
+    /// without taking ownership of the spec. Used by `rerender_widget_panel`
+    /// after an in-place spec mutation: the spec in the registry is already
+    /// current (mutation helpers like `append_tree_nodes_in_spec` mutate it
+    /// in place), so cloning it back through `update()` just to write the
+    /// same value would waste a 5 000-node deep clone for every IPC.
+    pub fn update_side_effects(
+        &mut self,
+        panel_id: PanelId,
+        hits: Vec<HitArea>,
+        instance_states: HashMap<String, WidgetInstanceState>,
+        focus_key: String,
+        tabbable: Vec<String>,
+    ) -> Result<BufferId, ()> {
+        match self.panels.get_mut(&panel_id) {
+            Some(state) => {
+                state.hits = hits;
+                state.instance_states = instance_states;
+                state.focus_key = focus_key;
+                state.tabbable = tabbable;
+                Ok(state.buffer_id)
+            }
+            None => Err(()),
+        }
+    }
+
+    /// Borrow the current spec + return the buffer id. Companion to
+    /// `update_side_effects` — render with the borrow and then write
+    /// back only the side-effects, avoiding the deep clone of the spec
+    /// that `buffer_and_spec()` does.
+    pub fn buffer_and_spec_ref(&self, panel_id: PanelId) -> Option<(BufferId, &WidgetSpec)> {
+        self.panels.get(&panel_id).map(|s| (s.buffer_id, &s.spec))
+    }
+
     /// Find the buffer and current spec for a panel — used by the
     /// dispatcher to re-render after a focus advance / activate
     /// command without the plugin needing to send an UpdateWidgetPanel.

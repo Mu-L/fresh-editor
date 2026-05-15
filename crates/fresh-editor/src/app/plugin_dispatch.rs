@@ -3276,39 +3276,50 @@ impl Editor {
     /// the registry, runs `render_spec` against the (possibly
     /// updated) prev state / focus key, writes the result back.
     pub(super) fn rerender_widget_panel(&mut self, panel_id: u64) {
-        let (buffer_id, spec) = match self.widget_registry.buffer_and_spec(panel_id) {
-            Some(s) => s,
-            None => return,
+        // The spec already lives in the registry — mutations (e.g.
+        // `append_tree_nodes_in_spec`) edit it in place. Borrow it for
+        // render, then write back only the side-effects (hits, instance
+        // states, focus key, tabbable). The previous shape cloned the
+        // whole spec out, rendered, then moved it back — for a Tree
+        // with 5 000 nodes that's a multi-MB deep clone per IPC, which
+        // dominates the host's per-mutation cost during a streaming
+        // search.
+        let (buffer_id, is_floating, panel_width, out_pieces) = {
+            let (buffer_id, spec) = match self.widget_registry.buffer_and_spec_ref(panel_id) {
+                Some(s) => s,
+                None => return,
+            };
+            let prev = self
+                .widget_registry
+                .instance_states(panel_id)
+                .cloned()
+                .unwrap_or_default();
+            let prev_focus = self
+                .widget_registry
+                .focus_key(panel_id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let is_floating = buffer_id == FLOATING_PANEL_BUFFER_ID;
+            let panel_width = if is_floating {
+                self.floating_panel_inner_width()
+            } else {
+                self.widget_panel_width(buffer_id)
+            };
+            let out = crate::widgets::render_spec(spec, &prev, &prev_focus, panel_width);
+            (buffer_id, is_floating, panel_width, out)
         };
-        let prev = self
-            .widget_registry
-            .instance_states(panel_id)
-            .cloned()
-            .unwrap_or_default();
-        let prev_focus = self
-            .widget_registry
-            .focus_key(panel_id)
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        let is_floating = buffer_id == FLOATING_PANEL_BUFFER_ID;
-        let panel_width = if is_floating {
-            self.floating_panel_inner_width()
-        } else {
-            self.widget_panel_width(buffer_id)
-        };
-        let out = crate::widgets::render_spec(&spec, &prev, &prev_focus, panel_width);
-        let focus_cursor = out.focus_cursor;
-        let entries = out.entries;
-        let embeds = out.embeds;
+        let _ = panel_width;
+        let focus_cursor = out_pieces.focus_cursor;
+        let entries = out_pieces.entries;
+        let embeds = out_pieces.embeds;
         if self
             .widget_registry
-            .update(
+            .update_side_effects(
                 panel_id,
-                spec,
-                out.hits,
-                out.instance_states,
-                out.focus_key,
-                out.tabbable,
+                out_pieces.hits,
+                out_pieces.instance_states,
+                out_pieces.focus_key,
+                out_pieces.tabbable,
             )
             .is_err()
         {
