@@ -3494,6 +3494,14 @@ impl Editor {
                     );
                 }
             }
+            WidgetMutation::SetRawEntries {
+                widget_key,
+                entries,
+            } => {
+                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                    crate::widgets::set_raw_entries_in_spec(&mut panel.spec, &widget_key, entries);
+                }
+            }
         }
 
         // Re-render with the mutated state. `rerender_widget_panel`

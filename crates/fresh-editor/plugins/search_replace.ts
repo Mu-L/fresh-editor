@@ -466,11 +466,52 @@ function buildScopeRowSpec(): WidgetSpec {
 // background, cursor highlight at the right byte position). The
 // match-stats portion stays in Raw because it has bespoke
 // truncated-warning styling (`[255, 180, 50]`) and isn't a control.
-function buildLine1Spec(): WidgetSpec {
-  if (!panel) return col();
-  const { searchPattern, replaceText, focusPanel, queryField, cursorPos, truncated } = panel;
+// Build just the matchStats text + inline overlays. Pulled out of
+// `buildLine1Spec` so the streaming pump can refresh it via the
+// `setRawEntries` mutation on the keyed `matchStats` raw widget —
+// without re-emitting the full panel spec (which forces js_to_json
+// over the entire 5 000-node tree and blocks the JS thread).
+function buildMatchStatsEntries(): TextPropertyEntry[] {
+  if (!panel) return [];
   const totalMatches = panel.searchResults.length;
   const fileCount = panel.fileGroups.length;
+  const truncated = panel.truncated;
+  const truncatedSuffix = truncated ? " " + editor.t("panel.limited") : "";
+  let matchStats = "";
+  if (totalMatches > 0) {
+    matchStats = "  " + editor.t("panel.match_stats", { count: String(totalMatches), files: String(fileCount) }) + truncatedSuffix;
+  } else if (panel.busy && panel.searchPattern) {
+    matchStats = "  " + editor.t("panel.searching");
+  } else if (panel.searchPattern && panel.searchPerformed && !panel.busy) {
+    matchStats = "  " + editor.t("panel.no_matches");
+  }
+  if (matchStats.length === 0) return [];
+  const overlays: InlineOverlay[] = [];
+  if (truncated && totalMatches > 0) {
+    const statsWithoutSuffix = "  " + editor.t("panel.match_stats", {
+      count: String(totalMatches),
+      files: String(fileCount),
+    });
+    const countEnd = byteLen(statsWithoutSuffix);
+    overlays.push({ start: 0, end: countEnd, style: { fg: C.statusOk } });
+    overlays.push({
+      start: countEnd,
+      end: countEnd + byteLen(truncatedSuffix),
+      style: { fg: [255, 180, 50] as RGB, bold: true },
+    });
+  } else {
+    overlays.push({
+      start: 0,
+      end: byteLen(matchStats),
+      style: { fg: totalMatches > 0 ? C.statusOk : C.statusDim },
+    });
+  }
+  return [{ text: matchStats, inlineOverlays: overlays }];
+}
+
+function buildLine1Spec(): WidgetSpec {
+  if (!panel) return col();
+  const { searchPattern, replaceText, focusPanel, queryField, cursorPos } = panel;
   const qFocusSearch = focusPanel === "query" && queryField === "search";
   const qFocusReplace = focusPanel === "query" && queryField === "replace";
   const searchVal = searchPattern || "";
@@ -482,52 +523,6 @@ function buildLine1Spec(): WidgetSpec {
   const replaceCursorByte = qFocusReplace ? byteLen(replaceVal.substring(0, cursorPos)) : -1;
   const searchLabel = editor.t("panel.search_label");
   const replLabel = editor.t("panel.replace_label");
-
-  const truncatedSuffix = truncated ? " " + editor.t("panel.limited") : "";
-  // Stats label next to the input fields. Only emit one when there's
-  // something concrete to report:
-  // - totalMatches > 0: show the count
-  // - busy: show "Searching…"
-  // - searchPattern + searchPerformed + !busy + totalMatches === 0: show "No matches"
-  // - otherwise (typing, no search yet, …): empty so the user doesn't
-  //   see "No matches" the moment they type a single character.
-  // See §17 of search-replace-scope-replan-on-widgets.md.
-  let matchStats = "";
-  if (totalMatches > 0) {
-    matchStats = "  " + editor.t("panel.match_stats", { count: String(totalMatches), files: String(fileCount) }) + truncatedSuffix;
-  } else if (panel.busy && searchPattern) {
-    matchStats = "  " + editor.t("panel.searching");
-  } else if (searchPattern && panel.searchPerformed && !panel.busy) {
-    matchStats = "  " + editor.t("panel.no_matches");
-  }
-
-  // Build the matchStats inline-overlay-styled Raw cell for the row.
-  // Truncated case keeps the warning-color tail; otherwise the whole
-  // stats string uses the ok/dim color depending on result presence.
-  const matchStatsEntries: TextPropertyEntry[] = [];
-  if (matchStats.length > 0) {
-    const overlays: InlineOverlay[] = [];
-    if (truncated && totalMatches > 0) {
-      const statsWithoutSuffix = "  " + editor.t("panel.match_stats", {
-        count: String(totalMatches),
-        files: String(fileCount),
-      });
-      const countEnd = byteLen(statsWithoutSuffix);
-      overlays.push({ start: 0, end: countEnd, style: { fg: C.statusOk } });
-      overlays.push({
-        start: countEnd,
-        end: countEnd + byteLen(truncatedSuffix),
-        style: { fg: [255, 180, 50] as RGB, bold: true },
-      });
-    } else {
-      overlays.push({
-        start: 0,
-        end: byteLen(matchStats),
-        style: { fg: totalMatches > 0 ? C.statusOk : C.statusDim },
-      });
-    }
-    matchStatsEntries.push({ text: matchStats, inlineOverlays: overlays });
-  }
 
   return row(
     spacer(1),
@@ -546,7 +541,7 @@ function buildLine1Spec(): WidgetSpec {
       fieldWidth: 25,
       key: "replaceField",
     }),
-    raw(matchStatsEntries),
+    raw(buildMatchStatsEntries(), "matchStats"),
   );
 }
 
@@ -924,7 +919,7 @@ function updatePanelContent(): void {
       buildLine1Spec(),
       buildOptionsRowSpec(),
       buildScopeRowSpec(),
-      raw(buildPanelEntries("postOptions")),
+      raw(buildPanelEntries("postOptions"), "separator"),
       buildMatchListSpec(),
       hintBar(buildHelpHints()),
     ),
@@ -1167,13 +1162,40 @@ async function performSearch(pattern: string, silent?: boolean): Promise<SearchR
         lastUiFlush = nowMs;
       }
       if (producerFinished) {
-        // Final flush — full spec re-emit so the matchStats line,
-        // file-row counts, and separator label all reflect the
-        // final state (rather than the last-streaming snapshot).
-        updatePanelContent();
+        // Streaming finished. The tree is already current in the host
+        // via the per-batch `appendTreeNodes` mutations — its nodes
+        // don't need refreshing. The only state that drifted is the
+        // small chrome strings: the matchStats label next to the
+        // input fields, and the "Matches (N in M files)" header in
+        // the separator. Update them in place via `setRawEntries`
+        // (a few-hundred-byte mutation) instead of re-emitting the
+        // full panel spec — the latter would force `js_to_json` over
+        // every TreeNode (~447 bytes × 5 000 nodes = 2.2 MB) and
+        // block the JS thread for ~1 second, exactly when user input
+        // piles up unread in the request channel. See the
+        // RESOLVE_CB_DONE dur_us=1095122 case in the perf trace.
+        if (panel.widgetPanel) {
+          if (panel.fileGroups.length === 0) {
+            // Special case: 0 matches. The matches body is an
+            // empty-state `raw()`, not a `tree()` — we have to swap
+            // widget kinds, which `setRawEntries` alone can't do.
+            // The full re-emit here is cheap because the tree is
+            // empty (no per-node serialization cost).
+            updatePanelContent();
+          } else {
+            panel.widgetPanel.setRawEntries("matchStats", buildMatchStatsEntries());
+            panel.widgetPanel.setRawEntries("separator", buildPanelEntries("postOptions"));
+          }
+        }
         lastStreamingFlatCount = 0;
         pendingTreeDeltaItems = [];
         pendingNewExpandedKeys = [];
+      }
+      // Also refresh the matchStats label on every streaming flush so
+      // the count updates in real time as results stream in.
+      if (!producerFinished && dueToFlush && panel.widgetPanel) {
+        panel.widgetPanel.setRawEntries("matchStats", buildMatchStatsEntries());
+        panel.widgetPanel.setRawEntries("separator", buildPanelEntries("postOptions"));
       }
 
       if (producerFinished) {
@@ -1395,13 +1417,23 @@ async function rerunSearch(): Promise<void> {
   panel.scrollOffset = 0;
   await performSearch(panel.searchPattern);
   // performSearch maintains panel.searchResults / panel.fileGroups
-  // incrementally during streaming and emits a final `updatePanelContent`
-  // on batch.done; no need to rebuild here. Only finalize busy +
-  // searchPerformed if we are still the latest search.
+  // incrementally during streaming and pushes matchStats / separator
+  // updates via cheap targeted mutations on batch.done — no full
+  // spec re-emit needed here. Only finalize busy + searchPerformed
+  // if we are still the latest search; the busy flip drives the
+  // "No matches" empty-state branch in `buildMatchListSpec`, so
+  // when totalMatches===0 we also need to refresh the matches Raw
+  // (a tiny mutation) so the user sees the empty-state label.
   if (panel && currentSearchGeneration === myGen) {
     panel.busy = false;
     panel.searchPerformed = true;
-    updatePanelContent();
+    // Only one tiny mutation needed: refresh matchStats since it
+    // depends on the busy flag and searchPerformed (showing
+    // "No matches" vs "Searching…"). The tree's nodes already
+    // reflect the final state — no full re-emit needed.
+    if (panel.widgetPanel) {
+      panel.widgetPanel.setRawEntries("matchStats", buildMatchStatsEntries());
+    }
   }
 }
 

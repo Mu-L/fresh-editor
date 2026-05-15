@@ -411,6 +411,37 @@ pub fn append_tree_nodes_in_spec(
     false
 }
 
+/// Replace a `Raw` widget's `entries` in place. Returns true when a
+/// matching `Raw` was found and updated.
+///
+/// Used by `WidgetMutation::SetRawEntries` to refresh small bits of
+/// panel chrome (the matchStats label, separator counts) without a
+/// full spec re-emit. Re-emitting was the killer in search-replace's
+/// `batch.done`: re-walking and re-serializing a 5 000-node Tree just
+/// to update a 30-byte label string blocked the JS thread for ~1
+/// second while queued user input piled up in the request channel.
+pub fn set_raw_entries_in_spec(
+    spec: &mut WidgetSpec,
+    widget_key: &str,
+    new_entries: Vec<TextPropertyEntry>,
+) -> bool {
+    if widget_key.is_empty() {
+        return false;
+    }
+    if let WidgetSpec::Raw { entries, key } = spec {
+        if key.as_deref() == Some(widget_key) {
+            *entries = new_entries;
+            return true;
+        }
+    }
+    for c in spec.children_mut() {
+        if c.contains_key(widget_key) {
+            return set_raw_entries_in_spec(c, widget_key, new_entries);
+        }
+    }
+    false
+}
+
 /// Stamp `Some(checked)` onto every `TreeNode` whose item-key
 /// appears in `keys`. Used by `WidgetMutation::SetCheckedKeys` —
 /// the host writes the new checkbox state into the spec so the
@@ -486,7 +517,8 @@ impl ContainsKey for WidgetSpec {
             | WidgetSpec::Button { key, .. }
             | WidgetSpec::Text { key, .. }
             | WidgetSpec::List { key, .. }
-            | WidgetSpec::Tree { key, .. } => key.as_deref() == Some(widget_key),
+            | WidgetSpec::Tree { key, .. }
+            | WidgetSpec::Raw { key, .. } => key.as_deref() == Some(widget_key),
             _ => false,
         };
         direct || self.children().any(|c| c.contains_key(widget_key))

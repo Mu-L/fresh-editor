@@ -1025,6 +1025,10 @@ type WidgetMutation = {
 	widgetKey: string;
 	newNodes: Array<TreeNode>;
 	newItemKeys: Array<string>;
+} | {
+	"kind": "setRawEntries";
+	widgetKey: string;
+	entries: Array<TextPropertyEntry>;
 };
 type SearchTakeResult = {
 	/**

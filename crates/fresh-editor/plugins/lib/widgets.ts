@@ -46,7 +46,7 @@ export type WidgetAction = globalThis.WidgetAction;
 export type WidgetMutation = globalThis.WidgetMutation;
 export type TreeNode = globalThis.TreeNode;
 export type StyledSegment = globalThis.StyledSegment;
-type TextPropertyEntry = globalThis.TextPropertyEntry;
+export type TextPropertyEntry = globalThis.TextPropertyEntry;
 type InlineOverlay = globalThis.InlineOverlay;
 type OverlayOptions = globalThis.OverlayOptions;
 
@@ -77,8 +77,8 @@ export function hintBar(entries: HintEntry[]): WidgetSpec {
  * `TextPropertyEntry[]` (the same shape `setVirtualBufferContent`
  * already accepts) so a plugin can migrate its panel one widget at a
  * time. */
-export function raw(entries: TextPropertyEntry[]): WidgetSpec {
- return { kind: "raw", entries };
+export function raw(entries: TextPropertyEntry[], key?: string): WidgetSpec {
+  return { kind: "raw", entries, key };
 }
 
 /** Build a `TextPropertyEntry` from a sequence of styled segments.
@@ -636,6 +636,18 @@ export class WidgetPanel {
       newNodes,
       newItemKeys,
     });
+  }
+
+  /** Replace the entries of a `Raw` widget identified by `widgetKey`.
+   *
+   * Use this when a small piece of panel chrome (a label, a header,
+   * a status line) needs to change but the rest of the spec is
+   * unchanged — calling `set(...)` to push the whole spec just to
+   * flip a few characters would force a `js_to_json` walk of every
+   * other widget (and every `Tree` node) in the panel, which can
+   * block the JS thread for hundreds of ms on large panels. */
+  setRawEntries(widgetKey: string, entries: TextPropertyEntry[]): boolean {
+    return this.mutate({ kind: "setRawEntries", widgetKey, entries });
   }
 }
 

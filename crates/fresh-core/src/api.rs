@@ -1785,6 +1785,16 @@ pub enum WidgetMutation {
         #[serde(default)]
         new_item_keys: Vec<String>,
     },
+    /// Replace a `Raw` widget's entries in place. The streaming search
+    /// pump uses this to update small bits of chrome (the matchStats
+    /// label, the separator "Matches (N in M files)" header) without
+    /// re-emitting the full panel spec — the latter would force a
+    /// `js_to_json` walk of every node in a 5 000-row tree once
+    /// streaming finishes, blocking the JS thread for ~1 second.
+    SetRawEntries {
+        widget_key: String,
+        entries: Vec<crate::text_property::TextPropertyEntry>,
+    },
 }
 
 /// Plugin command - allows plugins to send commands to the editor
