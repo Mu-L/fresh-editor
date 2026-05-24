@@ -35,7 +35,10 @@ fn regen_enabled() -> bool {
 }
 
 fn json_path(p: &Path) -> String {
-    serde_json::to_string(p).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(p)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 /// Replace concrete run paths with stable tokens, longest first so a
@@ -108,7 +111,10 @@ fn orch_meta(project: &Path, shared: bool) -> HashMap<String, serde_json::Value>
         "project_path".to_string(),
         serde_json::Value::String(project.to_string_lossy().into_owned()),
     );
-    m.insert("shared_worktree".to_string(), serde_json::Value::Bool(shared));
+    m.insert(
+        "shared_worktree".to_string(),
+        serde_json::Value::Bool(shared),
+    );
     m
 }
 
@@ -142,7 +148,10 @@ fn gen_v2_worktree_session() {
     }
     let d = dirs();
     let mut editor = new_editor(&d.project, &d.data_root);
-    let id = editor.create_window_at(d.worktree.clone(), "anna-katharine-green_hand-and-ring".into());
+    let id = editor.create_window_at(
+        d.worktree.clone(),
+        "anna-katharine-green_hand-and-ring".into(),
+    );
     editor.set_active_window(id);
     editor
         .active_window_mut()

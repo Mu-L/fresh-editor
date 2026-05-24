@@ -19,7 +19,10 @@ use fresh_core::WindowId;
 use std::path::{Path, PathBuf};
 
 fn json_path(p: &Path) -> String {
-    serde_json::to_string(p).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(p)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 /// Build a harness in `project` with the worktree-hijack fixture
@@ -241,7 +244,10 @@ fn diving_between_windows_roots_the_ui_at_the_active_window() {
         "diving into the worktree window points working_dir at the worktree"
     );
     assert_eq!(
-        h.editor().working_dir().file_name().and_then(|s| s.to_str()),
+        h.editor()
+            .working_dir()
+            .file_name()
+            .and_then(|s| s.to_str()),
         Some("worktree"),
         "the title's project name follows the dive"
     );

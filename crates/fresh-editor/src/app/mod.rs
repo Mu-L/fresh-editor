@@ -589,19 +589,12 @@ pub struct Editor {
     /// Menu configuration (built-in menus with i18n support)
     menus: crate::config::MenuConfig,
 
-    /// Working directory for file explorer (set at initialization).
-    ///
-    /// During the Session migration this field still backs every
-    /// existing read site. New code should prefer
-    /// `self.active_window().root` so the eventual swap to a real
-    /// active-session pointer is a no-op for the call site. See
-    /// `docs/internal/orchestrator-sessions-design.md` Step 1.
-    working_dir: PathBuf,
-
-    /// All editor sessions, keyed by id. Initially holds exactly one
-    /// session (`WindowId(1)`, the "base") rooted at `working_dir`.
-    /// Step 1 of the migration adds the abstraction without yet
-    /// allowing more than one entry.
+    /// All editor sessions, keyed by id. The active window's `root` is
+    /// the editor's working directory — see `working_dir()`, which
+    /// derives it. There is deliberately no separate `working_dir`
+    /// field: it cannot drift out of sync with the active window
+    /// (issue #2056). Holds exactly one session (`WindowId(1)`, the
+    /// "base") until the orchestrator adds more.
     pub(crate) windows: HashMap<fresh_core::WindowId, crate::app::window::Window>,
 
     /// Id of the currently active session. Always `WindowId(1)` for
@@ -1010,7 +1003,7 @@ impl Editor {
         let resolved = if input_path.is_absolute() {
             input_path.to_path_buf()
         } else {
-            self.working_dir.join(input_path)
+            self.working_dir().join(input_path)
         };
 
         let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());

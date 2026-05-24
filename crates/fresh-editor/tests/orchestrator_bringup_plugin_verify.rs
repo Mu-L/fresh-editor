@@ -15,7 +15,10 @@ use fresh::config_io::DirectoryContext;
 use std::path::{Path, PathBuf};
 
 fn json_path(p: &Path) -> String {
-    serde_json::to_string(p).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(p)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 #[test]
@@ -108,8 +111,21 @@ fn observe_rendered_root_with_orchestrator_plugin_loaded() {
     // activates the project-rooted window (not the worktree session), and
     // working_dir / explorer / title all agree on the project.
     let explorer_root = explorer_root.expect("file explorer should initialize");
-    assert_eq!(active_root, project, "the project window is active, not the worktree session");
-    assert_eq!(working_dir, project, "working_dir matches the active window's root");
-    assert_eq!(explorer_root, project, "file-explorer roots at the active (project) window");
-    assert_eq!(title_project.as_deref(), Some("project"), "title shows the project");
+    assert_eq!(
+        active_root, project,
+        "the project window is active, not the worktree session"
+    );
+    assert_eq!(
+        working_dir, project,
+        "working_dir matches the active window's root"
+    );
+    assert_eq!(
+        explorer_root, project,
+        "file-explorer roots at the active (project) window"
+    );
+    assert_eq!(
+        title_project.as_deref(),
+        Some("project"),
+        "title shows the project"
+    );
 }

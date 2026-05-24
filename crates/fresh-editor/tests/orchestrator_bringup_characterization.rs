@@ -227,7 +227,10 @@ fn v2_worktree_session_does_not_hijack_plain_launch() {
     // The worktree session is preserved as an inactive shell (divable via
     // the orchestrator), so both windows still exist.
     let roots = window_roots(&editor);
-    assert!(roots.contains(&s.worktree_canon), "worktree survives as a shell");
+    assert!(
+        roots.contains(&s.worktree_canon),
+        "worktree survives as a shell"
+    );
     assert!(roots.contains(&s.project_canon));
 }
 

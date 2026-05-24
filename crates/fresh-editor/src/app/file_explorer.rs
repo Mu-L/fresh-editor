@@ -1586,7 +1586,7 @@ impl Editor {
             return;
         }
 
-        let working_dir = self.working_dir.clone();
+        let working_dir = self.working_dir().to_path_buf();
         let rendered: Vec<String> = paths
             .iter()
             .map(|p| {

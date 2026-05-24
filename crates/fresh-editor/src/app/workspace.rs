@@ -150,7 +150,7 @@ impl WorkspaceTracker {
 impl Editor {
     /// Capture current editor state into a Workspace
     pub fn capture_workspace(&self) -> Workspace {
-        tracing::debug!("Capturing workspace for {:?}", self.working_dir);
+        tracing::debug!("Capturing workspace for {:?}", self.working_dir());
 
         // Collect terminal metadata for workspace restore
         let mut terminals = Vec::new();
@@ -187,7 +187,7 @@ impl Editor {
                     .get(&terminal_id)
                     .cloned()
                     .unwrap_or_else(|| {
-                        let root = self.dir_context.terminal_dir_for(&self.working_dir);
+                        let root = self.dir_context.terminal_dir_for(self.working_dir());
                         root.join(format!("fresh-terminal-{}.log", terminal_id.0))
                     });
                 let backing_path = self
@@ -196,7 +196,7 @@ impl Editor {
                     .get(&terminal_id)
                     .cloned()
                     .unwrap_or_else(|| {
-                        let root = self.dir_context.terminal_dir_for(&self.working_dir);
+                        let root = self.dir_context.terminal_dir_for(self.working_dir());
                         root.join(format!("fresh-terminal-{}.txt", terminal_id.0))
                     });
 
@@ -220,7 +220,7 @@ impl Editor {
                 .expect("active window must have a populated split layout")
                 .root(),
             &self.active_window().buffer_metadata,
-            &self.working_dir,
+            self.working_dir(),
             self.windows
                 .get(&self.active_window)
                 .map(|w| &w.terminal_buffers)
@@ -264,7 +264,7 @@ impl Editor {
                     .map(|w| w.buffers.as_map())
                     .expect("active window present"),
                 &self.active_window().buffer_metadata,
-                &self.working_dir,
+                self.working_dir(),
                 active_buffer,
                 self.windows
                     .get(&self.active_window)
@@ -298,7 +298,7 @@ impl Editor {
         // Capture file explorer state
         let file_explorer = if let Some(explorer) = self.file_explorer().as_ref() {
             // Get expanded directories from the tree
-            let expanded_dirs = get_expanded_dirs(explorer, &self.working_dir);
+            let expanded_dirs = get_expanded_dirs(explorer, self.working_dir());
             FileExplorerState {
                 visible: self.file_explorer_visible(),
                 width: self.active_window().file_explorer_width,
@@ -375,7 +375,7 @@ impl Editor {
         let bookmarks = serialize_bookmarks(
             &self.active_window().bookmarks,
             &self.active_window().buffer_metadata,
-            &self.working_dir,
+            self.working_dir(),
         );
 
         // Capture external files (files outside working_dir)
@@ -390,7 +390,7 @@ impl Editor {
             .values()
             .filter(|meta| !meta.hidden_from_tabs && !meta.is_virtual())
             .filter_map(|meta| meta.file_path())
-            .filter(|abs_path| abs_path.strip_prefix(&self.working_dir).is_err())
+            .filter(|abs_path| abs_path.strip_prefix(self.working_dir()).is_err())
             .cloned()
             .collect();
         if !external_files.is_empty() {
@@ -410,7 +410,7 @@ impl Editor {
             .filter_map(|meta| meta.file_path().cloned())
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| {
-                p.strip_prefix(&self.working_dir)
+                p.strip_prefix(self.working_dir())
                     .map(|rel| rel.to_path_buf())
                     .unwrap_or(p)
             })
@@ -458,7 +458,7 @@ impl Editor {
 
         Workspace {
             version: WORKSPACE_VERSION,
-            working_dir: self.working_dir.clone(),
+            working_dir: self.working_dir().to_path_buf(),
             split_layout,
             active_split_id: SplitId::from(
                 self.windows
@@ -516,11 +516,11 @@ impl Editor {
         // is resurrected on the next restart (terminal-reappears bug).
         if workspace.has_no_real_content() && self.has_any_virtual_buffer() {
             let on_disk = if let Some(ref session_name) = self.session_name {
-                Workspace::load_session(session_name, &self.working_dir)
+                Workspace::load_session(session_name, self.working_dir())
                     .ok()
                     .flatten()
             } else {
-                Workspace::load(&self.working_dir).ok().flatten()
+                Workspace::load(self.working_dir()).ok().flatten()
             };
             if let Some(existing) = on_disk {
                 if !existing.has_no_preservable_content() {
@@ -673,13 +673,16 @@ impl Editor {
     ///
     /// Returns true if a workspace was successfully loaded and applied.
     pub fn try_restore_workspace(&mut self) -> Result<bool, WorkspaceError> {
-        tracing::debug!("Attempting to restore workspace for {:?}", self.working_dir);
+        tracing::debug!(
+            "Attempting to restore workspace for {:?}",
+            self.working_dir()
+        );
 
         // For named sessions, load from session-scoped workspace file
         let workspace = if let Some(ref session_name) = self.session_name {
-            Workspace::load_session(session_name, &self.working_dir)?
+            Workspace::load_session(session_name, self.working_dir())?
         } else {
-            Workspace::load(&self.working_dir)?
+            Workspace::load(self.working_dir())?
         };
 
         match workspace {
@@ -689,7 +692,7 @@ impl Editor {
                 Ok(true)
             }
             None => {
-                tracing::debug!("No workspace found for {:?}", self.working_dir);
+                tracing::debug!("No workspace found for {:?}", self.working_dir());
                 Ok(false)
             }
         }
@@ -996,7 +999,7 @@ impl Editor {
         );
         let mut path_to_buffer: HashMap<PathBuf, BufferId> = HashMap::new();
         for rel_path in file_paths {
-            let abs_path = self.working_dir.join(&rel_path);
+            let abs_path = self.working_dir().join(&rel_path);
             tracing::trace!(
                 "Checking file: {:?} (exists: {})",
                 abs_path,
@@ -1059,10 +1062,11 @@ impl Editor {
         path_to_buffer: &HashMap<PathBuf, BufferId>,
     ) {
         for ro_path in read_only_files {
-            let buffer_id = path_to_buffer
-                .get(ro_path)
-                .copied()
-                .or_else(|| path_to_buffer.get(&self.working_dir.join(ro_path)).copied());
+            let buffer_id = path_to_buffer.get(ro_path).copied().or_else(|| {
+                path_to_buffer
+                    .get(&self.working_dir().join(ro_path))
+                    .copied()
+            });
             if let Some(id) = buffer_id {
                 self.active_window_mut().mark_buffer_read_only(id, true);
             }
@@ -1399,7 +1403,7 @@ impl Editor {
         terminal: &SerializedTerminalWorkspace,
     ) -> Option<BufferId> {
         // Resolve paths (accept absolute; otherwise treat as relative to terminals dir)
-        let terminals_root = self.dir_context.terminal_dir_for(&self.working_dir);
+        let terminals_root = self.dir_context.terminal_dir_for(self.working_dir());
         let log_path = if terminal.log_path.is_absolute() {
             terminal.log_path.clone()
         } else {
@@ -2040,29 +2044,27 @@ impl Editor {
     ///
     /// Each window's workspace is keyed by its `root`, matching the
     /// dir-keyed file naming `Workspace::save` uses. We temporarily flip
-    /// `active_window` + `working_dir` so the existing per-window
-    /// helpers (which all read `self.active_window`) save the correct
-    /// state to the correct path, then flip back. Plugin hooks aren't
-    /// fired because we bypass `set_active_window`.
+    /// `active_window` so the existing per-window helpers (which read
+    /// `self.active_window`, and `working_dir()` which derives from it)
+    /// save the correct state to the correct path, then flip back.
+    /// Plugin hooks aren't fired because we bypass `set_active_window`.
     ///
     /// Returns the first error encountered, if any; logs and continues
     /// past per-window failures so a single bad window can't block the
     /// other quits.
     pub fn save_all_windows_workspaces(&mut self) -> Result<(), WorkspaceError> {
         let originally_active = self.active_window;
-        let originally_wd = self.working_dir.clone();
 
-        let targets: Vec<(fresh_core::WindowId, PathBuf)> = self
+        let targets: Vec<fresh_core::WindowId> = self
             .windows
             .iter()
             .filter(|(_, w)| w.buffers.splits().is_some())
-            .map(|(id, w)| (*id, w.root.clone()))
+            .map(|(id, _)| *id)
             .collect();
 
         let mut first_err = None;
-        for (id, root) in targets {
+        for id in targets {
             self.active_window = id;
-            self.working_dir = root;
             if let Err(e) = self.save_workspace() {
                 tracing::warn!("Failed to save workspace for window {id}: {e}");
                 if first_err.is_none() {
@@ -2072,7 +2074,6 @@ impl Editor {
         }
 
         self.active_window = originally_active;
-        self.working_dir = originally_wd;
 
         match first_err {
             Some(e) => Err(e),
@@ -2097,19 +2098,21 @@ impl Editor {
     /// loop, so one corrupt workspace file can't blank the others.
     pub fn restore_inactive_window_workspaces(&mut self) {
         let originally_active = self.active_window;
-        let originally_wd = self.working_dir.clone();
         let saved_plugin_state = self.plugin_global_state.clone();
 
-        let targets: Vec<(fresh_core::WindowId, PathBuf)> = self
+        let targets: Vec<fresh_core::WindowId> = self
             .windows
-            .iter()
-            .filter(|(id, _)| **id != originally_active)
-            .map(|(id, w)| (*id, w.root.clone()))
+            .keys()
+            .copied()
+            .filter(|id| *id != originally_active)
             .collect();
 
-        for (id, root) in targets {
+        // `try_restore_workspace` keys off `working_dir()`, which derives
+        // from the active window's root — so pointing `active_window` at
+        // each shell is all that's needed to retarget the restore. No
+        // separate `working_dir` to swap.
+        for id in targets {
             self.active_window = id;
-            self.working_dir = root;
             match self.try_restore_workspace() {
                 Ok(true) => tracing::debug!("Restored workspace for inactive window {id}"),
                 Ok(false) => tracing::trace!(
@@ -2122,7 +2125,6 @@ impl Editor {
         }
 
         self.active_window = originally_active;
-        self.working_dir = originally_wd;
         self.plugin_global_state = saved_plugin_state;
     }
 }

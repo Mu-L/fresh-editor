@@ -68,7 +68,7 @@ impl Editor {
                 let resolved_path = if expanded_path.is_absolute() {
                     normalize_path(&expanded_path)
                 } else {
-                    normalize_path(&self.working_dir.join(&expanded_path))
+                    normalize_path(&self.working_dir().join(&expanded_path))
                 };
 
                 self.open_file_with_jump(resolved_path, line, column);
@@ -85,7 +85,7 @@ impl Editor {
                 let resolved_path = if expanded_path.is_absolute() {
                     normalize_path(&expanded_path)
                 } else {
-                    normalize_path(&self.working_dir.join(&expanded_path))
+                    normalize_path(&self.working_dir().join(&expanded_path))
                 };
 
                 if resolved_path.is_dir() {
@@ -228,7 +228,7 @@ impl Editor {
                     let resolved = if expanded.is_absolute() {
                         normalize_path(&expanded)
                     } else {
-                        normalize_path(&self.working_dir.join(&expanded))
+                        normalize_path(&self.working_dir().join(&expanded))
                     };
                     self.open_file_with_jump(resolved, line, column);
                 }
@@ -691,7 +691,7 @@ impl Editor {
         let full_path = if expanded_path.is_absolute() {
             normalize_path(&expanded_path)
         } else {
-            normalize_path(&self.working_dir.join(&expanded_path))
+            normalize_path(&self.working_dir().join(&expanded_path))
         };
 
         self.save_file_as_with_checks(full_path);
@@ -724,7 +724,7 @@ impl Editor {
         if let Some(parent) = full_path.parent() {
             if !parent.as_os_str().is_empty() && !self.authority.filesystem.exists(parent) {
                 let dir_name = parent
-                    .strip_prefix(&self.working_dir)
+                    .strip_prefix(self.working_dir())
                     .unwrap_or(parent)
                     .display()
                     .to_string();
@@ -763,7 +763,7 @@ impl Editor {
                 let metadata = BufferMetadata::with_file(
                     full_path.clone(),
                     &full_path,
-                    &self.working_dir,
+                    self.working_dir(),
                     self.authority.path_translation.as_ref(),
                 );
                 let active_buffer = self.active_buffer();
@@ -1019,7 +1019,8 @@ impl Editor {
             tracing::warn!("Failed to create config directory: {}", e);
             return;
         }
-        let resolver = ConfigResolver::new(self.dir_context.clone(), self.working_dir.clone());
+        let resolver =
+            ConfigResolver::new(self.dir_context.clone(), self.working_dir().to_path_buf());
         if let Err(e) = resolver.save_to_layer(&self.config, ConfigLayer::User) {
             tracing::warn!("Failed to save rulers to config: {}", e);
         }
@@ -1665,7 +1666,7 @@ impl Editor {
                 let full_path = if expanded_path.is_absolute() {
                     expanded_path
                 } else {
-                    self.working_dir.join(&expanded_path)
+                    self.working_dir().join(&expanded_path)
                 };
                 self.open_file_with_jump(full_path, line, column);
                 PromptResult::Done

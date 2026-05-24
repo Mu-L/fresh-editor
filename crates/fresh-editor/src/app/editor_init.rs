@@ -109,7 +109,6 @@ pub(super) struct EditorParts {
     pub(super) config_cached_json: Arc<serde_json::Value>,
     pub(super) user_config_raw: Arc<serde_json::Value>,
     pub(super) dir_context: DirectoryContext,
-    pub(super) working_dir: PathBuf,
 
     // Themes
     pub(super) theme: Arc<RwLock<crate::view::theme::Theme>>,
@@ -210,7 +209,6 @@ impl Editor {
             authority: parts.authority,
             local_filesystem: parts.local_filesystem,
             menu_state: crate::view::ui::MenuState::new(parts.dir_context.themes_dir()),
-            working_dir: parts.working_dir,
             windows: parts.windows,
             active_window: parts.active_window,
             next_window_id: parts.next_window_id,
@@ -1246,7 +1244,6 @@ impl Editor {
             config_cached_json,
             user_config_raw: Arc::new(user_config_raw),
             dir_context: dir_context.clone(),
-            working_dir: working_dir.clone(),
             theme,
             theme_registry,
             theme_cache,

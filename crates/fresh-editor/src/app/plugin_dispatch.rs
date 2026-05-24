@@ -124,7 +124,7 @@ impl Editor {
         // single Window.
 
         snapshot.clipboard = self.clipboard.get_internal().to_string();
-        snapshot.working_dir = self.working_dir.clone();
+        snapshot.working_dir = self.working_dir().to_path_buf();
 
         // Total terminal dimensions (full screen, not the active
         // split's viewport). Plugins read this via `getScreenSize()`
@@ -955,7 +955,7 @@ impl Editor {
                         .env_provider
                         .set(snippet, dir.map(std::path::PathBuf::from));
                     // Re-evaluate already-running tooling under the new env.
-                    self.request_restart(self.working_dir.clone());
+                    self.request_restart(self.working_dir().to_path_buf());
                 } else {
                     self.active_window_mut().status_message =
                         Some("Workspace not trusted — cannot activate environment".to_string());
@@ -966,7 +966,7 @@ impl Editor {
                 let was_active = self.authority.env_provider.is_active();
                 self.authority.env_provider.clear();
                 if was_active {
-                    self.request_restart(self.working_dir.clone());
+                    self.request_restart(self.working_dir().to_path_buf());
                 }
             }
 

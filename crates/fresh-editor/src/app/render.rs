@@ -1536,7 +1536,7 @@ impl Editor {
                     _ => None,
                 })
                 .unwrap_or(1);
-            let path = self.working_dir.display().to_string();
+            let path = self.working_dir().display().to_string();
             let triggers = self.workspace_trust_markers.join(", ");
             let secondary_label = if self.workspace_trust_prompt_cancellable {
                 "Cancel (Esc)".to_string()
@@ -2196,7 +2196,7 @@ impl Editor {
         let abs_path = if path_buf.is_absolute() {
             path_buf
         } else {
-            self.working_dir.join(&path_buf)
+            self.working_dir().join(&path_buf)
         };
         // Canonicalize for buffer-dedup parity with open_file_no_focus.
         let abs_path = self
@@ -3416,7 +3416,7 @@ impl Editor {
         if !self.config.editor.set_window_title {
             return;
         }
-        let project_name = self.working_dir.file_name().and_then(|s| s.to_str());
+        let project_name = self.working_dir().file_name().and_then(|s| s.to_str());
         let new_title =
             crate::services::terminal_title::build_window_title(display_name, project_name);
         if self.last_window_title.as_deref() == Some(new_title.as_str()) {

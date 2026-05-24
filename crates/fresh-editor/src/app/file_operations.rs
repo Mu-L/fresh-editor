@@ -62,7 +62,7 @@ impl Editor {
                         if let Some(parent) = path.parent() {
                             if !self.authority.filesystem.exists(parent) {
                                 let dir_name = parent
-                                    .strip_prefix(&self.working_dir)
+                                    .strip_prefix(self.working_dir())
                                     .unwrap_or(parent)
                                     .display()
                                     .to_string();
@@ -928,7 +928,7 @@ impl Editor {
     /// and remote (SSH) filesystems.
     fn resolve_git_index(&self) -> Option<PathBuf> {
         let spawner = &self.authority.process_spawner;
-        let cwd = self.working_dir.to_string_lossy().to_string();
+        let cwd = self.working_dir().to_string_lossy().to_string();
 
         // ProcessSpawner is async — run it on the tokio runtime if available,
         // otherwise fall back to blocking (should only happen in tests without
@@ -953,7 +953,7 @@ impl Editor {
         let git_dir_path = if std::path::Path::new(git_dir).is_absolute() {
             PathBuf::from(git_dir)
         } else {
-            self.working_dir.join(git_dir)
+            self.working_dir().join(git_dir)
         };
         Some(git_dir_path.join("index"))
     }

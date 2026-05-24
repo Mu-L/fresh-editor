@@ -3300,7 +3300,7 @@ impl Editor {
         let output = Command::new("git")
             .args(["diff", "--numstat", "--"])
             .arg(path)
-            .current_dir(&self.working_dir)
+            .current_dir(self.working_dir())
             .hide_window()
             .output()
             .ok()?;
@@ -3334,7 +3334,7 @@ impl Editor {
         let staged_output = Command::new("git")
             .args(["diff", "--numstat", "--cached", "--"])
             .arg(path)
-            .current_dir(&self.working_dir)
+            .current_dir(self.working_dir())
             .hide_window()
             .output()
             .ok()?;
@@ -3381,7 +3381,7 @@ impl Editor {
         let output = Command::new("git")
             .args(["status", "--porcelain", "--"])
             .arg(&resolved_path)
-            .current_dir(&self.working_dir)
+            .current_dir(self.working_dir())
             .hide_window()
             .output()
             .ok()?;
@@ -3404,7 +3404,7 @@ impl Editor {
                     } else {
                         file_part
                     };
-                    Some(self.working_dir.join(file_name))
+                    Some(self.working_dir().join(file_name))
                 } else {
                     None
                 }

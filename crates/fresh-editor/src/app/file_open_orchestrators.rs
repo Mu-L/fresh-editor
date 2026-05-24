@@ -177,9 +177,9 @@ impl Editor {
             self.authority
                 .filesystem
                 .home_dir()
-                .unwrap_or_else(|_| self.working_dir.clone())
+                .unwrap_or_else(|_| self.working_dir().to_path_buf())
         } else {
-            self.working_dir.clone()
+            self.working_dir().to_path_buf()
         };
 
         let resolved_path = if path.is_relative() {
@@ -366,7 +366,7 @@ impl Editor {
         let mut metadata = super::types::BufferMetadata::with_file(
             path.to_path_buf(),
             &display_path,
-            &self.working_dir,
+            self.working_dir(),
             self.authority.path_translation.as_ref(),
         );
 
@@ -479,7 +479,7 @@ impl Editor {
         encoding: crate::model::buffer::Encoding,
     ) -> anyhow::Result<BufferId> {
         // Use the same base directory logic as open_file
-        let base_dir = self.working_dir.clone();
+        let base_dir = self.working_dir().to_path_buf();
 
         let resolved_path = if path.is_relative() {
             base_dir.join(path)
@@ -562,7 +562,7 @@ impl Editor {
         let metadata = super::types::BufferMetadata::with_file(
             path.to_path_buf(),
             &display_path,
-            &self.working_dir,
+            self.working_dir(),
             self.authority.path_translation.as_ref(),
         );
         self.active_window_mut()
@@ -680,7 +680,7 @@ impl Editor {
     /// GB18030, GBK, Shift-JIS, or EUC-KR that requires loading the entire file into memory.
     pub fn open_file_large_encoding_confirmed(&mut self, path: &Path) -> anyhow::Result<BufferId> {
         // Use the same base directory logic as open_file
-        let base_dir = self.working_dir.clone();
+        let base_dir = self.working_dir().to_path_buf();
 
         let resolved_path = if path.is_relative() {
             base_dir.join(path)
@@ -749,7 +749,7 @@ impl Editor {
         let metadata = super::types::BufferMetadata::with_file(
             path.to_path_buf(),
             &display_path,
-            &self.working_dir,
+            self.working_dir(),
             self.authority.path_translation.as_ref(),
         );
         self.active_window_mut()
