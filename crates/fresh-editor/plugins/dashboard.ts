@@ -16,7 +16,7 @@ const editor = getEditor();
 //   it is never loaded, so no buffers are created, no timers run,
 //   and no network fetches fire.
 //
-//   A second flag `plugins.dashboard.auto-open` (default true) gates
+//   A second flag `plugins.dashboard.auto-open` (default false) gates
 //   only the ambient open paths (startup + last-buffer-closed). When
 //   false the plugin still loads and the "Show Dashboard" command is
 //   still available — it just won't appear on its own.
@@ -1590,7 +1590,7 @@ registerHandler("dashboardShowOrFocus", dashboardShowOrFocus);
 // comes from the typed plugin-config field declared below. The field
 // shows up in the Settings UI under "Plugin Settings → dashboard".
 editor.defineConfigBoolean("autoOpen", {
-    default: true,
+    default: false,
     description: "Show the dashboard automatically when Fresh starts with no real files open.",
 });
 
@@ -1599,7 +1599,7 @@ let autoOpenOverride: boolean | null = null;
 function autoOpenEnabled(): boolean {
     if (autoOpenOverride !== null) return autoOpenOverride;
     const cfg = (editor.getPluginConfig() ?? {}) as { autoOpen?: boolean };
-    return cfg.autoOpen !== false;
+    return cfg.autoOpen === true;
 }
 
 function shouldShowDashboard(): boolean {

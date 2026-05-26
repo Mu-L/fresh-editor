@@ -29,6 +29,7 @@ Live Grep grows into a universal search overlay: search across multiple **scopes
 
 ### Improvements
 
+* The **dashboard no longer opens automatically** on startup by default. To re-enable it, open **Settings**, select **Plugin: dashboard**, and turn on **AutoOpen** ("Show the dashboard automatically when Fresh starts with no real files open."). The dashboard remains available any time via the **Show Dashboard** command.
 * Homebrew install simplified now that fresh-editor is in homebrew-core — `brew install fresh-editor`, no tap step.
 
 ### Bug Fixes
