@@ -2478,7 +2478,7 @@ interface EditorAPI {
 	* 
 	* Uses typed Vec<Suggestion> - serde validates field names at runtime
 	*/
-	setPromptSuggestions(suggestions: PromptSuggestion[]): boolean;
+	setPromptSuggestions(suggestions: PromptSuggestion[], selectedIndex?: number): boolean;
 	setPromptInputSync(sync: boolean): boolean;
 	/**
 	* Set the title shown in the floating-overlay prompt's frame

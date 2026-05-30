@@ -4144,15 +4144,18 @@ impl JsEditorApi {
     /// Set suggestions for the current prompt
     ///
     /// Uses typed Vec<Suggestion> - serde validates field names at runtime
+    // `selected_index` uses `rquickjs::function::Opt` (not `Option<u32>`)
+    // so JS callers can omit the argument; `Option<u32>` would require
+    // the argument position to be present at the JS layer.
     pub fn set_prompt_suggestions(
         &self,
         suggestions: Vec<fresh_core::command::Suggestion>,
-        selected_index: Option<u32>,
+        selected_index: rquickjs::function::Opt<u32>,
     ) -> bool {
         self.command_sender
             .send(PluginCommand::SetPromptSuggestions {
                 suggestions,
-                selected_index,
+                selected_index: selected_index.0,
             })
             .is_ok()
     }
