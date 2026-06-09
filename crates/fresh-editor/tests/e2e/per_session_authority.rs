@@ -260,7 +260,7 @@ fn new_local_session_is_born_with_its_own_local_authority() -> anyhow::Result<()
     // authority, so the window is born local.
     let proj_b = temp.path().join("projB");
     std::fs::create_dir_all(&proj_b)?;
-    let born_authority = harness.editor().local_session_authority();
+    let born_authority = harness.editor().local_session_authority(&proj_b);
     let (new_win, _terminal, _buffer) = harness
         .editor_mut()
         .create_window_with_terminal(
@@ -416,5 +416,70 @@ fn switching_to_a_dormant_remote_session_starts_reconnect() -> anyhow::Result<()
     harness.render()?;
     harness.assert_screen_contains("Connecting");
 
+    Ok(())
+}
+
+#[test]
+fn trusting_one_session_does_not_change_another() -> anyhow::Result<()> {
+    // Per-session trust: each open session owns its own WorkspaceTrust scoped
+    // to its root, so a trust decision in one project never changes the live
+    // trust level another open session's spawns are gated against (issue
+    // #2280). Before this, every session shared one trust `Arc`, so trusting
+    // one folder trusted them all.
+    use fresh::services::workspace_trust::TrustLevel;
+
+    let temp = tempfile::tempdir()?;
+    let mut harness = EditorTestHarness::create(
+        100,
+        30,
+        HarnessOptions::new().with_working_dir(temp.path().to_path_buf()),
+    )?;
+    let session_a = harness.editor_mut().active_window_id();
+    let root_b = temp.path().join("projB");
+    std::fs::create_dir_all(&root_b)?;
+    let session_b = harness
+        .editor_mut()
+        .create_window_at(root_b, "projB".into());
+
+    // Record distinct decisions in the two sessions.
+    harness
+        .editor()
+        .session(session_a)
+        .unwrap()
+        .authority()
+        .workspace_trust
+        .set_level(TrustLevel::Trusted);
+    harness
+        .editor()
+        .session(session_b)
+        .unwrap()
+        .authority()
+        .workspace_trust
+        .set_level(TrustLevel::Restricted);
+
+    // Neither decision leaked: a shared handle would have left both at the
+    // last value set (Restricted).
+    assert_eq!(
+        harness
+            .editor()
+            .session(session_a)
+            .unwrap()
+            .authority()
+            .workspace_trust
+            .level(),
+        TrustLevel::Trusted,
+        "session A keeps its own Trusted decision when B is set Restricted"
+    );
+    assert_eq!(
+        harness
+            .editor()
+            .session(session_b)
+            .unwrap()
+            .authority()
+            .workspace_trust
+            .level(),
+        TrustLevel::Restricted,
+        "session B keeps its own Restricted decision"
+    );
     Ok(())
 }

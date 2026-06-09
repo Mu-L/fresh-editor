@@ -554,15 +554,32 @@ impl Editor {
         // ones locally.
         let active_id = self.active_window;
         let active_auth = self.authority.clone();
-        let background_auth = crate::services::authority::Authority::local(
-            std::sync::Arc::clone(&self.authority.workspace_trust),
-            std::sync::Arc::clone(&self.authority.env_provider),
-        );
+        let env = std::sync::Arc::clone(&self.authority.env_provider);
+        // Each background window gets its **own** local authority with its
+        // **own** per-session trust scoped to its root — so trusting the
+        // active project never raises the trust level a background project's
+        // spawns are gated against. Roots are collected first to avoid
+        // borrowing `self` while building the trusts.
+        let bg_roots: Vec<(fresh_core::WindowId, std::path::PathBuf)> = self
+            .windows
+            .iter()
+            .filter(|(id, _)| **id != active_id)
+            .map(|(id, w)| (*id, w.root.clone()))
+            .collect();
+        let mut bg_auths: HashMap<fresh_core::WindowId, crate::services::authority::Authority> =
+            HashMap::new();
+        for (id, root) in bg_roots {
+            let trust = self.session_trust_for(&root);
+            bg_auths.insert(
+                id,
+                crate::services::authority::Authority::local(trust, std::sync::Arc::clone(&env)),
+            );
+        }
         for (id, w) in self.windows.iter_mut() {
             let a = if *id == active_id {
                 &active_auth
             } else {
-                &background_auth
+                bg_auths.get(id).expect("background authority built above")
             };
             w.lsp
                 .set_long_running_spawner(a.long_running_spawner.clone());

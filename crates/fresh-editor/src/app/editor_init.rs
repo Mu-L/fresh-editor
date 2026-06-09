@@ -1158,13 +1158,13 @@ impl Editor {
         // gets its own local authority (sharing trust + env) and a matching
         // local `fs_manager` so its file explorer reads the host, not the
         // active session's remote/container backend. The active window keeps
-        // `authority` (wired into `base_resources` above).
-        let background_authority = crate::services::authority::Authority::local(
-            Arc::clone(&authority.workspace_trust),
-            Arc::clone(&authority.env_provider),
-        );
-        let background_fs_manager =
-            Arc::new(FsManager::new(Arc::clone(&background_authority.filesystem)));
+        // `authority` (wired into `base_resources` above). Each shell's
+        // authority — with its **own** per-session trust scoped to its root —
+        // is built in the loop below so trusting the active project never
+        // raises another session's trust level.
+        let background_fs_manager = Arc::new(FsManager::new(Arc::new(
+            crate::model::filesystem::StdFileSystem,
+        )));
         let mut windows = HashMap::new();
         if let Some(ref env) = persisted_env {
             // The active window came from a real pick when `picked_active`
@@ -1201,6 +1201,15 @@ impl Editor {
                 } else {
                     fresh_core::WindowId(ps.id)
                 };
+                // This shell's own local authority, gated by its own
+                // per-session trust (scoped to its root + project store).
+                let shell_authority = crate::services::authority::Authority::local(
+                    crate::services::workspace_trust::WorkspaceTrust::for_session(
+                        &ps.root,
+                        &dir_context.project_state_dir(&ps.root),
+                    ),
+                    Arc::clone(&authority.env_provider),
+                );
                 let resources = crate::app::window_resources::WindowResources {
                     config: Arc::clone(&config_arc),
                     grammar_registry: Arc::clone(&grammar_registry),
@@ -1211,7 +1220,7 @@ impl Editor {
                     fs_manager: Arc::clone(&background_fs_manager),
                     local_filesystem: Arc::clone(&local_filesystem),
                     buffer_id_alloc: buffer_id_alloc.clone(),
-                    authority: background_authority.clone(),
+                    authority: shell_authority,
                     time_source: Arc::clone(&time_source),
                     dir_context: dir_context.clone(),
                     tokio_runtime: tokio_runtime.clone(),

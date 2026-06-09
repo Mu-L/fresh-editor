@@ -3195,8 +3195,9 @@ impl Editor {
         // container/SSH/k8s session). Remote sessions take the
         // `attachRemoteAgent` → `create_remote_session_window` path, which
         // passes its connected authority. `resume` is the agent-resume argv
-        // carried through to the new session's terminal.
-        let new_authority = self.local_session_authority();
+        // carried through to the new session's terminal. The new local
+        // session gets its own per-session trust scoped to its root.
+        let new_authority = self.local_session_authority(&root);
         match self.create_window_with_terminal(
             root,
             label,

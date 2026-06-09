@@ -41,7 +41,7 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::services::remote::SpawnError;
 
@@ -138,6 +138,22 @@ impl WorkspaceTrust {
     /// installed at boot, and by tests/fixtures that don't exercise gating.
     pub fn permissive() -> Self {
         Self::new(None, TrustLevel::Trusted)
+    }
+
+    /// Build a **per-session** trust handle for `root`, backed by that
+    /// project's on-disk store at `project_state_dir`, adopting whatever level
+    /// the user previously recorded for it (Restricted by default). Each
+    /// session owns one of these, so trusting one project never raises the
+    /// live trust level another open session's spawns are gated against —
+    /// they read distinct handles. The shared "remember this folder" registry
+    /// is the per-project store itself. See
+    /// `docs/internal/PER_SESSION_BACKENDS_DESIGN.md`.
+    pub fn for_session(root: &Path, project_state_dir: &Path) -> Arc<Self> {
+        let trust = Self::new(Some(root.to_path_buf()), TrustLevel::Restricted);
+        // `set_store` adopts the project's persisted level (or the safe
+        // Restricted default for an undecided project).
+        trust.set_store(Some(TrustStore::for_project_dir(project_state_dir)));
+        Arc::new(trust)
     }
 
     fn build(root: Option<PathBuf>, level: TrustLevel, store: Option<TrustStore>) -> Self {

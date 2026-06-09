@@ -94,7 +94,16 @@ impl crate::app::Editor {
         let id = WindowId(self.next_window_id);
         self.next_window_id += 1;
 
-        let resources = self.window_resources();
+        // A new window for `root` is its own local session with its **own**
+        // per-session trust scoped to that root — not a clone of the active
+        // session's authority/trust (which would leak a trust decision across
+        // projects). Its `fs_manager` rides the same (host) filesystem.
+        let local_authority = self.local_session_authority(&root);
+        let mut resources = self.window_resources();
+        resources.fs_manager = std::sync::Arc::new(crate::services::fs::FsManager::new(
+            std::sync::Arc::clone(&local_authority.filesystem),
+        ));
+        resources.authority = local_authority;
         let mut session = Window::new(id, label, root.clone(), resources);
         session.terminal_width = self.terminal_width;
         session.terminal_height = self.terminal_height;
@@ -129,15 +138,33 @@ impl crate::app::Editor {
         id
     }
 
-    /// A fresh local authority for a brand-new session, sharing the
-    /// editor's live workspace-trust and env-provider handles. The
-    /// canonical backend for the Orchestrator's "New Session (Local)"
-    /// flow: callers pass this to [`Self::create_window_with_terminal`]
-    /// so a new session for a different project is born under its own
-    /// local backend rather than inheriting the active window's.
-    pub fn local_session_authority(&self) -> crate::services::authority::Authority {
+    /// A per-session [`WorkspaceTrust`](crate::services::workspace_trust::WorkspaceTrust)
+    /// for `root`, backed by that project's on-disk store and adopting its
+    /// previously recorded level. Each session owns one, so a trust decision
+    /// in one project never changes what another open session's spawns are
+    /// gated against.
+    pub(crate) fn session_trust_for(
+        &self,
+        root: &std::path::Path,
+    ) -> std::sync::Arc<crate::services::workspace_trust::WorkspaceTrust> {
+        crate::services::workspace_trust::WorkspaceTrust::for_session(
+            root,
+            &self.dir_context.project_state_dir(root),
+        )
+    }
+
+    /// A fresh local authority for a brand-new session rooted at `root`, with
+    /// its **own** per-session trust (not a clone of the active session's) and
+    /// the editor's shared env handle. The canonical backend for the
+    /// Orchestrator's "New Session (Local)" flow: callers pass this to
+    /// [`Self::create_window_with_terminal`] so a new session for a different
+    /// project is born under its own local backend *and* its own trust.
+    pub fn local_session_authority(
+        &self,
+        root: &std::path::Path,
+    ) -> crate::services::authority::Authority {
         crate::services::authority::Authority::local(
-            std::sync::Arc::clone(&self.authority.workspace_trust),
+            self.session_trust_for(root),
             std::sync::Arc::clone(&self.authority.env_provider),
         )
     }

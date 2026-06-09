@@ -157,17 +157,28 @@ Reconnect is **trust-gated** (below). A dead container/pod surfaces
 ## Per-session trust and env
 
 `WorkspaceTrust` and `EnvProvider` move from one shared handle to one **per
-session**, carried in the `SessionProfile` and constructed per window:
+session**, each window's authority carrying its own:
 
-- **Trust** — each session has its own level; a small shared **registry**
-  (`remember this host/cluster`) lets a decision be reused without making it
-  global. Auto-reconnect on restore consults the session's trust (don't
-  silently re-establish a remote backend for an untrusted folder).
-- **Env** — each session restores its own activation; activating in one never
-  affects another.
+- **Trust — shipped.** Each session owns a `WorkspaceTrust` scoped to its root
+  (`WorkspaceTrust::for_session`), so a trust decision in one project never
+  changes the live level another open session's spawns are gated against. The
+  "remember this folder" registry is the existing per-project on-disk
+  `TrustStore` (each session adopts its project's recorded level on
+  construction). Every per-session-authority construction point —
+  `local_session_authority`, `create_window_at`, the `set_boot_authority`
+  background fan-out, and the constructor's restored shells — builds a trust
+  for *that window's* root; the active session's trust is what drives the pill
+  and gating. (Auto-prompting on *switch* is deliberately not wired: the dock
+  live-switches windows on ↑/↓, so a modal there would spam — the boot prompt
+  + the per-session restricted pill cover it; per-session prompt-on-dive is a
+  separate UX decision.) Auto-reconnect on restore should consult the
+  session's trust (don't silently re-establish a remote backend for an
+  untrusted folder).
+- **Env** — *still shared* (follow-up): each session should restore its own
+  activation; activating in one should not affect another.
 
-Switching sessions therefore never changes another session's backend, trust,
-or env.
+Switching sessions therefore never changes another session's backend or trust
+(env is the remaining shared handle).
 
 ## Invariants
 
