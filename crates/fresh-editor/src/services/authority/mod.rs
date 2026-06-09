@@ -318,7 +318,45 @@ pub struct Authority {
     pub command_prefix: Vec<String>,
 }
 
+/// A session's **execution scope**: the trust gate (*may it run?*) and env
+/// overlay (*with what env?*) for one session, paired so they are always
+/// minted and handed around together.
+///
+/// This is the one blessed way to obtain per-session `trust` + `env`:
+/// [`SessionScope::for_root`] mints **fresh** handles owned by exactly one
+/// session, so trusting/activating in one window can never leak into another
+/// (issue #2280). Window construction goes through this — no path clones
+/// another window's live trust/env handles. (`Authority` still carries the two
+/// `Arc`s directly so its spawners can read them live; the scope is the
+/// construction-time guarantee, checked across windows by
+/// `Editor::debug_assert_sessions_unshared`.)
+pub struct SessionScope {
+    pub trust: Arc<WorkspaceTrust>,
+    pub env: Arc<crate::services::env_provider::EnvProvider>,
+}
+
+impl SessionScope {
+    /// Mint a fresh scope for a session rooted at `root`: a per-root trust
+    /// (backed by that project's store, adopting its recorded level) and a
+    /// fresh **inactive** env (the env-manager plugin activates it per
+    /// session). Each call yields handles owned by exactly one session.
+    pub fn for_root(root: &Path, project_state_dir: &Path) -> Self {
+        Self {
+            trust: WorkspaceTrust::for_session(root, project_state_dir),
+            env: Arc::new(crate::services::env_provider::EnvProvider::inactive()),
+        }
+    }
+}
+
 impl Authority {
+    /// Build a local authority from a per-session [`SessionScope`] — the
+    /// canonical per-session local constructor. Equivalent to
+    /// [`Self::local`] but takes the scope as a unit so callers can't pass a
+    /// trust from one window and an env from another.
+    pub fn local_scoped(scope: SessionScope) -> Self {
+        Self::local(scope.trust, scope.env)
+    }
+
     /// Build a [`TerminalWrapper`] that runs `argv` as an interactive PTY
     /// child **inside this authority's backend**. Local runs it directly;
     /// container/remote authorities prepend their exec prefix

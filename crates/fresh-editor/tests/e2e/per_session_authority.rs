@@ -483,3 +483,54 @@ fn trusting_one_session_does_not_change_another() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn activating_env_in_one_session_does_not_affect_another() -> anyhow::Result<()> {
+    // Per-session env: each session owns its own EnvProvider, so activating
+    // an env (venv/direnv/mise) in one project never activates it for another
+    // open session (issue #2280). Before this, every session shared one
+    // EnvProvider handle.
+    let temp = tempfile::tempdir()?;
+    let mut harness = EditorTestHarness::create(
+        100,
+        30,
+        HarnessOptions::new().with_working_dir(temp.path().to_path_buf()),
+    )?;
+    let session_a = harness.editor_mut().active_window_id();
+    let root_b = temp.path().join("projB");
+    std::fs::create_dir_all(&root_b)?;
+    let session_b = harness
+        .editor_mut()
+        .create_window_at(root_b, "projB".into());
+
+    // Activate an env in session A.
+    harness
+        .editor()
+        .session(session_a)
+        .unwrap()
+        .authority()
+        .env_provider
+        .set("export FRESH_TEST=1".into(), None);
+
+    assert!(
+        harness
+            .editor()
+            .session(session_a)
+            .unwrap()
+            .authority()
+            .env_provider
+            .is_active(),
+        "session A's env is active after activation"
+    );
+    assert!(
+        !harness
+            .editor()
+            .session(session_b)
+            .unwrap()
+            .authority()
+            .env_provider
+            .is_active(),
+        "activating an env in session A must not activate session B's env"
+    );
+    Ok(())
+}

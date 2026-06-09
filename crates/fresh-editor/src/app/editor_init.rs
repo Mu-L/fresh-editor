@@ -1202,13 +1202,13 @@ impl Editor {
                     fresh_core::WindowId(ps.id)
                 };
                 // This shell's own local authority, gated by its own
-                // per-session trust (scoped to its root + project store).
-                let shell_authority = crate::services::authority::Authority::local(
-                    crate::services::workspace_trust::WorkspaceTrust::for_session(
+                // per-session trust + env (scoped to its root + project store)
+                // — never a clone of the active session's handles.
+                let shell_authority = crate::services::authority::Authority::local_scoped(
+                    crate::services::authority::SessionScope::for_root(
                         &ps.root,
                         &dir_context.project_state_dir(&ps.root),
                     ),
-                    Arc::clone(&authority.env_provider),
                 );
                 let resources = crate::app::window_resources::WindowResources {
                     config: Arc::clone(&config_arc),

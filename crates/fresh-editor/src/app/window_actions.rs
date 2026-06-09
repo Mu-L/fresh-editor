@@ -135,38 +135,86 @@ impl crate::app::Editor {
             },
         );
 
+        self.debug_assert_sessions_unshared();
         id
     }
 
-    /// A per-session [`WorkspaceTrust`](crate::services::workspace_trust::WorkspaceTrust)
-    /// for `root`, backed by that project's on-disk store and adopting its
-    /// previously recorded level. Each session owns one, so a trust decision
-    /// in one project never changes what another open session's spawns are
-    /// gated against.
-    pub(crate) fn session_trust_for(
+    /// Invariant guard (debug builds): **no two windows share any backend
+    /// handle** — not trust, not env, not the filesystem or either spawner.
+    /// Each session must own all three of {authority, trust, env} outright;
+    /// sharing is the leak class per-session backends exist to prevent (issue
+    /// #2280). Trust + env are the mutable handles whose sharing is a *live*
+    /// cross-project leak; the filesystem/spawner checks additionally catch
+    /// the remote case, where a shared handle means one live connection (and
+    /// per-window keepalive) backing two sessions — close one, lose both.
+    ///
+    /// Called after the window-construction paths so a future change that
+    /// clones one window's authority into another trips immediately in
+    /// tests/dev rather than shipping a silent leak. O(n²) over a handful of
+    /// windows, debug-only.
+    pub(crate) fn debug_assert_sessions_unshared(&self) {
+        #[cfg(debug_assertions)]
+        {
+            use std::sync::Arc;
+            let windows: Vec<&Window> = self.windows.values().collect();
+            for (i, a) in windows.iter().enumerate() {
+                let aa = &a.resources.authority;
+                for b in &windows[i + 1..] {
+                    let ba = &b.resources.authority;
+                    debug_assert!(
+                        !Arc::ptr_eq(&aa.workspace_trust, &ba.workspace_trust),
+                        "per-session invariant violated: two windows share a WorkspaceTrust \
+                         handle — a trust decision in one would leak into the other"
+                    );
+                    debug_assert!(
+                        !Arc::ptr_eq(&aa.env_provider, &ba.env_provider),
+                        "per-session invariant violated: two windows share an EnvProvider \
+                         handle — an env activation in one would leak into the other"
+                    );
+                    debug_assert!(
+                        !Arc::ptr_eq(&aa.filesystem, &ba.filesystem),
+                        "per-session invariant violated: two windows share a filesystem \
+                         handle — for a remote backend that is one connection behind two \
+                         sessions"
+                    );
+                    debug_assert!(
+                        !Arc::ptr_eq(&aa.process_spawner, &ba.process_spawner),
+                        "per-session invariant violated: two windows share a process spawner"
+                    );
+                    debug_assert!(
+                        !Arc::ptr_eq(&aa.long_running_spawner, &ba.long_running_spawner),
+                        "per-session invariant violated: two windows share an LSP spawner"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A fresh per-session execution scope (trust + env) for `root` — the one
+    /// blessed factory. Each call mints handles owned by exactly one session,
+    /// so a trust decision or env activation in one window can never leak into
+    /// another. Every per-session window construction goes through this.
+    pub(crate) fn session_scope_for(
         &self,
         root: &std::path::Path,
-    ) -> std::sync::Arc<crate::services::workspace_trust::WorkspaceTrust> {
-        crate::services::workspace_trust::WorkspaceTrust::for_session(
+    ) -> crate::services::authority::SessionScope {
+        crate::services::authority::SessionScope::for_root(
             root,
             &self.dir_context.project_state_dir(root),
         )
     }
 
     /// A fresh local authority for a brand-new session rooted at `root`, with
-    /// its **own** per-session trust (not a clone of the active session's) and
-    /// the editor's shared env handle. The canonical backend for the
+    /// its **own** per-session trust + env (not clones of the active
+    /// session's) and a host filesystem. The canonical backend for the
     /// Orchestrator's "New Session (Local)" flow: callers pass this to
     /// [`Self::create_window_with_terminal`] so a new session for a different
-    /// project is born under its own local backend *and* its own trust.
+    /// project is born under its own local backend, trust, and env.
     pub fn local_session_authority(
         &self,
         root: &std::path::Path,
     ) -> crate::services::authority::Authority {
-        crate::services::authority::Authority::local(
-            self.session_trust_for(root),
-            std::sync::Arc::clone(&self.authority.env_provider),
-        )
+        crate::services::authority::Authority::local_scoped(self.session_scope_for(root))
     }
 
     /// Atomic "create a new window seeded with an agent terminal"
@@ -387,6 +435,7 @@ impl crate::app::Editor {
             crate::services::plugins::hooks::HookArgs::BufferActivated { buffer_id },
         );
 
+        self.debug_assert_sessions_unshared();
         Ok((id, terminal_id, buffer_id))
     }
 

@@ -3605,8 +3605,17 @@ impl Editor {
         let window_mode = spec.window;
         let window_label = spec.label.clone();
         let window_command = spec.command.clone();
-        let trust = std::sync::Arc::clone(&self.authority.workspace_trust);
-        let env = std::sync::Arc::clone(&self.authority.env_provider);
+        // A remote session gets its **own** fresh trust + env handles — never
+        // a clone of the launching session's `Arc`s — so a born-attached
+        // remote window can't share (and leak) trust/env with the window it
+        // was launched from. The trust *level* is copied by value from the
+        // launching context (independent handle thereafter); env starts
+        // inactive (the remote's env rides the spawner's captured probe).
+        let trust = std::sync::Arc::new(crate::services::workspace_trust::WorkspaceTrust::new(
+            None,
+            self.authority.workspace_trust.level(),
+        ));
+        let env = std::sync::Arc::new(crate::services::env_provider::EnvProvider::inactive());
 
         // The connect (spawn the carrier, bootstrap the agent, await `ready`)
         // is async and can take seconds, so run it on the runtime and report

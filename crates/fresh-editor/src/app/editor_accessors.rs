@@ -554,12 +554,11 @@ impl Editor {
         // ones locally.
         let active_id = self.active_window;
         let active_auth = self.authority.clone();
-        let env = std::sync::Arc::clone(&self.authority.env_provider);
         // Each background window gets its **own** local authority with its
-        // **own** per-session trust scoped to its root — so trusting the
-        // active project never raises the trust level a background project's
-        // spawns are gated against. Roots are collected first to avoid
-        // borrowing `self` while building the trusts.
+        // **own** per-session trust + env scoped to its root — so trusting or
+        // activating an env in the active project never leaks into a
+        // background one. Roots are collected first to avoid borrowing `self`
+        // while building the scopes.
         let bg_roots: Vec<(fresh_core::WindowId, std::path::PathBuf)> = self
             .windows
             .iter()
@@ -569,10 +568,9 @@ impl Editor {
         let mut bg_auths: HashMap<fresh_core::WindowId, crate::services::authority::Authority> =
             HashMap::new();
         for (id, root) in bg_roots {
-            let trust = self.session_trust_for(&root);
             bg_auths.insert(
                 id,
-                crate::services::authority::Authority::local(trust, std::sync::Arc::clone(&env)),
+                crate::services::authority::Authority::local_scoped(self.session_scope_for(&root)),
             );
         }
         for (id, w) in self.windows.iter_mut() {
@@ -611,6 +609,7 @@ impl Editor {
                 crate::services::plugins::hooks::HookArgs::AuthorityChanged { label },
             );
         }
+        self.debug_assert_sessions_unshared();
     }
 
     /// The active window's id. The active session under the (in-progress)
