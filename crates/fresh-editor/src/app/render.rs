@@ -1529,9 +1529,6 @@ impl Editor {
         // Record non-editor region theme keys for the theme inspector
         self.record_non_editor_theme_regions();
 
-        // Render theme info popup (Ctrl+Right-Click)
-        self.render_theme_info_popup(frame);
-
         // Render tab drag drop zone overlay if dragging a tab
         let drag_state_clone = self.active_window().mouse_state.dragging_tab.clone();
         if let Some(ref drag_state) = drag_state_clone {
@@ -1620,6 +1617,13 @@ impl Editor {
                 self.render_floating_widget_panel(frame, dock, super::PanelSlot::Dock);
             }
         }
+
+        // The theme-info popup (Ctrl+Right-Click) anchors to an absolute
+        // screen cell that may sit over the dock column, so draw it after
+        // the dock — otherwise the dock paints over it and its "Open in
+        // Theme Editor" button is hidden and unclickable.
+        self.render_theme_info_popup(frame);
+
         if self.floating_widget_panel.is_some() {
             // A `fullscreen` modal paints over the whole frame, covering the
             // dock; otherwise it lays into `chrome_area` beside the dock.
