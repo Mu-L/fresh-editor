@@ -52,7 +52,7 @@ use crate::services::workspace_trust::WorkspaceTrust;
 /// `result.remoteWorkspaceFolder` for the in-container root). Strings
 /// because the wire format is JSON; paths get parsed in
 /// `Authority::from_plugin_payload`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PathTranslationSpec {
     pub host_root: String,
     pub remote_root: String,
@@ -186,7 +186,7 @@ impl TerminalWrapper {
 /// `Authority::from_plugin_payload`. Plugins consuming the API see only
 /// the `kind` discriminator and the kind-specific params, so old payloads
 /// keep working as new kinds are added.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthorityPayload {
     pub filesystem: FilesystemSpec,
     pub spawner: SpawnerSpec,
@@ -204,7 +204,7 @@ pub struct AuthorityPayload {
 }
 
 /// Filesystem kind chosen by a plugin payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FilesystemSpec {
     /// Use the host filesystem. Devcontainers fall here because the
@@ -214,7 +214,7 @@ pub enum FilesystemSpec {
 }
 
 /// Process-spawner kind chosen by a plugin payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SpawnerSpec {
     /// Spawn on the host. Equivalent to `LocalProcessSpawner`.
@@ -252,7 +252,7 @@ pub enum SpawnerSpec {
 }
 
 /// Terminal-wrapper kind chosen by a plugin payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum TerminalWrapperSpec {
     /// Use the detected host shell.
@@ -534,10 +534,49 @@ impl Authority {
     }
 }
 
+/// Declarative description of *how to rebuild* a session's backend — the
+/// persisted, source-of-truth counterpart to the live [`Authority`]. A
+/// session stores this (in its per-dir workspace file) so that after an
+/// editor restart or a cold relaunch its backend can be reconstructed
+/// (`Local`) or reconnected (`Plugin` / `RemoteAgent`) instead of silently
+/// degrading to local. See `docs/internal/PER_SESSION_BACKENDS_DESIGN.md`.
+///
+/// Reuses the existing creation payloads ([`AuthorityPayload`],
+/// [`RemoteAgentSpec`]) verbatim so there is no new backend vocabulary and
+/// `fresh-core` stays backend-opaque. Externally tagged so it round-trips
+/// through JSON robustly and additively.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SessionAuthoritySpec {
+    /// Host-local backend. The default for a brand-new session and for any
+    /// session with no persisted spec (back-compat).
+    Local,
+    /// A backend installed via `editor.setAuthority(...)` — devcontainer /
+    /// docker. Reconnecting it is the owning plugin's job (only it can run
+    /// `devcontainer up`).
+    Plugin(AuthorityPayload),
+    /// A born-attached remote agent (SSH / Kubernetes). Reconnectable from
+    /// core via `connect_ssh_authority` / `connect_kube_authority`.
+    RemoteAgent(RemoteAgentSpec),
+}
+
+impl Default for SessionAuthoritySpec {
+    fn default() -> Self {
+        Self::Local
+    }
+}
+
+impl SessionAuthoritySpec {
+    /// Whether this session's backend is anything other than plain local —
+    /// i.e. one that must be reconnected (not just rebuilt) on restore.
+    pub fn is_remote(&self) -> bool {
+        !matches!(self, Self::Local)
+    }
+}
+
 /// Plugin payload for `editor.attachRemoteAgent(...)`. Names a transport
 /// that needs a live connection plus the captured in-pod env probe.
 /// Opaque JSON at the fresh-core boundary; parsed here.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteAgentSpec {
     pub transport: RemoteTransportSpec,
     /// Captured in-pod env (PATH/HOME/LANG/…) applied to LSP spawns and
@@ -561,7 +600,7 @@ pub struct RemoteAgentSpec {
 
 /// Transport kind for [`RemoteAgentSpec`]. Tagged + additive so new
 /// carriers slot in without breaking the plugin contract.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum RemoteTransportSpec {
     /// Exec into a pod on a K8s (or any kube) cluster.

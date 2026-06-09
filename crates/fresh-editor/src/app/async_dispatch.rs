@@ -724,6 +724,7 @@ impl Editor {
                         keepalive,
                         working_dir,
                         mode,
+                        spec,
                         request_id,
                     } = ready;
                     // If the plugin cancelled this connect while it was
@@ -759,6 +760,10 @@ impl Editor {
                             // runtime down, so the awaiting caller observes
                             // success rather than a vanished promise.
                             self.resolve_remote_attach(request_id);
+                            // Record the reconnect spec on the (re-rooted)
+                            // active session before the restart so it persists
+                            // and the rebuilt editor restores this backend.
+                            self.active_window_mut().authority_spec = spec;
                             self.install_authority_with_keepalive(authority, keepalive, root);
                         }
                         crate::services::async_bridge::RemoteAttachMode::Window {
@@ -775,7 +780,7 @@ impl Editor {
                             // failure reject so the plugin keeps its dialog
                             // open with the reason and no half-built window.
                             match self.create_remote_session_window(
-                                authority, keepalive, root, label, command,
+                                authority, keepalive, root, label, command, spec,
                             ) {
                                 Ok(_) => self.resolve_remote_attach(request_id),
                                 Err(e) => self.reject_remote_attach(request_id, e),

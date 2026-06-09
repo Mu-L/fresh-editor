@@ -1088,9 +1088,23 @@ impl Editor {
         // lookup by `active_window_id` — a clean base reuses id 1, and
         // a stale persisted id-1 window (a different project's old
         // base) must not lend its label/root/state to it.
-        let (active_label, active_root, active_plugin_state) = picked_active
-            .map(|w| (w.label.clone(), w.root.clone(), w.plugin_state.clone()))
-            .unwrap_or_else(|| (String::new(), working_dir.clone(), HashMap::new()));
+        let (active_label, active_root, active_plugin_state, active_authority_spec) = picked_active
+            .map(|w| {
+                (
+                    w.label.clone(),
+                    w.root.clone(),
+                    w.plugin_state.clone(),
+                    w.authority_spec.clone(),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    String::new(),
+                    working_dir.clone(),
+                    HashMap::new(),
+                    crate::services::authority::SessionAuthoritySpec::Local,
+                )
+            });
 
         let mut active_win = crate::app::window::Window::new(
             active_window_id,
@@ -1116,6 +1130,7 @@ impl Editor {
         active_win.buffer_metadata = buffer_metadata;
         active_win.event_logs = event_logs;
         active_win.plugin_state = active_plugin_state;
+        active_win.authority_spec = active_authority_spec;
         // Load prompt histories from disk for the active window.
         // Each window has its own prompt-history rings.
         for history_name in ["search", "replace", "goto_line"] {
@@ -1215,6 +1230,11 @@ impl Editor {
                 shell.terminal_width = width;
                 shell.terminal_height = height;
                 shell.plugin_state = ps.plugin_state.clone();
+                // Carry the session's backend spec so an unmaterialized
+                // background remote session keeps its identity (and a later
+                // save doesn't clobber it back to local). Its live authority
+                // stays the local placeholder until reconnect — i.e. dormant.
+                shell.authority_spec = ps.authority_spec.clone();
                 windows.insert(id, shell);
             }
         }

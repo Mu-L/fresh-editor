@@ -3476,10 +3476,17 @@ impl Editor {
                 // handles, so its spawners are gated and env'd identically.
                 let trust = std::sync::Arc::clone(&self.authority.workspace_trust);
                 let env = std::sync::Arc::clone(&self.authority.env_provider);
+                // Record the spec on the active session *before* the restart
+                // so it persists (save-on-restart) and the rebuilt editor
+                // restores this session under the same backend instead of
+                // degrading it to local. The payload is cloned because
+                // `from_plugin_payload` consumes it.
+                let spec = crate::services::authority::SessionAuthoritySpec::Plugin(parsed.clone());
                 match crate::services::authority::Authority::from_plugin_payload(parsed, trust, env)
                 {
                     Ok(auth) => {
                         tracing::info!("Plugin installed new authority");
+                        self.active_window_mut().authority_spec = spec;
                         self.install_authority(auth);
                     }
                     Err(e) => {
@@ -3542,6 +3549,10 @@ impl Editor {
         // on the same `RemoteAttachReady`; only the connect future differs.
         use crate::services::authority::RemoteTransportSpec;
         let base_env = spec.base_env.clone();
+        // The reconnect spec persisted on the session (so a restart can bring
+        // this remote backend back). Cloned before `spec` is consumed below.
+        let session_spec =
+            crate::services::authority::SessionAuthoritySpec::RemoteAgent(spec.clone());
         let mode_for = |label: &str| {
             if window_mode {
                 crate::services::async_bridge::RemoteAttachMode::Window {
@@ -3577,6 +3588,7 @@ impl Editor {
                                 keepalive: Box::new(keepalive),
                                 working_dir: workspace,
                                 mode,
+                                spec: session_spec,
                                 request_id,
                             },
                         ),
@@ -3630,6 +3642,7 @@ impl Editor {
                                 keepalive: Box::new(keepalive),
                                 working_dir: workspace,
                                 mode,
+                                spec: session_spec,
                                 request_id,
                             },
                         ),

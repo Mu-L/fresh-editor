@@ -3944,6 +3944,18 @@ fn real_main() -> AnyhowResult<()> {
         // dropped editor so the next iteration can re-bind it.
         warning_log_slot = editor.take_warning_log();
 
+        // Persist every session before a restart rebuilds the editor from
+        // disk. Quit already saves (after the loop); the restart branch did
+        // not, so a session's per-window state — notably its backend
+        // `authority_spec` — would be lost across an `install_authority`
+        // restart and the session would come back local. Only needed when we
+        // are actually restarting; a real quit saves below.
+        if restart_dir.is_some() {
+            if let Err(e) = editor.save_all_windows_workspaces() {
+                tracing::warn!("Failed to save sessions before restart: {e}");
+            }
+        }
+
         drop(editor);
 
         if let Some(new_dir) = restart_dir {

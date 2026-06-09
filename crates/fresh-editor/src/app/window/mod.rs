@@ -324,6 +324,18 @@ pub struct Window {
     /// data dir so it survives editor restarts.
     pub plugin_state: HashMap<String, HashMap<String, serde_json::Value>>,
 
+    /// Declarative spec for *how to rebuild this session's backend* — the
+    /// persisted source of truth behind the live `resources.authority`. Set
+    /// when an authority is installed for the session (`setAuthority` →
+    /// `Plugin`, born-attached remote → `RemoteAgent`, new local → `Local`)
+    /// and round-tripped through the session's workspace file so a restart /
+    /// relaunch can reconnect the backend rather than degrade it to local.
+    /// `Local` (the default) for an ordinary host-local session. A session
+    /// whose spec is remote but whose live `authority` is local is *dormant*
+    /// — disconnected, awaiting reconnect. See
+    /// `docs/internal/PER_SESSION_BACKENDS_DESIGN.md`.
+    pub authority_spec: crate::services::authority::SessionAuthoritySpec,
+
     /// Window-scoped layout hit-test cache: split-leaf rects, tab
     /// rects, the file-explorer rect, separators, scrollbars, and
     /// per-leaf `view_line_mappings` that mouse positioning and
@@ -1697,6 +1709,7 @@ impl Window {
             file_explorer: None,
             file_mod_times: HashMap::new(),
             plugin_state: HashMap::new(),
+            authority_spec: crate::services::authority::SessionAuthoritySpec::Local,
             lsp,
             panel_ids: HashMap::new(),
             buffers: WindowBuffers::new(),

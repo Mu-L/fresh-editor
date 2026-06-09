@@ -82,6 +82,20 @@ pub(crate) struct PersistedWindow {
     /// stripped on save.
     #[serde(default)]
     pub(crate) plugin_state: HashMap<String, HashMap<String, serde_json::Value>>,
+    /// How to rebuild/reconnect this session's backend on restore (read
+    /// from the workspace file's `authority_spec`). `Local` for an ordinary
+    /// host session. Threaded into the window at construction so an
+    /// unmaterialized background session still knows its backend (and a
+    /// later save doesn't clobber it back to local).
+    #[serde(default, skip_serializing_if = "is_local_authority_spec")]
+    pub(crate) authority_spec: crate::services::authority::SessionAuthoritySpec,
+}
+
+fn is_local_authority_spec(spec: &crate::services::authority::SessionAuthoritySpec) -> bool {
+    matches!(
+        spec,
+        crate::services::authority::SessionAuthoritySpec::Local
+    )
 }
 
 fn is_false(b: &bool) -> bool {
@@ -204,7 +218,12 @@ fn discover_sessions(
         Ok(e) => e,
         Err(_) => return Vec::new(),
     };
-    let mut found: Vec<(PathBuf, String, SessionState)> = Vec::new();
+    let mut found: Vec<(
+        PathBuf,
+        String,
+        SessionState,
+        crate::services::authority::SessionAuthoritySpec,
+    )> = Vec::new();
     for entry in entries {
         let p = &entry.path;
         // Only real workspace files. A torn `*.json.tmp` write or a
@@ -250,13 +269,19 @@ fn discover_sessions(
             .get("session_plugin_state")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        found.push((root, label, plugin_state));
+        // The session's backend spec (how to reconnect on restore). Absent /
+        // unparseable → `Local`, so a malformed entry degrades safely.
+        let authority_spec: crate::services::authority::SessionAuthoritySpec = val
+            .get("authority_spec")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        found.push((root, label, plugin_state, authority_spec));
     }
     found.sort_by(|a, b| canonical_key(&a.0).cmp(&canonical_key(&b.0)));
     found
         .into_iter()
         .enumerate()
-        .map(|(i, (root, label, plugin_state))| {
+        .map(|(i, (root, label, plugin_state, authority_spec))| {
             let (project_path, shared_worktree) = read_orch_session_meta(&plugin_state);
             PersistedWindow {
                 id: (i as u64) + 1,
@@ -264,6 +289,7 @@ fn discover_sessions(
                 root,
                 project_path,
                 shared_worktree,
+                authority_spec,
                 plugin_state,
             }
         })
@@ -849,6 +875,7 @@ mod tests {
             root: PathBuf::from(root),
             project_path: project_path.map(PathBuf::from),
             shared_worktree: false,
+            authority_spec: Default::default(),
             plugin_state: HashMap::new(),
         }
     }
@@ -1001,6 +1028,82 @@ mod tests {
         assert_eq!(sessions[0].label, "live-session");
         assert!(!dead_file.exists(), "the dead dir's cache file was GC'd");
         assert!(live_file.exists(), "the live cache file is kept");
+    }
+
+    #[test]
+    fn discover_reads_authority_spec_so_remote_sessions_arent_lost() {
+        // A session that was running on a remote backend persists an
+        // `authority_spec` in its workspace file; discovery must surface it
+        // (so restore can reconnect rather than degrade to local). A file
+        // without the field reads back as `Local` — back-compat for sessions
+        // written before per-session backends existed.
+        use crate::model::filesystem::StdFileSystem;
+        use crate::services::authority::{
+            AuthorityPayload, FilesystemSpec, SessionAuthoritySpec, SpawnerSpec,
+            TerminalWrapperSpec,
+        };
+        let data = tempfile::tempdir().unwrap();
+        let data_dir = data.path();
+        let ws_dir = workspaces_dir(data_dir);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_root = remote_root.path().canonicalize().unwrap();
+        let spec = SessionAuthoritySpec::Plugin(AuthorityPayload {
+            filesystem: FilesystemSpec::Local,
+            spawner: SpawnerSpec::DockerExec {
+                container_id: "abc123".into(),
+                user: Some("vscode".into()),
+                workspace: Some("/workspaces/proj".into()),
+                env: Vec::new(),
+            },
+            terminal_wrapper: TerminalWrapperSpec::HostShell,
+            display_label: "Container:abc123".into(),
+            path_translation: None,
+        });
+        std::fs::write(
+            ws_dir.join("remote.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "working_dir": remote_root,
+                "label": "remote-session",
+                "authority_spec": spec,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        // A plain local session with no `authority_spec` field at all.
+        let local_root = tempfile::tempdir().unwrap();
+        let local_root = local_root.path().canonicalize().unwrap();
+        std::fs::write(
+            ws_dir.join("local.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "working_dir": local_root, "label": "local-session",
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let fs = StdFileSystem;
+        let sessions = discover_sessions(&fs, data_dir);
+
+        let remote = sessions
+            .iter()
+            .find(|s| s.label == "remote-session")
+            .expect("remote session discovered");
+        assert_eq!(
+            remote.authority_spec, spec,
+            "the remote backend spec round-trips through discovery"
+        );
+        let local = sessions
+            .iter()
+            .find(|s| s.label == "local-session")
+            .expect("local session discovered");
+        assert_eq!(
+            local.authority_spec,
+            SessionAuthoritySpec::Local,
+            "a session with no persisted spec reads back as Local"
+        );
     }
 
     #[test]

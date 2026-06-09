@@ -58,6 +58,10 @@ pub struct RemoteAttachReady {
     pub working_dir: Option<std::path::PathBuf>,
     /// Restart (global) vs. born-attached new window.
     pub mode: RemoteAttachMode,
+    /// Declarative spec for *how to reconnect* this backend — stored on the
+    /// session so a restart / relaunch can bring it back (dormant) and
+    /// reconnect it, rather than degrading it to local.
+    pub spec: crate::services::authority::SessionAuthoritySpec,
     /// JS callback id of the `attachRemoteAgent` promise to settle once the
     /// session (authority + window) is fully constructed. The main loop
     /// resolves it on success and rejects it if window creation fails, so the

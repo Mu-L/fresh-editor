@@ -770,6 +770,7 @@ impl crate::app::Editor {
         root: PathBuf,
         label: String,
         command: Option<Vec<String>>,
+        spec: crate::services::authority::SessionAuthoritySpec,
     ) -> Result<WindowId, String> {
         match self.create_window_with_terminal(
             root.clone(),
@@ -782,6 +783,12 @@ impl crate::app::Editor {
         ) {
             Ok((window_id, _terminal, _buffer)) => {
                 self.session_keepalives.insert(window_id, keepalive);
+                // Persist how to reconnect this backend on the new session so
+                // a restart / relaunch can bring it back rather than degrade
+                // it to local.
+                if let Some(w) = self.windows.get_mut(&window_id) {
+                    w.authority_spec = spec;
+                }
                 Ok(window_id)
             }
             Err(e) => {

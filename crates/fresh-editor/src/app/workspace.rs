@@ -459,6 +459,10 @@ impl Editor {
                 .get_mut(&id)
                 .expect("window present for restore");
             win.apply_workspace_layout(&workspace, session.as_deref());
+            // Restore the session's backend spec so a dormant remote session
+            // knows what to reconnect to (the live authority is still the
+            // local placeholder until reconnect).
+            win.authority_spec = workspace.authority_spec.clone();
         } else {
             // Never-seeded shell: build the whole window from the
             // workspace via the `Window::from_workspace` factory, carrying
@@ -479,6 +483,7 @@ impl Editor {
             built.terminal_width = tw;
             built.terminal_height = th;
             built.plugin_state = pstate;
+            built.authority_spec = workspace.authority_spec.clone();
             self.windows.insert(id, built);
         }
 
@@ -2282,6 +2287,8 @@ impl crate::app::window::Window {
             // workspace file is the sole record).
             label: Some(self.label.clone()),
             session_plugin_state: self.plugin_state.clone(),
+            // How to rebuild/reconnect this session's backend on restore.
+            authority_spec: self.authority_spec.clone(),
         }
     }
 }

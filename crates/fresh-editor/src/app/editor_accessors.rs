@@ -503,6 +503,11 @@ impl Editor {
         // is gated by the same workspace-trust state.
         let trust = std::sync::Arc::clone(&self.authority.workspace_trust);
         let env = std::sync::Arc::clone(&self.authority.env_provider);
+        // Detaching returns this session to a plain local backend; clear its
+        // persisted spec so a later restore doesn't try to reconnect a
+        // backend the user explicitly left.
+        self.active_window_mut().authority_spec =
+            crate::services::authority::SessionAuthoritySpec::Local;
         self.install_authority(crate::services::authority::Authority::local(trust, env));
     }
 

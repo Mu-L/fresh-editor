@@ -115,6 +115,24 @@ pub struct Workspace {
     /// session identity survives across restarts without windows.json.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub session_plugin_state: HashMap<String, HashMap<String, serde_json::Value>>,
+
+    /// How to rebuild / reconnect this session's backend on restore. `Local`
+    /// (the default, skipped when serialized) for an ordinary host session;
+    /// a `Plugin` (devcontainer/docker) or `RemoteAgent` (SSH/Kubernetes)
+    /// spec for a session that was running remotely, so a restart or
+    /// relaunch can bring it back disconnected-but-reconnectable rather than
+    /// silently local. See `docs/internal/PER_SESSION_BACKENDS_DESIGN.md`.
+    #[serde(default, skip_serializing_if = "is_local_authority_spec")]
+    pub authority_spec: crate::services::authority::SessionAuthoritySpec,
+}
+
+/// Skip-serialize predicate so workspace files for ordinary local sessions
+/// don't carry a redundant `authority_spec: Local`.
+fn is_local_authority_spec(spec: &crate::services::authority::SessionAuthoritySpec) -> bool {
+    matches!(
+        spec,
+        crate::services::authority::SessionAuthoritySpec::Local
+    )
 }
 
 /// Reference to a persisted unnamed buffer (content stored in recovery files)
@@ -999,6 +1017,7 @@ impl Workspace {
                 .as_secs(),
             label: None,
             session_plugin_state: HashMap::new(),
+            authority_spec: crate::services::authority::SessionAuthoritySpec::Local,
         }
     }
 
