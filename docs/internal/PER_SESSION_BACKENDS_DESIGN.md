@@ -40,31 +40,50 @@ backend-opaque (`AUTHORITY_DESIGN.md` principle 3). The profile is set
 wherever a backend/trust/env is installed and is the *source of truth* for
 restoration; the live `Authority` is derived from it.
 
-### Restoring agent terminals: the *restore command*
+### Restoring agent terminals (as-built: agent-resume)
 
 Bringing a session's backend back is not enough for an **agent** session
 (`claude`, `aider`, …): its seed terminal ran a process that is gone, and
-re-opening a bare shell loses the agent. So each terminal carries an
-optional **restore command** — the argv to re-run on restore — which is
-deliberately **not** the launch argv:
+re-opening a bare shell loses the agent. This is the *what to re-run* half of
+restore, and it is **already shipped** — see
+[`agent-resume-design.md`](agent-resume-design.md). In brief, each terminal
+persists two argvs in its workspace entry:
 
-- The **launch command** is what spawned the PTY (often just a shell, or
-  `claude`).
-- The **restore command** is *how to bring this terminal back*, and it is
-  **mutable**: set at create time (defaulting to the launch argv) and
-  **updated while the terminal runs** — e.g. once the agent knows its
-  session id it sets `claude --resume <id>`. A plugin op
-  (`setTerminalRestoreCommand(terminalId, argv)`) writes it; the orchestrator
-  / agent plugin owns the policy.
+- `command` — the **launch** argv (the agent / shell the PTY was spawned
+  with), and
+- `agent_resume.argv` — *how to rejoin* the conversation, distinct from
+  launch and provided by the Orchestrator's agent registry (e.g. launch
+  `claude --session-id <uuid>`, resume `claude --resume <uuid>`).
 
-Persisted per terminal (in the workspace file's terminal entries, alongside
-cwd/scrollback). On restore the terminal resumes under the existing
-focus-to-resume model (it is *not* auto-re-executed in the background): when
-the user focuses a restored terminal that has a restore command, it spawns
-that command instead of the default shell. A terminal with no restore
-command behaves as today (shell + read-only scrollback). For remote sessions
-the existing `RemoteAgentSpec.command` is just the seed terminal's initial
-restore command.
+On restore, `restore_terminal_from_workspace` runs `agent_resume → command →
+shell`, gated by `terminal.resume_agents`. Detection and the per-agent flags
+live in TS data (the registry), not core — the same mechanism/policy split
+this design uses for backends.
+
+So a session's restore data has **two complementary halves**: the
+`SessionProfile` (this doc — *where* the session runs) and the per-terminal
+agent-resume (*what* to re-run in it). They are persisted independently in the
+same workspace file and **compose** at restore. Two constraints make that
+composition correct — and both are *new work this design owns*, because the
+agent-resume feature landed assuming a local backend:
+
+1. **The agent runs *inside* the session's backend, not beside it.** Today a
+   command terminal builds a `TerminalWrapper` that **replaces** the
+   authority's wrapper, so an agent argv runs on the **host** even under a
+   container / SSH / k8s authority. The fix is to make the authority own
+   *"run this interactive argv in my backend"* —
+   `Authority::terminal_command(argv)` returning `docker exec … <argv>` /
+   `kubectl exec … <argv>` / `ssh … -- <argv>` (bare `argv` for local). Launch
+   **and** resume argvs go through it, so they compose with the backend
+   instead of bypassing it. (This also fixes a born-attached remote agent's
+   *seed* terminal, which has the same bypass today.)
+
+2. **Backend first, then agent.** A restored remote session is **Dormant**
+   (local placeholder) until reconnect, so its agent must **not** re-run on
+   the placeholder. Restore order is: local sessions re-run the agent
+   immediately (unchanged); remote sessions defer the agent re-run to the
+   reconnect-on-activate step and then run it via
+   `authority.terminal_command(resume_argv)` in the now-live backend.
 
 ## Lifecycle: Live vs Dormant
 
@@ -115,6 +134,12 @@ per-window activation `AUTHORITY_DESIGN.md` calls for:
 - Container → core can't run `devcontainer up`; fire a
   `session_reattach_requested { window_id, profile }` hook so the
   devcontainer plugin re-attaches. Core stays opaque.
+
+Once the backend is live again, the session's **agent terminals re-run in
+it** — each terminal's `agent_resume → command` argv is run through
+`authority.terminal_command(argv)` (the composition seam above), so the agent
+rejoins inside its real backend rather than on the host. This is the
+"backend first, then agent" order from *Restoring agent terminals*.
 
 Reconnect is **trust-gated** (below). A dead container/pod surfaces
 `FailedAttach`, not a crash.
