@@ -994,6 +994,7 @@ impl Editor {
                 Some(HoverTarget::StatusBarEncodingIndicator) => StatusBarHover::EncodingIndicator,
                 Some(HoverTarget::StatusBarLanguageIndicator) => StatusBarHover::LanguageIndicator,
                 Some(HoverTarget::StatusBarRemoteIndicator) => StatusBarHover::RemoteIndicator,
+                Some(HoverTarget::StatusBarTrustIndicator) => StatusBarHover::WorkspaceTrust,
                 _ => StatusBarHover::None,
             };
 
@@ -1020,6 +1021,9 @@ impl Editor {
             // Compute plugin-provided status-bar values before taking the
             // mutable window borrow below.
             let dynamic_status_bar_elements = self.get_status_bar_element_values(active_buf);
+            // Active session's trust level for the always-present `{trust}`
+            // indicator — read here (Copy) before the mutable window borrow.
+            let workspace_trust_level = self.authority().workspace_trust.level();
             // Single window borrow, split into buffers + cursors so the
             // status-bar context can hold both.
             let __active_id = self.active_window;
@@ -1060,6 +1064,7 @@ impl Editor {
                         // ctx but doesn't run `render_status`.
                         remote_indicator_on_bar: false,
                         dynamic_status_bar_elements: dynamic_status_bar_elements.clone(),
+                        workspace_trust_level,
                     };
                     StatusBarRenderer::render_status_bar(
                         frame,
@@ -1084,6 +1089,7 @@ impl Editor {
                 status_bar_layout.language_indicator;
             self.active_chrome_mut().status_bar_message_area = status_bar_layout.message_area;
             self.active_chrome_mut().status_bar_remote_area = status_bar_layout.remote_indicator;
+            self.active_chrome_mut().status_bar_trust_area = status_bar_layout.trust_indicator;
             self.active_chrome_mut().status_bar_plugin_token_areas =
                 status_bar_layout.plugin_token_areas;
         }

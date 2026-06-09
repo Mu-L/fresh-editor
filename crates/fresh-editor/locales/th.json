@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "ตกลง",
   "trust.dialog.btn_cancel": "ยกเลิก (Esc)",
   "trust.dialog.btn_quit": "ออก",
-  "trust.dialog.btn_quit_key": "ออก (%{key})"
+  "trust.dialog.btn_quit_key": "ออก (%{key})",
+  "statusbar.trust.trusted": "เชื่อถือ",
+  "statusbar.trust.restricted": "จำกัด",
+  "statusbar.trust.blocked": "ปิดกั้น"
 }

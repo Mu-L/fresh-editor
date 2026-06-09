@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "确定",
   "trust.dialog.btn_cancel": "取消 (Esc)",
   "trust.dialog.btn_quit": "退出",
-  "trust.dialog.btn_quit_key": "退出 (%{key})"
+  "trust.dialog.btn_quit_key": "退出 (%{key})",
+  "statusbar.trust.trusted": "已信任",
+  "statusbar.trust.restricted": "受限",
+  "statusbar.trust.blocked": "已阻止"
 }

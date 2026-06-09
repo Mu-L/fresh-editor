@@ -1256,6 +1256,10 @@ impl Editor {
                         HoverTarget::StatusBarRemoteIndicator,
                     ),
                     (
+                        self.active_chrome().status_bar_trust_area,
+                        HoverTarget::StatusBarTrustIndicator,
+                    ),
+                    (
                         self.active_chrome().status_bar_warning_area,
                         HoverTarget::StatusBarWarningBadge,
                     ),
@@ -2408,6 +2412,14 @@ impl Editor {
                 // it, so it could never be toggled shut. It clears any *other*
                 // menu popup itself, after its toggle check.
                 return Some(self.handle_action(Action::ShowRemoteIndicatorMenu));
+            }
+        }
+        if let Some((r, s, e)) = self.active_chrome().status_bar_trust_area {
+            if row == r && col >= s && col < e {
+                // Clicking the trust indicator opens the (cancellable)
+                // workspace-trust prompt so the user can change the decision.
+                self.dismiss_menu_popups_for_prompt();
+                return Some(self.handle_action(Action::WorkspaceTrustPrompt));
             }
         }
         if let Some((r, s, e)) = self.active_chrome().status_bar_warning_area {

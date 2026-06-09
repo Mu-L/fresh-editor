@@ -49,6 +49,9 @@ enum ElementKind {
     Clock,
     /// Remote authority indicator — styling driven by connection state
     RemoteIndicator(RemoteIndicatorState),
+    /// Workspace-trust indicator — always present, styling driven by the
+    /// active session's trust level. Clickable (opens the trust prompt).
+    WorkspaceTrust(crate::services::workspace_trust::TrustLevel),
     /// Custom plugin token
     Custom,
 }
@@ -252,6 +255,10 @@ pub struct StatusBarContext<'a> {
     /// Key: "plugin_name:token_name", Value: current value to render.
     /// Populated by `render.rs` before rendering.
     pub dynamic_status_bar_elements: HashMap<String, String>,
+    /// Active session's workspace-trust level. Drives the always-present
+    /// `{trust}` indicator (read from the active authority each frame, so it
+    /// never goes stale or vanishes — unlike a per-buffer plugin token).
+    pub workspace_trust_level: crate::services::workspace_trust::TrustLevel,
 }
 
 /// Layout information returned from status bar rendering for mouse click detection
@@ -272,6 +279,9 @@ pub struct StatusBarLayout {
     /// Remote authority indicator area (row, start_col, end_col) - clickable
     /// to open the remote-authority context menu.
     pub remote_indicator: Option<(u16, u16, u16)>,
+    /// Workspace-trust indicator area (row, start_col, end_col) - clickable
+    /// to open the workspace-trust prompt.
+    pub trust_indicator: Option<(u16, u16, u16)>,
     /// Plugin-registered status-bar token areas, keyed by the
     /// `"<plugin_name>:<token_name>"` registry key (same key the
     /// editor uses in `status_bar_token_registry`). Populated by the
@@ -305,6 +315,8 @@ pub enum StatusBarHover {
     MessageArea,
     /// Mouse is over the remote authority indicator
     RemoteIndicator,
+    /// Mouse is over the workspace-trust indicator
+    WorkspaceTrust,
 }
 
 /// Which search option checkbox is being hovered
@@ -1136,6 +1148,25 @@ impl StatusBarRenderer {
                     token_key: None,
                 })
             }
+            StatusBarElement::WorkspaceTrust => {
+                // Always-present trust control, read from the active session's
+                // trust level each frame. Persistent like `{remote}` — it never
+                // vanishes, so the user always knows whether repo-controlled
+                // execution is gated. Capitalized for a status-bar label.
+                use crate::services::workspace_trust::TrustLevel;
+                let level = ctx.workspace_trust_level;
+                let text = match level {
+                    TrustLevel::Trusted => t!("statusbar.trust.trusted"),
+                    TrustLevel::Restricted => t!("statusbar.trust.restricted"),
+                    TrustLevel::Blocked => t!("statusbar.trust.blocked"),
+                }
+                .to_string();
+                Some(RenderedElement {
+                    text,
+                    kind: ElementKind::WorkspaceTrust(level),
+                    token_key: None,
+                })
+            }
             StatusBarElement::CustomToken(key) => {
                 if let Some(value) = ctx.dynamic_status_bar_elements.get(key) {
                     Some(RenderedElement {
@@ -1297,6 +1328,25 @@ impl StatusBarRenderer {
                 }
                 style
             }
+            ElementKind::WorkspaceTrust(level) => {
+                use crate::services::workspace_trust::TrustLevel;
+                let is_hovering = hover == StatusBarHover::WorkspaceTrust;
+                let (fg, bg) = match level {
+                    // Gated states reuse the warning indicator palette so
+                    // "execution is restricted/blocked" reads at a glance.
+                    TrustLevel::Restricted | TrustLevel::Blocked => (
+                        theme.status_warning_indicator_fg,
+                        theme.status_warning_indicator_bg,
+                    ),
+                    // Trusted: neutral status-bar palette (everything-works).
+                    TrustLevel::Trusted => (theme.status_bar_fg, theme.status_bar_bg),
+                };
+                let mut style = Style::default().fg(fg).bg(bg);
+                if is_hovering {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                style
+            }
         }
     }
 
@@ -1325,6 +1375,9 @@ impl StatusBarRenderer {
             ElementKind::Messages => layout.message_area = Some((row, start_col, end_col)),
             ElementKind::RemoteIndicator(_) => {
                 layout.remote_indicator = Some((row, start_col, end_col))
+            }
+            ElementKind::WorkspaceTrust(_) => {
+                layout.trust_indicator = Some((row, start_col, end_col))
             }
             ElementKind::Custom => {
                 if let Some(key) = token_key {

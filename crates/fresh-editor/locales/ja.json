@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "OK",
   "trust.dialog.btn_cancel": "キャンセル (Esc)",
   "trust.dialog.btn_quit": "終了",
-  "trust.dialog.btn_quit_key": "終了 (%{key})"
+  "trust.dialog.btn_quit_key": "終了 (%{key})",
+  "statusbar.trust.trusted": "信頼済み",
+  "statusbar.trust.restricted": "制限",
+  "statusbar.trust.blocked": "ブロック"
 }

@@ -583,6 +583,11 @@ pub enum StatusBarElement {
     /// the bottom-left of the status bar as a persistent remote-state entry
     /// point.
     RemoteIndicator,
+    /// Workspace-trust indicator: always shows the active session's trust level
+    /// ("Trusted" / "Restricted" / "Blocked"). Clickable — opens the
+    /// workspace-trust prompt. A persistent, core counterpart to the env-manager
+    /// plugin's per-buffer trust chip.
+    WorkspaceTrust,
     /// Custom token registered by a plugin (format: "plugin_name:token_name")
     CustomToken(String),
 }
@@ -612,6 +617,7 @@ impl TryFrom<String> for StatusBarElement {
             "palette" => Ok(Self::Palette),
             "clock" => Ok(Self::Clock),
             "remote" => Ok(Self::RemoteIndicator),
+            "trust" => Ok(Self::WorkspaceTrust),
             _ => {
                 // Check if it's a custom token (contains ':')
                 if inner.contains(':') {
@@ -643,6 +649,7 @@ impl From<StatusBarElement> for String {
             StatusBarElement::Palette => "{palette}".to_string(),
             StatusBarElement::Clock => "{clock}".to_string(),
             StatusBarElement::RemoteIndicator => "{remote}".to_string(),
+            StatusBarElement::WorkspaceTrust => "{trust}".to_string(),
             StatusBarElement::CustomToken(name) => format!("{{{}}}", name),
         }
     }
@@ -671,7 +678,8 @@ impl schemars::JsonSchema for StatusBarElement {
                 {"value": "{update}", "name": "Update"},
                 {"value": "{palette}", "name": "Palette"},
                 {"value": "{clock}", "name": "Clock"},
-                {"value": "{remote}", "name": "Remote Indicator"}
+                {"value": "{remote}", "name": "Remote Indicator"},
+                {"value": "{trust}", "name": "Workspace Trust"}
             ]
         })
     }

@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "OK",
   "trust.dialog.btn_cancel": "Zrušit (Esc)",
   "trust.dialog.btn_quit": "Ukončit",
-  "trust.dialog.btn_quit_key": "Ukončit (%{key})"
+  "trust.dialog.btn_quit_key": "Ukončit (%{key})",
+  "statusbar.trust.trusted": "Důvěryhodné",
+  "statusbar.trust.restricted": "Omezeno",
+  "statusbar.trust.blocked": "Blokováno"
 }

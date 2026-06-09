@@ -50,6 +50,8 @@ pub enum HoverTarget {
     StatusBarLspIndicator,
     /// Hovering over the status bar remote-authority indicator
     StatusBarRemoteIndicator,
+    /// Hovering over the status bar workspace-trust indicator
+    StatusBarTrustIndicator,
     /// Hovering over the status bar warning badge
     StatusBarWarningBadge,
     /// Hovering over the status bar line ending indicator

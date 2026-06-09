@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "ОК",
   "trust.dialog.btn_cancel": "Отмена (Esc)",
   "trust.dialog.btn_quit": "Выйти",
-  "trust.dialog.btn_quit_key": "Выйти (%{key})"
+  "trust.dialog.btn_quit_key": "Выйти (%{key})",
+  "statusbar.trust.trusted": "Доверено",
+  "statusbar.trust.restricted": "Ограничено",
+  "statusbar.trust.blocked": "Заблокировано"
 }

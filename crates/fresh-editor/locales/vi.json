@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "OK",
   "trust.dialog.btn_cancel": "Huỷ (Esc)",
   "trust.dialog.btn_quit": "Thoát",
-  "trust.dialog.btn_quit_key": "Thoát (%{key})"
+  "trust.dialog.btn_quit_key": "Thoát (%{key})",
+  "statusbar.trust.trusted": "Tin cậy",
+  "statusbar.trust.restricted": "Giới hạn",
+  "statusbar.trust.blocked": "Đã chặn"
 }

@@ -141,6 +141,9 @@ pub(crate) struct ChromeLayout {
     /// Status bar remote-authority indicator area (row, start_col, end_col)
     /// — clickable to open the remote-authority context menu.
     pub status_bar_remote_area: Option<(u16, u16, u16)>,
+    /// Status bar workspace-trust indicator area (row, start_col, end_col)
+    /// — clickable to open the workspace-trust prompt.
+    pub status_bar_trust_area: Option<(u16, u16, u16)>,
     /// Plugin-registered status-bar token areas, keyed by
     /// `"<plugin>:<token>"`. Populated by `render_status_bar`; consumed
     /// by `handle_click_status_bar` which fires the

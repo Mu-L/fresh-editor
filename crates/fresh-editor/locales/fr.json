@@ -1520,5 +1520,8 @@
   "trust.dialog.btn_ok": "OK",
   "trust.dialog.btn_cancel": "Annuler (Esc)",
   "trust.dialog.btn_quit": "Quitter",
-  "trust.dialog.btn_quit_key": "Quitter (%{key})"
+  "trust.dialog.btn_quit_key": "Quitter (%{key})",
+  "statusbar.trust.trusted": "Approuvé",
+  "statusbar.trust.restricted": "Restreint",
+  "statusbar.trust.blocked": "Bloqué"
 }
