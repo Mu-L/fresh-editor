@@ -804,6 +804,35 @@ pub(crate) fn render_content(
         }
     }
 
+    // Record vertical-scrollbar theme keys for the inspector, from the
+    // thumb/track geometry just computed for each split. Done here (in the
+    // render pass that painted them) rather than a post-hoc pass.
+    {
+        let mut sb_runs: Vec<crate::app::types::ThemeRun> = Vec::new();
+        for (_, _, _, scrollbar_rect, thumb_start, thumb_end) in &split_areas {
+            for row in 0..scrollbar_rect.height {
+                let is_thumb = (row as usize) >= *thumb_start && (row as usize) < *thumb_end;
+                sb_runs.push(crate::app::types::ThemeRun {
+                    x: scrollbar_rect.x,
+                    y: scrollbar_rect.y + row,
+                    w: scrollbar_rect.width,
+                    fg_key: Some(if is_thumb {
+                        "ui.scrollbar_thumb_fg"
+                    } else {
+                        "ui.scrollbar_track_fg"
+                    }),
+                    bg_key: Some("editor.bg"),
+                    region: if is_thumb {
+                        "Scrollbar Thumb"
+                    } else {
+                        "Scrollbar Track"
+                    },
+                });
+            }
+        }
+        crate::app::types::apply_theme_runs(cell_theme_map, screen_width, &sb_runs);
+    }
+
     (
         split_areas,
         tab_layouts,

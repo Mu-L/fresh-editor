@@ -201,37 +201,7 @@ impl Editor {
             }
         }
 
-        // Scrollbars
-        let split_areas = self.active_layout().split_areas.clone();
-        for (_, _, _, scrollbar_rect, thumb_start, thumb_end) in &split_areas {
-            for row in scrollbar_rect.y..scrollbar_rect.y + scrollbar_rect.height {
-                let rel_row = (row - scrollbar_rect.y) as usize;
-                let is_thumb = rel_row >= *thumb_start && rel_row < *thumb_end;
-                let info = CellThemeInfo {
-                    fg_key: Some(
-                        if is_thumb {
-                            "ui.scrollbar_thumb_fg"
-                        } else {
-                            "ui.scrollbar_track_fg"
-                        }
-                        .into(),
-                    ),
-                    bg_key: Some("editor.bg".into()),
-                    region: if is_thumb {
-                        "Scrollbar Thumb".into()
-                    } else {
-                        "Scrollbar Track".into()
-                    },
-                    syntax_category: None,
-                };
-                for col in scrollbar_rect.x..scrollbar_rect.x + scrollbar_rect.width {
-                    let idx = row as usize * sw + col as usize;
-                    if let Some(cell) = self.active_chrome_mut().cell_theme_map.get_mut(idx) {
-                        *cell = info.clone();
-                    }
-                }
-            }
-        }
+        // Scrollbars are recorded during paint (see orchestration/mod.rs).
 
         // Tab bars are recorded during paint (see tabs.rs).
     }
