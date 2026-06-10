@@ -745,29 +745,30 @@ impl Editor {
                             let ctrl = modifiers.contains(KeyModifiers::CONTROL);
                             let handled = match code {
                                 KeyCode::Left if ctrl => self
-                                    .with_focused_text_editor(panel_id, |e| {
+                                    .with_focused_text_editor(&panel_id, |e| {
                                         e.move_word_left_selecting()
                                     }),
                                 KeyCode::Right if ctrl => self
-                                    .with_focused_text_editor(panel_id, |e| {
+                                    .with_focused_text_editor(&panel_id, |e| {
                                         e.move_word_right_selecting()
                                     }),
-                                KeyCode::Left => self.with_focused_text_editor(panel_id, |e| {
+                                KeyCode::Left => self.with_focused_text_editor(&panel_id, |e| {
                                     e.move_left_selecting()
                                 }),
-                                KeyCode::Right => self.with_focused_text_editor(panel_id, |e| {
+                                KeyCode::Right => self.with_focused_text_editor(&panel_id, |e| {
                                     e.move_right_selecting()
                                 }),
                                 KeyCode::Up => self
-                                    .with_focused_text_editor(panel_id, |e| e.move_up_selecting()),
-                                KeyCode::Down => self.with_focused_text_editor(panel_id, |e| {
+                                    .with_focused_text_editor(&panel_id, |e| e.move_up_selecting()),
+                                KeyCode::Down => self.with_focused_text_editor(&panel_id, |e| {
                                     e.move_down_selecting()
                                 }),
-                                KeyCode::Home => self.with_focused_text_editor(panel_id, |e| {
+                                KeyCode::Home => self.with_focused_text_editor(&panel_id, |e| {
                                     e.move_home_selecting()
                                 }),
-                                KeyCode::End => self
-                                    .with_focused_text_editor(panel_id, |e| e.move_end_selecting()),
+                                KeyCode::End => self.with_focused_text_editor(&panel_id, |e| {
+                                    e.move_end_selecting()
+                                }),
                                 _ => false,
                             };
                             // We always consume Shift+nav on a
@@ -1128,7 +1129,7 @@ impl Editor {
                 // buffer's read-only-ness.
                 let buffer_id = self.active_buffer();
                 if let Some(panel_id) = self.focused_text_widget_panel_for_buffer(buffer_id) {
-                    if self.handle_widget_copy(panel_id) {
+                    if self.handle_widget_copy(&panel_id) {
                         self.set_status_message(t!("clipboard.copied").to_string());
                         return Ok(());
                     }
@@ -1156,7 +1157,7 @@ impl Editor {
                 // are independent of the underlying virtual buffer.
                 let buffer_id = self.active_buffer();
                 if let Some(panel_id) = self.focused_text_widget_panel_for_buffer(buffer_id) {
-                    if self.handle_widget_cut(panel_id) {
+                    if self.handle_widget_cut(&panel_id) {
                         return Ok(());
                     }
                 }
@@ -1182,7 +1183,7 @@ impl Editor {
                 if let Some(panel_id) = self.focused_text_widget_panel_for_buffer(buffer_id) {
                     if let Some(text) = self.clipboard.paste() {
                         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-                        self.handle_widget_insert_str(panel_id, &normalized);
+                        self.handle_widget_insert_str(&panel_id, &normalized);
                         self.set_status_message(t!("clipboard.pasted").to_string());
                     }
                     return Ok(());
@@ -1200,7 +1201,7 @@ impl Editor {
                 // catch-all path below.
                 let buffer_id = self.active_buffer();
                 if let Some(panel_id) = self.focused_text_widget_panel_for_buffer(buffer_id) {
-                    self.handle_widget_select_all(panel_id);
+                    self.handle_widget_select_all(&panel_id);
                     return Ok(());
                 }
                 self.apply_action_as_events(Action::SelectAll)?;
@@ -2480,23 +2481,13 @@ impl Editor {
     /// `sessions` widget. Used for dock-only gestures (Enter-activate,
     /// the Alt+T/Alt+I/Alt+P filter toggles) that the dialog handles via
     /// an editor mode the dock can't use — see `dispatch_floating_widget_key`.
-    fn fire_dock_widget_event(&self, panel_id: u64, event_type: &str) {
-        if self
-            .plugin_manager
-            .read()
-            .unwrap()
-            .has_hook_handlers("widget_event")
-        {
-            self.plugin_manager.read().unwrap().run_hook(
-                "widget_event",
-                crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                    panel_id,
-                    widget_key: "sessions".to_string(),
-                    event_type: event_type.to_string(),
-                    payload: serde_json::json!({}),
-                },
-            );
-        }
+    fn fire_dock_widget_event(&self, panel_key: &crate::widgets::PanelKey, event_type: &str) {
+        self.fire_widget_event(
+            panel_key,
+            "sessions".to_string(),
+            event_type.to_string(),
+            serde_json::json!({}),
+        );
     }
 
     /// Route a keystroke to the floating widget panel when one is
@@ -2516,8 +2507,8 @@ impl Editor {
         modifiers: crossterm::event::KeyModifiers,
     ) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
-        let panel_id = match self.panel(slot) {
-            Some(fwp) => fwp.panel_id,
+        let panel_key = match self.panel(slot) {
+            Some(fwp) => fwp.panel_key.clone(),
             None => {
                 tracing::debug!(
                     target: "fresh::dock",
@@ -2530,7 +2521,7 @@ impl Editor {
         };
         tracing::debug!(
             target: "fresh::dock",
-            panel_id,
+            panel = %panel_key,
             ?slot,
             ?code,
             modifiers = ?modifiers,
@@ -2551,7 +2542,7 @@ impl Editor {
         ) {
             let on_filter = self
                 .widget_registry
-                .focus_key(panel_id)
+                .focus_key(&panel_key)
                 .map(|k| k == "filter")
                 .unwrap_or(false);
             // The project dropdown owns the keyboard while panel focus
@@ -2564,40 +2555,40 @@ impl Editor {
             // so the dropdown was visible but un-navigable by keyboard.
             let on_project_menu = self
                 .widget_registry
-                .focus_key(panel_id)
+                .focus_key(&panel_key)
                 .map(|k| k.starts_with("project-pick:"))
                 .unwrap_or(false);
             if on_project_menu {
                 match code {
                     KeyCode::Up => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_prev");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_prev");
                         return true;
                     }
                     KeyCode::Down => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_next");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_next");
                         return true;
                     }
                     // Tab/Shift+Tab navigate the menu too, so they can't
                     // tab focus *out* of the open dropdown into the dock
                     // toolbar behind it.
                     KeyCode::Tab if modifiers.contains(KeyModifiers::SHIFT) => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_prev");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_prev");
                         return true;
                     }
                     KeyCode::BackTab => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_prev");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_prev");
                         return true;
                     }
                     KeyCode::Tab => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_next");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_next");
                         return true;
                     }
                     KeyCode::Enter | KeyCode::Char(' ') => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_accept");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_accept");
                         return true;
                     }
                     KeyCode::Esc => {
-                        self.fire_dock_widget_event(panel_id, "dock_menu_cancel");
+                        self.fire_dock_widget_event(&panel_key, "dock_menu_cancel");
                         return true;
                     }
                     _ => {}
@@ -2607,7 +2598,7 @@ impl Editor {
                 KeyCode::Esc => {
                     if on_filter {
                         // Return from the filter to the session list.
-                        self.set_panel_focus_and_notify(panel_id, "sessions".to_string());
+                        self.set_panel_focus_and_notify(&panel_key, "sessions".to_string());
                     } else {
                         // Leave the dock — focus the editor; dock stays visible.
                         self.blur_floating_panel(slot);
@@ -2617,10 +2608,10 @@ impl Editor {
                 KeyCode::Enter => {
                     if on_filter {
                         // Return from the filter to the session list.
-                        self.set_panel_focus_and_notify(panel_id, "sessions".to_string());
+                        self.set_panel_focus_and_notify(&panel_key, "sessions".to_string());
                     } else if self
                         .widget_registry
-                        .focus_key(panel_id)
+                        .focus_key(&panel_key)
                         .map(|k| k == "sessions" || k.is_empty())
                         .unwrap_or(true)
                     {
@@ -2633,7 +2624,7 @@ impl Editor {
                         // dialog's identical `activate` logic, not split across
                         // the host (was: always blur, which silently dropped
                         // the on-disk attach in the dock).
-                        self.fire_dock_widget_event(panel_id, "dock_activate");
+                        self.fire_dock_widget_event(&panel_key, "dock_activate");
                     } else {
                         // A button or toggle is keyboard-focused (Tab-cycled
                         // onto "+ New", "Manage", "view", the project menu, or
@@ -2645,7 +2636,7 @@ impl Editor {
                         // and merely re-focused the session list, so buttons
                         // worked with the mouse but not the keyboard.
                         self.handle_widget_command(
-                            panel_id,
+                            &panel_key,
                             fresh_core::api::WidgetAction::Key {
                                 key: "Enter".to_string(),
                             },
@@ -2654,7 +2645,7 @@ impl Editor {
                     return true;
                 }
                 KeyCode::Char('/') if modifiers.is_empty() => {
-                    self.set_panel_focus_and_notify(panel_id, "filter".to_string());
+                    self.set_panel_focus_and_notify(&panel_key, "filter".to_string());
                     return true;
                 }
                 KeyCode::Char('t' | 'T') if modifiers.contains(KeyModifiers::ALT) => {
@@ -2664,19 +2655,19 @@ impl Editor {
                     // dock widget_event the plugin maps to the same toggle —
                     // otherwise it falls through to the generic chord path and
                     // merely blurs the dock.
-                    self.fire_dock_widget_event(panel_id, "dock_toggle_worktrees");
+                    self.fire_dock_widget_event(&panel_key, "dock_toggle_worktrees");
                     return true;
                 }
                 KeyCode::Char('i' | 'I') if modifiers.contains(KeyModifiers::ALT) => {
                     // Alt+I toggles "show empty/1-file sessions" — same dock
                     // routing rationale as Alt+T above.
-                    self.fire_dock_widget_event(panel_id, "dock_toggle_trivial");
+                    self.fire_dock_widget_event(&panel_key, "dock_toggle_trivial");
                     return true;
                 }
                 KeyCode::Char('p' | 'P') if modifiers.contains(KeyModifiers::ALT) => {
                     // Alt+P flips the project scope (current ↔ all) — same dock
                     // routing rationale as Alt+T above.
-                    self.fire_dock_widget_event(panel_id, "dock_toggle_scope");
+                    self.fire_dock_widget_event(&panel_key, "dock_toggle_scope");
                     return true;
                 }
                 KeyCode::Char('n' | 'N') if modifiers.contains(KeyModifiers::ALT) => {
@@ -2685,50 +2676,29 @@ impl Editor {
                     // active buffer's mode; fire a `dock_new` widget_event
                     // the plugin turns into "+ New" — and which now leaves
                     // the dock mounted (the form is a separate slot).
-                    if self
-                        .plugin_manager
-                        .read()
-                        .unwrap()
-                        .has_hook_handlers("widget_event")
-                    {
-                        self.plugin_manager.read().unwrap().run_hook(
-                            "widget_event",
-                            crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                                panel_id,
-                                widget_key: "sessions".to_string(),
-                                event_type: "dock_new".to_string(),
-                                payload: serde_json::json!({}),
-                            },
-                        );
-                    }
+                    self.fire_widget_event(
+                        &panel_key,
+                        "sessions".to_string(),
+                        "dock_new".to_string(),
+                        serde_json::json!({}),
+                    );
                     return true;
                 }
                 KeyCode::Char(' ') => {
                     // Toggle the highlighted row's multi-select checkbox
                     // (plugin owns the selection set).
-                    let has_handler = self
-                        .plugin_manager
-                        .read()
-                        .unwrap()
-                        .has_hook_handlers("widget_event");
                     tracing::debug!(
                         target: "fresh::dock",
-                        panel_id,
-                        has_handler,
-                        focus_key = ?self.widget_registry.focus_key(panel_id),
+                        panel = %panel_key,
+                        focus_key = ?self.widget_registry.focus_key(&panel_key),
                         "dispatch_floating_widget_key: Space on LeftDock — firing dock_space widget_event"
                     );
-                    if has_handler {
-                        self.plugin_manager.read().unwrap().run_hook(
-                            "widget_event",
-                            crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                                panel_id,
-                                widget_key: "sessions".to_string(),
-                                event_type: "dock_space".to_string(),
-                                payload: serde_json::json!({}),
-                            },
-                        );
-                    }
+                    self.fire_widget_event(
+                        &panel_key,
+                        "sessions".to_string(),
+                        "dock_space".to_string(),
+                        serde_json::json!({}),
+                    );
                     return true;
                 }
                 _ => {}
@@ -2761,27 +2731,17 @@ impl Editor {
                 }
                 let widget_key = self
                     .widget_registry
-                    .get(panel_id)
+                    .get(&panel_key)
                     .map(|p| p.focus_key.clone())
                     .unwrap_or_default();
-                if self
-                    .plugin_manager
-                    .read()
-                    .unwrap()
-                    .has_hook_handlers("widget_event")
-                {
-                    self.plugin_manager.read().unwrap().run_hook(
-                        "widget_event",
-                        crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                            panel_id,
-                            widget_key,
-                            event_type: "cancel".to_string(),
-                            payload: serde_json::json!({}),
-                        },
-                    );
-                }
+                self.fire_widget_event(
+                    &panel_key,
+                    widget_key,
+                    "cancel".to_string(),
+                    serde_json::json!({}),
+                );
                 *self.panel_opt_mut(slot) = None;
-                let _ = self.widget_registry.unmount(panel_id);
+                let _ = self.widget_registry.unmount(&panel_key);
                 return true;
             }
             KeyCode::Tab => Some(if modifiers.contains(KeyModifiers::SHIFT) {
@@ -2838,7 +2798,7 @@ impl Editor {
                 return false;
             }
             self.handle_widget_command(
-                panel_id,
+                &panel_key,
                 fresh_core::api::WidgetAction::Key {
                     key: name.to_string(),
                 },
@@ -2906,7 +2866,7 @@ impl Editor {
             // working.
             if ch == ' ' {
                 self.handle_widget_command(
-                    panel_id,
+                    &panel_key,
                     fresh_core::api::WidgetAction::Key {
                         key: "Space".to_string(),
                     },
@@ -2914,7 +2874,7 @@ impl Editor {
                 return true;
             }
             self.handle_widget_command(
-                panel_id,
+                &panel_key,
                 fresh_core::api::WidgetAction::TextInputChar {
                     text: ch.to_string(),
                 },

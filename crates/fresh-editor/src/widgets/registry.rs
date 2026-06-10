@@ -1,5 +1,6 @@
-//! Panel registry — maps plugin-allocated `panel_id` to mounted spec
-//! and hit-area data for click routing.
+//! Panel registry — maps a panel's composite identity (owning plugin,
+//! plugin-local `panel_id`) to mounted spec and hit-area data for click
+//! routing.
 //!
 //! The registry is the source of truth for "which panels exist, what
 //! spec are they currently rendering, and which buffer rows belong
@@ -15,6 +16,33 @@ use std::collections::{HashMap, HashSet};
 /// Plugin-allocated panel identifier. Unique within a plugin; the
 /// editor does not interpret the value.
 pub type PanelId = u64;
+
+/// Composite panel identity: panel ids are plugin-local, so the
+/// registry key is (owning plugin, id). The owner is recorded host-side
+/// at mount time from the calling plugin's identity — never trusted
+/// from the JS side.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PanelKey {
+    /// Name of the plugin that mounted the panel.
+    pub plugin: String,
+    /// The plugin-local panel id.
+    pub id: PanelId,
+}
+
+impl PanelKey {
+    pub fn new(plugin: impl Into<String>, id: PanelId) -> Self {
+        Self {
+            plugin: plugin.into(),
+            id,
+        }
+    }
+}
+
+impl std::fmt::Display for PanelKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.plugin, self.id)
+    }
+}
 
 /// One clickable rectangle within a rendered widget panel.
 ///
@@ -174,10 +202,12 @@ pub struct WidgetPanelState {
     pub tabbable: Vec<String>,
 }
 
-/// Global registry of mounted widget panels.
+/// Global registry of mounted widget panels, keyed by composite
+/// (plugin, panel id) identity — two plugins reusing the same local id
+/// coexist without evicting each other.
 #[derive(Debug, Default)]
 pub struct WidgetRegistry {
-    panels: HashMap<PanelId, WidgetPanelState>,
+    panels: HashMap<PanelKey, WidgetPanelState>,
 }
 
 impl WidgetRegistry {
@@ -197,7 +227,7 @@ impl WidgetRegistry {
     #[allow(clippy::too_many_arguments)]
     pub fn mount(
         &mut self,
-        panel_id: PanelId,
+        panel_key: PanelKey,
         buffer_id: BufferId,
         spec: WidgetSpec,
         hits: Vec<HitArea>,
@@ -206,7 +236,7 @@ impl WidgetRegistry {
         tabbable: Vec<String>,
     ) -> Option<WidgetPanelState> {
         self.panels.insert(
-            panel_id,
+            panel_key,
             WidgetPanelState {
                 buffer_id,
                 spec,
@@ -228,14 +258,14 @@ impl WidgetRegistry {
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        panel_id: PanelId,
+        panel_key: &PanelKey,
         spec: WidgetSpec,
         hits: Vec<HitArea>,
         instance_states: HashMap<String, WidgetInstanceState>,
         focus_key: String,
         tabbable: Vec<String>,
     ) -> Result<BufferId, ()> {
-        match self.panels.get_mut(&panel_id) {
+        match self.panels.get_mut(panel_key) {
             Some(state) => {
                 state.spec = spec;
                 state.hits = hits;
@@ -253,21 +283,21 @@ impl WidgetRegistry {
     /// positions into the next render so they persist.
     pub fn instance_states(
         &self,
-        panel_id: PanelId,
+        panel_key: &PanelKey,
     ) -> Option<&HashMap<String, WidgetInstanceState>> {
-        self.panels.get(&panel_id).map(|s| &s.instance_states)
+        self.panels.get(panel_key).map(|s| &s.instance_states)
     }
 
     /// Read-only access to the previous render's focus key.
-    pub fn focus_key(&self, panel_id: PanelId) -> Option<&str> {
-        self.panels.get(&panel_id).map(|s| s.focus_key.as_str())
+    pub fn focus_key(&self, panel_key: &PanelKey) -> Option<&str> {
+        self.panels.get(panel_key).map(|s| s.focus_key.as_str())
     }
 
     /// Set the focus key directly (used by `widget_focus_advance`
     /// and click-driven focus moves). Updates the in-place state;
     /// the next render reads it via `focus_key()`.
-    pub fn set_focus_key(&mut self, panel_id: PanelId, key: String) {
-        if let Some(state) = self.panels.get_mut(&panel_id) {
+    pub fn set_focus_key(&mut self, panel_key: &PanelKey, key: String) {
+        if let Some(state) = self.panels.get_mut(panel_key) {
             state.focus_key = key;
         }
     }
@@ -283,13 +313,13 @@ impl WidgetRegistry {
     /// keep its own selection mirror + preview in sync), else `None`.
     pub fn set_list_scroll(
         &mut self,
-        panel_id: PanelId,
+        panel_key: &PanelKey,
         list_key: &str,
         scroll_offset: u32,
         visible: u32,
     ) -> Option<i32> {
         let _ = visible;
-        let state = self.panels.get_mut(&panel_id)?;
+        let state = self.panels.get_mut(panel_key)?;
         let WidgetInstanceState::List {
             scroll_offset: so,
             user_scrolled,
@@ -315,13 +345,13 @@ impl WidgetRegistry {
     /// same value would waste a 5 000-node deep clone for every IPC.
     pub fn update_side_effects(
         &mut self,
-        panel_id: PanelId,
+        panel_key: &PanelKey,
         hits: Vec<HitArea>,
         instance_states: HashMap<String, WidgetInstanceState>,
         focus_key: String,
         tabbable: Vec<String>,
     ) -> Result<BufferId, ()> {
-        match self.panels.get_mut(&panel_id) {
+        match self.panels.get_mut(panel_key) {
             Some(state) => {
                 state.hits = hits;
                 state.instance_states = instance_states;
@@ -337,52 +367,52 @@ impl WidgetRegistry {
     /// `update_side_effects` — render with the borrow and then write
     /// back only the side-effects, avoiding the deep clone of the spec
     /// that `buffer_and_spec()` does.
-    pub fn buffer_and_spec_ref(&self, panel_id: PanelId) -> Option<(BufferId, &WidgetSpec)> {
-        self.panels.get(&panel_id).map(|s| (s.buffer_id, &s.spec))
+    pub fn buffer_and_spec_ref(&self, panel_key: &PanelKey) -> Option<(BufferId, &WidgetSpec)> {
+        self.panels.get(panel_key).map(|s| (s.buffer_id, &s.spec))
     }
 
     /// Find the buffer and current spec for a panel — used by the
     /// dispatcher to re-render after a focus advance / activate
     /// command without the plugin needing to send an UpdateWidgetPanel.
-    pub fn buffer_and_spec(&self, panel_id: PanelId) -> Option<(BufferId, WidgetSpec)> {
+    pub fn buffer_and_spec(&self, panel_key: &PanelKey) -> Option<(BufferId, WidgetSpec)> {
         self.panels
-            .get(&panel_id)
+            .get(panel_key)
             .map(|s| (s.buffer_id, s.spec.clone()))
     }
 
     /// Tear down a panel. Returns the buffer_id the panel was
     /// rendering into, so the caller can clear the buffer if it
     /// owns it.
-    pub fn unmount(&mut self, panel_id: PanelId) -> Option<BufferId> {
-        self.panels.remove(&panel_id).map(|s| s.buffer_id)
+    pub fn unmount(&mut self, panel_key: &PanelKey) -> Option<BufferId> {
+        self.panels.remove(panel_key).map(|s| s.buffer_id)
     }
 
     /// Read-only access to a panel's current state.
-    pub fn get(&self, panel_id: PanelId) -> Option<&WidgetPanelState> {
-        self.panels.get(&panel_id)
+    pub fn get(&self, panel_key: &PanelKey) -> Option<&WidgetPanelState> {
+        self.panels.get(panel_key)
     }
 
     /// Mutable access — used by `WidgetCommand` handlers that
     /// update widget instance state (e.g. TextInput value/cursor)
     /// directly without round-tripping through the plugin.
-    pub fn get_mut(&mut self, panel_id: PanelId) -> Option<&mut WidgetPanelState> {
-        self.panels.get_mut(&panel_id)
+    pub fn get_mut(&mut self, panel_key: &PanelKey) -> Option<&mut WidgetPanelState> {
+        self.panels.get_mut(panel_key)
     }
 
-    /// All currently-mounted panel ids — useful for theme-change
+    /// All currently-mounted panel keys — useful for theme-change
     /// re-render passes (every panel re-renders against the new
     /// theme without plugin involvement).
-    pub fn panel_ids(&self) -> Vec<PanelId> {
-        self.panels.keys().copied().collect()
+    pub fn panel_keys(&self) -> Vec<PanelKey> {
+        self.panels.keys().cloned().collect()
     }
 
     /// Panels rendering into `buffer_id`. Used by mouse-wheel
     /// routing to find which widget panel sits under the pointer.
-    pub fn panels_for_buffer(&self, buffer_id: BufferId) -> Vec<PanelId> {
+    pub fn panels_for_buffer(&self, buffer_id: BufferId) -> Vec<PanelKey> {
         self.panels
             .iter()
             .filter(|(_, s)| s.buffer_id == buffer_id)
-            .map(|(pid, _)| *pid)
+            .map(|(key, _)| key.clone())
             .collect()
     }
 
@@ -399,8 +429,8 @@ impl WidgetRegistry {
         buffer_id: BufferId,
         row: u32,
         col_byte: u32,
-    ) -> Option<(PanelId, HitArea)> {
-        for (pid, state) in &self.panels {
+    ) -> Option<(PanelKey, HitArea)> {
+        for (key, state) in &self.panels {
             if state.buffer_id != buffer_id {
                 continue;
             }
@@ -409,7 +439,7 @@ impl WidgetRegistry {
                     && (col_byte as usize) >= hit.byte_start
                     && (col_byte as usize) < hit.byte_end
                 {
-                    return Some((*pid, hit.clone()));
+                    return Some((key.clone(), hit.clone()));
                 }
             }
         }
@@ -421,6 +451,10 @@ impl WidgetRegistry {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn pk(id: PanelId) -> PanelKey {
+        PanelKey::new("test-plugin", id)
+    }
 
     fn empty_spec() -> WidgetSpec {
         WidgetSpec::Col {
@@ -445,7 +479,7 @@ mod tests {
     fn hit_test_finds_widget_inside_range() {
         let mut reg = WidgetRegistry::new();
         reg.mount(
-            42,
+            pk(42),
             BufferId(7),
             empty_spec(),
             vec![make_hit(0, 0, 5, "a"), make_hit(0, 7, 12, "b")],
@@ -454,7 +488,7 @@ mod tests {
             Vec::new(),
         );
         let hit = reg.hit_test(BufferId(7), 0, 8).expect("inside b");
-        assert_eq!(hit.0, 42);
+        assert_eq!(hit.0, pk(42));
         assert_eq!(hit.1.widget_key, "b");
     }
 
@@ -462,7 +496,7 @@ mod tests {
     fn hit_test_returns_none_when_outside_range() {
         let mut reg = WidgetRegistry::new();
         reg.mount(
-            1,
+            pk(1),
             BufferId(0),
             empty_spec(),
             vec![make_hit(0, 0, 5, "a")],
@@ -491,7 +525,7 @@ mod tests {
             },
         );
         reg.mount(
-            7,
+            pk(7),
             BufferId(0),
             empty_spec(),
             Vec::new(),
@@ -502,7 +536,7 @@ mod tests {
     }
 
     fn list_state(reg: &WidgetRegistry) -> (u32, i32) {
-        match reg.instance_states(7).unwrap().get("lst").unwrap() {
+        match reg.instance_states(&pk(7)).unwrap().get("lst").unwrap() {
             WidgetInstanceState::List {
                 scroll_offset,
                 selected_index,
@@ -520,7 +554,7 @@ mod tests {
         // fires; the selection is allowed to leave the visible range.
         let mut reg = WidgetRegistry::new();
         mount_with_list(&mut reg, 0, 2);
-        let moved = reg.set_list_scroll(7, "lst", 10, 8);
+        let moved = reg.set_list_scroll(&pk(7), "lst", 10, 8);
         assert_eq!(moved, None);
         assert_eq!(list_state(&reg), (10, 2));
     }
@@ -531,7 +565,7 @@ mod tests {
         // selection stays, and no move is reported.
         let mut reg = WidgetRegistry::new();
         mount_with_list(&mut reg, 0, 12);
-        let moved = reg.set_list_scroll(7, "lst", 10, 8); // window [10,18)
+        let moved = reg.set_list_scroll(&pk(7), "lst", 10, 8); // window [10,18)
         assert_eq!(moved, None);
         assert_eq!(list_state(&reg), (10, 12));
     }
@@ -542,16 +576,55 @@ mod tests {
         // selection clamp, no reported move.
         let mut reg = WidgetRegistry::new();
         mount_with_list(&mut reg, 0, -1);
-        let moved = reg.set_list_scroll(7, "lst", 5, 8);
+        let moved = reg.set_list_scroll(&pk(7), "lst", 5, 8);
         assert_eq!(moved, None);
         assert_eq!(list_state(&reg), (5, -1));
+    }
+
+    #[test]
+    fn same_local_id_from_two_plugins_coexists() {
+        // Panel ids are plugin-local: a second plugin mounting the same
+        // local id must NOT evict the first plugin's panel, and the
+        // hit-test must resolve each buffer's hit to its owning plugin.
+        let mut reg = WidgetRegistry::new();
+        reg.mount(
+            PanelKey::new("alpha", 1),
+            BufferId(10),
+            empty_spec(),
+            vec![make_hit(0, 0, 5, "a-btn")],
+            HashMap::new(),
+            String::new(),
+            Vec::new(),
+        );
+        let evicted = reg.mount(
+            PanelKey::new("beta", 1),
+            BufferId(20),
+            empty_spec(),
+            vec![make_hit(0, 0, 5, "b-btn")],
+            HashMap::new(),
+            String::new(),
+            Vec::new(),
+        );
+        assert!(evicted.is_none(), "beta:1 must not evict alpha:1");
+
+        let (key_a, hit_a) = reg.hit_test(BufferId(10), 0, 2).expect("alpha hit");
+        assert_eq!(key_a, PanelKey::new("alpha", 1));
+        assert_eq!(hit_a.widget_key, "a-btn");
+        let (key_b, hit_b) = reg.hit_test(BufferId(20), 0, 2).expect("beta hit");
+        assert_eq!(key_b, PanelKey::new("beta", 1));
+        assert_eq!(hit_b.widget_key, "b-btn");
+
+        // Unmounting one plugin's panel leaves the other untouched.
+        reg.unmount(&PanelKey::new("beta", 1));
+        assert!(reg.hit_test(BufferId(20), 0, 2).is_none());
+        assert!(reg.hit_test(BufferId(10), 0, 2).is_some());
     }
 
     #[test]
     fn unmount_clears_hits() {
         let mut reg = WidgetRegistry::new();
         reg.mount(
-            5,
+            pk(5),
             BufferId(2),
             empty_spec(),
             vec![make_hit(0, 0, 3, "x")],
@@ -560,7 +633,7 @@ mod tests {
             Vec::new(),
         );
         assert!(reg.hit_test(BufferId(2), 0, 1).is_some());
-        reg.unmount(5);
+        reg.unmount(&pk(5));
         assert!(reg.hit_test(BufferId(2), 0, 1).is_none());
     }
 
@@ -568,7 +641,7 @@ mod tests {
     fn update_replaces_hits() {
         let mut reg = WidgetRegistry::new();
         reg.mount(
-            5,
+            pk(5),
             BufferId(2),
             empty_spec(),
             vec![make_hit(0, 0, 3, "old")],
@@ -577,7 +650,7 @@ mod tests {
             Vec::new(),
         );
         reg.update(
-            5,
+            &pk(5),
             empty_spec(),
             vec![make_hit(1, 4, 9, "new")],
             HashMap::new(),

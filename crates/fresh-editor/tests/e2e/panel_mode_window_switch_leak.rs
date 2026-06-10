@@ -63,6 +63,7 @@ fn panel_mode_does_not_leak_onto_window_switched_away_from() {
     harness
         .editor_mut()
         .handle_plugin_command(PluginCommand::MountFloatingWidget {
+            plugin: "test-plugin".to_string(),
             panel_id: 1,
             spec: minimal_panel_spec(),
             width_pct: 50,

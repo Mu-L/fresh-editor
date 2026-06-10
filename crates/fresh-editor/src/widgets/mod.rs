@@ -23,7 +23,9 @@ pub use actions::{
     set_toggle_checked_in_spec, set_tree_checked_keys_in_spec, set_tree_nodes_in_spec,
     tree_parent_index,
 };
-pub use registry::{HitArea, PanelId, WidgetInstanceState, WidgetPanelState, WidgetRegistry};
+pub use registry::{
+    HitArea, PanelId, PanelKey, WidgetInstanceState, WidgetPanelState, WidgetRegistry,
+};
 pub use render::{
     render_spec, render_spec_no_autofocus, EmbedRect, FocusCursor, OverlayRow, RenderOutput,
     ScrollRegion,

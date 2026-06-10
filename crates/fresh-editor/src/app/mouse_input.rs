@@ -3973,8 +3973,8 @@ impl Editor {
     /// column). Reuses the canonical `ScrollbarMouse`/`ScrollbarState`.
     fn try_widget_scrollbar_press(&mut self, slot: super::PanelSlot, col: u16, row: u16) -> bool {
         use crate::view::ui::scrollbar::ScrollbarState;
-        let (panel_id, tracks) = match self.panel(slot) {
-            Some(fwp) => (fwp.panel_id, fwp.scrollbar_tracks.clone()),
+        let (panel_key, tracks) = match self.panel(slot) {
+            Some(fwp) => (fwp.panel_key.clone(), fwp.scrollbar_tracks.clone()),
             None => return false,
         };
         for t in &tracks {
@@ -3986,7 +3986,7 @@ impl Editor {
                 if let Some(fwp) = self.panel_mut(slot) {
                     fwp.scrollbar_drag_key = Some(t.list_key.clone());
                 }
-                self.apply_widget_scroll(panel_id, &t.list_key, new_offset, t.visible);
+                self.apply_widget_scroll(&panel_key, &t.list_key, new_offset, t.visible);
                 return true;
             }
         }
@@ -3997,9 +3997,9 @@ impl Editor {
     /// true if a drag is active (the press captured a `list_key`).
     fn try_widget_scrollbar_drag(&mut self, slot: super::PanelSlot, row: u16) -> bool {
         use crate::view::ui::scrollbar::ScrollbarState;
-        let (panel_id, key) = match self.panel(slot) {
+        let (panel_key, key) = match self.panel(slot) {
             Some(fwp) => match &fwp.scrollbar_drag_key {
-                Some(k) => (fwp.panel_id, k.clone()),
+                Some(k) => (fwp.panel_key.clone(), k.clone()),
                 None => return false,
             },
             None => return false,
@@ -4020,7 +4020,7 @@ impl Editor {
             .panel_mut(slot)
             .and_then(|fwp| fwp.scrollbar_mouse.drag(state, t.rect, row));
         if let Some(off) = new_offset {
-            self.apply_widget_scroll(panel_id, &key, off, t.visible);
+            self.apply_widget_scroll(&panel_key, &key, off, t.visible);
         }
         true
     }
@@ -4043,35 +4043,25 @@ impl Editor {
     /// preview stay in sync with the thumb.
     fn apply_widget_scroll(
         &mut self,
-        panel_id: u64,
+        panel_key: &crate::widgets::PanelKey,
         list_key: &str,
         new_offset: usize,
         visible: usize,
     ) {
         let moved_sel = self.widget_registry.set_list_scroll(
-            panel_id,
+            panel_key,
             list_key,
             new_offset as u32,
             visible as u32,
         );
-        self.rerender_widget_panel(panel_id);
+        self.rerender_widget_panel(panel_key);
         if let Some(sel) = moved_sel {
-            if self
-                .plugin_manager
-                .read()
-                .unwrap()
-                .has_hook_handlers("widget_event")
-            {
-                self.plugin_manager.read().unwrap().run_hook(
-                    "widget_event",
-                    crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                        panel_id,
-                        widget_key: list_key.to_string(),
-                        event_type: "select".to_string(),
-                        payload: serde_json::json!({ "index": sel as i64 }),
-                    },
-                );
-            }
+            self.fire_widget_event(
+                panel_key,
+                list_key.to_string(),
+                "select".to_string(),
+                serde_json::json!({ "index": sel as i64 }),
+            );
         }
     }
 
@@ -4089,9 +4079,9 @@ impl Editor {
         col: u16,
         row: u16,
     ) -> bool {
-        let (panel_id, inner) = match self.panel(slot) {
+        let (panel_key, inner) = match self.panel(slot) {
             Some(fwp) => match fwp.last_inner_rect {
-                Some(rect) => (fwp.panel_id, rect),
+                Some(rect) => (fwp.panel_key.clone(), rect),
                 None => return false,
             },
             None => return false,
@@ -4138,15 +4128,7 @@ impl Editor {
         {
             return false;
         }
-        self.plugin_manager.read().unwrap().run_hook(
-            "widget_event",
-            crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                panel_id,
-                widget_key: key,
-                event_type: "context".to_string(),
-                payload,
-            },
-        );
+        self.fire_widget_event(&panel_key, key, "context".to_string(), payload);
         true
     }
 
@@ -4176,33 +4158,23 @@ impl Editor {
     /// owning plugin clears its state — the click-outside analogue of the
     /// Esc dismissal in `dispatch_floating_widget_key`.
     fn dismiss_floating_panel_with_cancel(&mut self, slot: super::PanelSlot) {
-        let panel_id = match self.panel(slot) {
-            Some(f) => f.panel_id,
+        let panel_key = match self.panel(slot) {
+            Some(f) => f.panel_key.clone(),
             None => return,
         };
         let widget_key = self
             .widget_registry
-            .get(panel_id)
+            .get(&panel_key)
             .map(|p| p.focus_key.clone())
             .unwrap_or_default();
-        if self
-            .plugin_manager
-            .read()
-            .unwrap()
-            .has_hook_handlers("widget_event")
-        {
-            self.plugin_manager.read().unwrap().run_hook(
-                "widget_event",
-                crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                    panel_id,
-                    widget_key,
-                    event_type: "cancel".to_string(),
-                    payload: serde_json::json!({}),
-                },
-            );
-        }
+        self.fire_widget_event(
+            &panel_key,
+            widget_key,
+            "cancel".to_string(),
+            serde_json::json!({}),
+        );
         *self.panel_opt_mut(slot) = None;
-        let _ = self.widget_registry.unmount(panel_id);
+        let _ = self.widget_registry.unmount(&panel_key);
     }
 
     /// `handle_editor_click` uses; clicks outside the rect are
@@ -4213,9 +4185,9 @@ impl Editor {
         if self.try_widget_scrollbar_press(slot, col, row) {
             return;
         }
-        let (panel_id, inner) = match self.panel(slot) {
+        let (panel_key, inner) = match self.panel(slot) {
             Some(fwp) => match fwp.last_inner_rect {
-                Some(rect) => (fwp.panel_id, rect),
+                Some(rect) => (fwp.panel_key.clone(), rect),
                 None => return,
             },
             None => return,
@@ -4259,7 +4231,7 @@ impl Editor {
         if !hit_key.is_empty() {
             let tabbable = self
                 .widget_registry
-                .get(panel_id)
+                .get(&panel_key)
                 .map(|p| p.tabbable.iter().any(|k| k == &hit_key))
                 .unwrap_or(false);
             tracing::debug!(
@@ -4271,9 +4243,9 @@ impl Editor {
                 "handle_floating_widget_click: hit"
             );
             if tabbable {
-                self.set_panel_focus_and_notify(panel_id, hit_key.clone());
+                self.set_panel_focus_and_notify(&panel_key, hit_key.clone());
             }
-            self.rerender_widget_panel(panel_id);
+            self.rerender_widget_panel(&panel_key);
         } else {
             tracing::debug!(
                 target: "fresh::dock",
@@ -4284,7 +4256,7 @@ impl Editor {
         }
         let handled_specially = if hit_kind == "tree" && hit_event == "expand" {
             if let Some(item_key) = hit_payload.get("key").and_then(|v| v.as_str()) {
-                self.handle_widget_tree_expand_toggle(panel_id, &hit_key, item_key);
+                self.handle_widget_tree_expand_toggle(&panel_key, &hit_key, item_key);
                 true
             } else {
                 false
@@ -4292,13 +4264,7 @@ impl Editor {
         } else {
             false
         };
-        if !handled_specially
-            && self
-                .plugin_manager
-                .read()
-                .unwrap()
-                .has_hook_handlers("widget_event")
-        {
+        if !handled_specially {
             // Tag the event as mouse-originated. Keyboard nav (arrows)
             // fires `select` through `handle_widget_command` *without* this
             // marker, so a plugin can tell a click apart from an arrow-move
@@ -4308,15 +4274,7 @@ impl Editor {
             if let Some(obj) = hit_payload.as_object_mut() {
                 obj.insert("via".to_string(), serde_json::json!("click"));
             }
-            self.plugin_manager.read().unwrap().run_hook(
-                "widget_event",
-                crate::services::plugins::hooks::HookArgs::WidgetEvent {
-                    panel_id,
-                    widget_key: hit_key,
-                    event_type: hit_event,
-                    payload: hit_payload,
-                },
-            );
+            self.fire_widget_event(&panel_key, hit_key, hit_event, hit_payload);
         }
     }
 

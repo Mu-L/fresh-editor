@@ -440,14 +440,16 @@ impl Editor {
         // embed rects all reflect the new chrome (Bug 13). The hook above
         // lets plugins update their spec; this rerender picks up either the
         // updated spec or the existing spec at the new width.
-        for panel_id in [
-            self.dock.as_ref().map(|f| f.panel_id),
-            self.floating_widget_panel.as_ref().map(|f| f.panel_id),
+        for panel_key in [
+            self.dock.as_ref().map(|f| f.panel_key.clone()),
+            self.floating_widget_panel
+                .as_ref()
+                .map(|f| f.panel_key.clone()),
         ]
         .into_iter()
         .flatten()
         {
-            self.rerender_widget_panel(panel_id);
+            self.rerender_widget_panel(&panel_key);
         }
     }
 }

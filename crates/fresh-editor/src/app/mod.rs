@@ -1114,7 +1114,8 @@ pub(crate) enum PanelPlacement {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FloatingWidgetState {
-    pub panel_id: crate::widgets::PanelId,
+    /// Composite (plugin, id) identity of the mounted panel.
+    pub panel_key: crate::widgets::PanelKey,
     pub width_pct: u8,
     pub height_pct: u8,
     /// On-screen anchor. Defaults to `Centered` on mount; a plugin
@@ -1679,7 +1680,7 @@ mod tests {
 
     fn test_panel(placement: PanelPlacement, focused: bool) -> FloatingWidgetState {
         FloatingWidgetState {
-            panel_id: 1,
+            panel_key: crate::widgets::PanelKey::new("test-plugin", 1),
             width_pct: 50,
             height_pct: 50,
             placement,
@@ -1775,7 +1776,10 @@ mod tests {
         let _ = editor.take_full_redraw_request();
 
         editor
-            .handle_plugin_command(PluginCommand::UnmountFloatingWidget { panel_id: 1 })
+            .handle_plugin_command(PluginCommand::UnmountFloatingWidget {
+                plugin: "test-plugin".to_string(),
+                panel_id: 1,
+            })
             .unwrap();
 
         assert!(editor.dock.is_none(), "dock should be unmounted");
@@ -1799,7 +1803,10 @@ mod tests {
         let _ = editor.take_full_redraw_request();
 
         editor
-            .handle_plugin_command(PluginCommand::UnmountFloatingWidget { panel_id: 1 })
+            .handle_plugin_command(PluginCommand::UnmountFloatingWidget {
+                plugin: "test-plugin".to_string(),
+                panel_id: 1,
+            })
             .unwrap();
 
         assert!(

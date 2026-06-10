@@ -934,16 +934,23 @@ impl Editor {
         }
     }
 
-    /// Which slot currently holds the panel with this id, if any.
+    /// Which slot currently holds the panel with this identity, if any.
     #[cfg(feature = "plugins")]
-    pub(crate) fn slot_of_panel(&self, panel_id: u64) -> Option<crate::app::PanelSlot> {
+    pub(crate) fn slot_of_panel(
+        &self,
+        panel_key: &crate::widgets::PanelKey,
+    ) -> Option<crate::app::PanelSlot> {
         if self
             .floating_widget_panel
             .as_ref()
-            .is_some_and(|f| f.panel_id == panel_id)
+            .is_some_and(|f| &f.panel_key == panel_key)
         {
             Some(crate::app::PanelSlot::Floating)
-        } else if self.dock.as_ref().is_some_and(|f| f.panel_id == panel_id) {
+        } else if self
+            .dock
+            .as_ref()
+            .is_some_and(|f| &f.panel_key == panel_key)
+        {
             Some(crate::app::PanelSlot::Dock)
         } else {
             None

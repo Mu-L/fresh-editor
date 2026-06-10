@@ -1163,15 +1163,15 @@ impl Editor {
         } else {
             return false;
         };
-        let Some(panel_id) = self.panel(slot).map(|f| f.panel_id) else {
+        let Some(panel_id) = self.panel(slot).map(|f| f.panel_key.clone()) else {
             return false;
         };
-        if self.panel_focused_widget_is_text(panel_id) {
+        if self.panel_focused_widget_is_text(&panel_id) {
             // Single-line `TextEdit` strips embedded newlines; multi-line
             // stores plain `\n`. Normalise CRLF / CR → LF first, matching
             // the `Action::Paste` widget-routing path.
             let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-            self.handle_widget_insert_str(panel_id, &normalized);
+            self.handle_widget_insert_str(&panel_id, &normalized);
             self.set_status_message(t!("clipboard.pasted").to_string());
         }
         true

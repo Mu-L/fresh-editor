@@ -1394,49 +1394,81 @@ impl Editor {
             }
 
             PluginCommand::MountWidgetPanel {
+                plugin,
                 panel_id,
                 buffer_id,
                 spec,
             } => {
-                self.handle_mount_widget_panel(panel_id, buffer_id, spec);
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_mount_widget_panel(key, buffer_id, spec);
             }
 
-            PluginCommand::UpdateWidgetPanel { panel_id, spec } => {
-                self.handle_update_widget_panel(panel_id, spec);
+            PluginCommand::UpdateWidgetPanel {
+                plugin,
+                panel_id,
+                spec,
+            } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_update_widget_panel(&key, spec);
             }
 
-            PluginCommand::UnmountWidgetPanel { panel_id } => {
-                self.handle_unmount_widget_panel(panel_id);
+            PluginCommand::UnmountWidgetPanel { plugin, panel_id } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_unmount_widget_panel(&key);
             }
 
-            PluginCommand::WidgetCommand { panel_id, action } => {
-                self.handle_widget_command(panel_id, action);
+            PluginCommand::WidgetCommand {
+                plugin,
+                panel_id,
+                action,
+            } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_widget_command(&key, action);
             }
 
-            PluginCommand::WidgetMutate { panel_id, mutation } => {
-                self.handle_widget_mutate(panel_id, mutation);
+            PluginCommand::WidgetMutate {
+                plugin,
+                panel_id,
+                mutation,
+            } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_widget_mutate(&key, mutation);
             }
 
             PluginCommand::MountFloatingWidget {
+                plugin,
                 panel_id,
                 spec,
                 width_pct,
                 height_pct,
                 as_dock,
             } => {
-                self.handle_mount_floating_widget(panel_id, spec, width_pct, height_pct, as_dock);
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_mount_floating_widget(key, spec, width_pct, height_pct, as_dock);
             }
 
-            PluginCommand::UpdateFloatingWidget { panel_id, spec } => {
-                self.handle_update_floating_widget(panel_id, spec);
+            PluginCommand::UpdateFloatingWidget {
+                plugin,
+                panel_id,
+                spec,
+            } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_update_floating_widget(&key, spec);
             }
 
-            PluginCommand::UnmountFloatingWidget { panel_id } => {
-                self.handle_unmount_floating_widget(panel_id);
+            PluginCommand::UnmountFloatingWidget { plugin, panel_id } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_unmount_floating_widget(&key);
             }
 
-            PluginCommand::FloatingPanelControl { panel_id, op, arg } => {
-                self.handle_floating_panel_control(panel_id, &op, arg);
+            PluginCommand::FloatingPanelControl {
+                plugin,
+                panel_id,
+                op,
+                arg,
+            } => {
+                let key = crate::widgets::PanelKey::new(plugin, panel_id);
+                self.handle_floating_panel_control(&key, &op, arg);
             }
         }
         Ok(())
@@ -3884,7 +3916,7 @@ impl Editor {
 
     fn handle_mount_widget_panel(
         &mut self,
-        panel_id: u64,
+        panel_key: crate::widgets::PanelKey,
         buffer_id: BufferId,
         spec: fresh_core::api::WidgetSpec,
     ) {
@@ -3898,7 +3930,7 @@ impl Editor {
         let out = crate::widgets::render_spec(&spec, &prev, &prev_focus, panel_width);
         let focus_cursor = out.focus_cursor;
         self.widget_registry.mount(
-            panel_id,
+            panel_key.clone(),
             buffer_id,
             spec,
             out.hits,
@@ -3910,39 +3942,43 @@ impl Editor {
         if let Err(e) = self.set_virtual_buffer_content(buffer_id, entries.clone()) {
             tracing::error!(
                 "Failed to render mounted widget panel {} into {:?}: {}",
-                panel_id,
+                panel_key,
                 buffer_id,
                 e
             );
         } else {
             tracing::debug!(
                 "Mounted widget panel {} into buffer {:?}",
-                panel_id,
+                panel_key,
                 buffer_id
             );
         }
         self.apply_widget_focus_cursor(buffer_id, &entries, focus_cursor);
     }
 
-    fn handle_update_widget_panel(&mut self, panel_id: u64, spec: fresh_core::api::WidgetSpec) {
-        let prev = match self.widget_registry.instance_states(panel_id) {
+    fn handle_update_widget_panel(
+        &mut self,
+        panel_key: &crate::widgets::PanelKey,
+        spec: fresh_core::api::WidgetSpec,
+    ) {
+        let prev = match self.widget_registry.instance_states(panel_key) {
             Some(s) => s.clone(),
             None => {
                 tracing::debug!(
                     "UpdateWidgetPanel for unknown panel {} ignored (not mounted)",
-                    panel_id
+                    panel_key
                 );
                 return;
             }
         };
         let prev_focus = self
             .widget_registry
-            .focus_key(panel_id)
+            .focus_key(panel_key)
             .map(|s| s.to_string())
             .unwrap_or_default();
         let buffer_id_for_width = self
             .widget_registry
-            .buffer_and_spec(panel_id)
+            .buffer_and_spec(panel_key)
             .map(|(b, _)| b)
             .unwrap_or(BufferId(0));
         let panel_width = self.widget_panel_width(buffer_id_for_width);
@@ -3950,7 +3986,7 @@ impl Editor {
         let focus_cursor = out.focus_cursor;
         let entries = out.entries;
         match self.widget_registry.update(
-            panel_id,
+            panel_key,
             spec,
             out.hits,
             out.instance_states,
@@ -3959,14 +3995,14 @@ impl Editor {
         ) {
             Ok(buffer_id) => {
                 if let Err(e) = self.set_virtual_buffer_content(buffer_id, entries.clone()) {
-                    tracing::error!("Failed to render updated widget panel {}: {}", panel_id, e);
+                    tracing::error!("Failed to render updated widget panel {}: {}", panel_key, e);
                 }
                 self.apply_widget_focus_cursor(buffer_id, &entries, focus_cursor);
             }
             Err(()) => {
                 tracing::debug!(
                     "UpdateWidgetPanel for unknown panel {} ignored (not mounted)",
-                    panel_id
+                    panel_key
                 );
             }
         }
@@ -3977,14 +4013,18 @@ impl Editor {
     /// the full spec; it sends one targeted change. The host
     /// mutates the registry's spec / instance state and re-renders
     /// against the just-mutated state.
-    fn handle_widget_mutate(&mut self, panel_id: u64, mutation: fresh_core::api::WidgetMutation) {
+    fn handle_widget_mutate(
+        &mut self,
+        panel_key: &crate::widgets::PanelKey,
+        mutation: fresh_core::api::WidgetMutation,
+    ) {
         use fresh_core::api::WidgetMutation;
 
         // Look up the panel; bail if unknown.
-        if self.widget_registry.get(panel_id).is_none() {
+        if self.widget_registry.get(panel_key).is_none() {
             tracing::debug!(
                 "WidgetMutate for unknown panel {} ignored (not mounted)",
-                panel_id
+                panel_key
             );
             return;
         }
@@ -4001,7 +4041,7 @@ impl Editor {
                 // multi-line viewport offsets don't snap on a
                 // plugin-driven update; the renderer re-clamps next
                 // render anyway.
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     // Preserve `scroll` + `multiline` so plugin-
                     // driven SetValue doesn't snap the viewport,
                     // and preserve `completions` /
@@ -4055,7 +4095,7 @@ impl Editor {
                 // Toggle checked lives in the spec (not instance
                 // state). Walk the spec, find the Toggle by key,
                 // mutate.
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     crate::widgets::set_toggle_checked_in_spec(
                         &mut panel.spec,
                         &widget_key,
@@ -4065,7 +4105,7 @@ impl Editor {
             }
             WidgetMutation::SetSelectedIndex { widget_key, index } => {
                 // List selected_index lives in instance state.
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     let (prev_scroll, prev_index, prev_item_height, prev_user_scrolled) =
                         match panel.instance_states.get(&widget_key) {
                             Some(crate::widgets::WidgetInstanceState::List {
@@ -4107,7 +4147,7 @@ impl Editor {
                 // any render is dropped on the floor — Text
                 // instance state is seeded on first render of
                 // the spec).
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     if let Some(crate::widgets::WidgetInstanceState::Text {
                         completions,
                         completion_selected_index,
@@ -4127,7 +4167,7 @@ impl Editor {
                 item_keys,
             } => {
                 // List items live in the spec.
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     crate::widgets::set_list_items_in_spec(
                         &mut panel.spec,
                         &widget_key,
@@ -4138,7 +4178,7 @@ impl Editor {
             }
             WidgetMutation::SetExpandedKeys { widget_key, keys } => {
                 // Tree expanded_keys lives in instance state.
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     let (prev_scroll, prev_sel) = match panel.instance_states.get(&widget_key) {
                         Some(crate::widgets::WidgetInstanceState::Tree {
                             scroll_offset,
@@ -4170,7 +4210,7 @@ impl Editor {
                 // matching nodes so the next render reflects it
                 // immediately, without round-tripping through the
                 // plugin.
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     crate::widgets::set_tree_checked_keys_in_spec(
                         &mut panel.spec,
                         &widget_key,
@@ -4184,7 +4224,7 @@ impl Editor {
                 new_nodes,
                 new_item_keys,
             } => {
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     crate::widgets::append_tree_nodes_in_spec(
                         &mut panel.spec,
                         &widget_key,
@@ -4197,7 +4237,7 @@ impl Editor {
                 widget_key,
                 entries,
             } => {
-                if let Some(panel) = self.widget_registry.get_mut(panel_id) {
+                if let Some(panel) = self.widget_registry.get_mut(panel_key) {
                     crate::widgets::set_raw_entries_in_spec(&mut panel.spec, &widget_key, entries);
                 }
             }
@@ -4206,22 +4246,22 @@ impl Editor {
                 // spec. The renderer reads it on the next paint and
                 // re-clamps to the first tabbable if the key isn't a
                 // current tabbable, so an unknown key is a safe no-op.
-                self.widget_registry.set_focus_key(panel_id, widget_key);
+                self.widget_registry.set_focus_key(panel_key, widget_key);
             }
         }
 
         // Re-render with the mutated state. `rerender_widget_panel`
         // reads the registry's current spec + instance state and
         // pushes the result through the buffer.
-        self.rerender_widget_panel(panel_id);
+        self.rerender_widget_panel(panel_key);
     }
 
-    fn handle_unmount_widget_panel(&mut self, panel_id: u64) {
-        match self.widget_registry.unmount(panel_id) {
+    fn handle_unmount_widget_panel(&mut self, panel_key: &crate::widgets::PanelKey) {
+        match self.widget_registry.unmount(panel_key) {
             Some(buffer_id) => {
                 tracing::debug!(
                     "Unmounted widget panel {} (was rendering into {:?})",
-                    panel_id,
+                    panel_key,
                     buffer_id
                 );
                 // Buffer lifetime is owned by the plugin (it created the
@@ -4230,14 +4270,14 @@ impl Editor {
                 // panel state.
             }
             None => {
-                tracing::debug!("UnmountWidgetPanel for unknown panel {} ignored", panel_id);
+                tracing::debug!("UnmountWidgetPanel for unknown panel {} ignored", panel_key);
             }
         }
     }
 
     fn handle_mount_floating_widget(
         &mut self,
-        panel_id: u64,
+        panel_key: crate::widgets::PanelKey,
         spec: fresh_core::api::WidgetSpec,
         width_pct: u8,
         height_pct: u8,
@@ -4272,12 +4312,12 @@ impl Editor {
             super::PanelPlacement::Centered
         };
         if let Some(existing) = self.panel_opt_mut(slot).take() {
-            if existing.panel_id != panel_id {
-                let _ = self.widget_registry.unmount(existing.panel_id);
+            if existing.panel_key != panel_key {
+                let _ = self.widget_registry.unmount(&existing.panel_key);
             }
         }
         *self.panel_opt_mut(slot) = Some(FloatingWidgetState {
-            panel_id,
+            panel_key: panel_key.clone(),
             width_pct,
             height_pct,
             placement,
@@ -4305,7 +4345,7 @@ impl Editor {
         let overlays = out.overlays;
         let scroll_regions = out.scroll_regions;
         self.widget_registry.mount(
-            panel_id,
+            panel_key.clone(),
             buffer_id,
             spec,
             out.hits,
@@ -4322,7 +4362,7 @@ impl Editor {
         }
         tracing::debug!(
             "Mounted floating widget panel {} ({}%x{}%)",
-            panel_id,
+            panel_key,
             width_pct,
             height_pct
         );
@@ -4336,22 +4376,26 @@ impl Editor {
         }
     }
 
-    fn handle_update_floating_widget(&mut self, panel_id: u64, spec: fresh_core::api::WidgetSpec) {
-        let Some(slot) = self.slot_of_panel(panel_id) else {
+    fn handle_update_floating_widget(
+        &mut self,
+        panel_key: &crate::widgets::PanelKey,
+        spec: fresh_core::api::WidgetSpec,
+    ) {
+        let Some(slot) = self.slot_of_panel(panel_key) else {
             tracing::debug!(
                 "UpdateFloatingWidget for unknown / mismatched panel {} ignored",
-                panel_id
+                panel_key
             );
             return;
         };
         let prev = self
             .widget_registry
-            .instance_states(panel_id)
+            .instance_states(panel_key)
             .cloned()
             .unwrap_or_default();
         let prev_focus = self
             .widget_registry
-            .focus_key(panel_id)
+            .focus_key(panel_key)
             .map(|s| s.to_string())
             .unwrap_or_default();
         let panel_width = self.floating_panel_inner_width(slot);
@@ -4364,7 +4408,7 @@ impl Editor {
         if self
             .widget_registry
             .update(
-                panel_id,
+                panel_key,
                 spec,
                 out.hits,
                 out.instance_states,
@@ -4375,7 +4419,7 @@ impl Editor {
         {
             tracing::debug!(
                 "UpdateFloatingWidget for unknown panel {} ignored (not in registry)",
-                panel_id
+                panel_key
             );
             return;
         }
@@ -4388,16 +4432,16 @@ impl Editor {
         }
     }
 
-    fn handle_unmount_floating_widget(&mut self, panel_id: u64) {
-        let Some(slot) = self.slot_of_panel(panel_id) else {
+    fn handle_unmount_floating_widget(&mut self, panel_key: &crate::widgets::PanelKey) {
+        let Some(slot) = self.slot_of_panel(panel_key) else {
             tracing::debug!(
                 "UnmountFloatingWidget for unknown / mismatched panel {} ignored",
-                panel_id
+                panel_key
             );
             return;
         };
         *self.panel_opt_mut(slot) = None;
-        let _ = self.widget_registry.unmount(panel_id);
+        let _ = self.widget_registry.unmount(panel_key);
         // Hiding the left dock frees its full-height column. The next
         // frame's `compute_dock_split` already lays the chrome back out
         // full-width (and the early command drain in `render` makes that
@@ -4427,14 +4471,19 @@ impl Editor {
         // funnel: it re-derives `dock_cols` (now 0 for a dock unmount) and
         // reflows every window's terminals + viewports to the reclaimed width.
         self.relayout();
-        tracing::debug!("Unmounted floating widget panel {}", panel_id);
+        tracing::debug!("Unmounted floating widget panel {}", panel_key);
     }
 
     /// Apply a `FloatingPanelControl` op. No-op if the panel id
     /// doesn't match the mounted floating panel.
-    fn handle_floating_panel_control(&mut self, panel_id: u64, op: &str, arg: f64) {
-        let Some(slot) = self.slot_of_panel(panel_id) else {
-            tracing::warn!("FloatingPanelControl for unknown/mismatched panel {panel_id} ignored");
+    fn handle_floating_panel_control(
+        &mut self,
+        panel_key: &crate::widgets::PanelKey,
+        op: &str,
+        arg: f64,
+    ) {
+        let Some(slot) = self.slot_of_panel(panel_key) else {
+            tracing::warn!("FloatingPanelControl for unknown/mismatched panel {panel_key} ignored");
             return;
         };
         // `blur` fires a widget_event, so handle it before borrowing the

@@ -3806,13 +3806,13 @@ pub enum PluginCommand {
 
     /// Mount a declarative widget panel inside an existing virtual
     /// buffer. The host renders the `WidgetSpec` and writes the
-    /// resulting text-property entries into the buffer. The
-    /// `panel_id` is plugin-allocated (any unique u64 for that
-    /// plugin) and is used to address the panel for later
-    /// `UpdateWidgetPanel` / `UnmountWidgetPanel` calls.
+    /// resulting text-property entries into the buffer. `panel_id`
+    /// is plugin-local; the host keys the panel by (plugin, id), so
+    /// every widget command carries the calling plugin's name.
     ///
     /// See `docs/internal/plugin-widget-library-design.md`.
     MountWidgetPanel {
+        plugin: String,
         panel_id: u64,
         buffer_id: BufferId,
         spec: WidgetSpec,
@@ -3822,11 +3822,15 @@ pub enum PluginCommand {
     /// The reconciler diffs against the previous spec and applies
     /// the minimum mutation; widget instance state is preserved on
     /// nodes whose `key` matches.
-    UpdateWidgetPanel { panel_id: u64, spec: WidgetSpec },
+    UpdateWidgetPanel {
+        plugin: String,
+        panel_id: u64,
+        spec: WidgetSpec,
+    },
 
     /// Tear down a widget panel. Subsequent `UpdateWidgetPanel`
     /// calls for the same `panel_id` are no-ops.
-    UnmountWidgetPanel { panel_id: u64 },
+    UnmountWidgetPanel { plugin: String, panel_id: u64 },
 
     /// Route a keystroke / nav action to the panel's currently
     /// focused widget. The plugin's `defineMode` bindings dispatch
@@ -3834,13 +3838,18 @@ pub enum PluginCommand {
     /// (Tab cycle, Enter to activate, Up/Down to navigate a List,
     /// Backspace / arrows / printable input to edit a TextInput).
     /// See `WidgetAction` for the action shapes.
-    WidgetCommand { panel_id: u64, action: WidgetAction },
+    WidgetCommand {
+        plugin: String,
+        panel_id: u64,
+        action: WidgetAction,
+    },
 
     /// Apply a targeted mutation to a mounted widget panel
     /// without re-transmitting the full spec. The IPC fast path
     /// for hot-path updates (typing, selection moves, partial
     /// list refreshes). See `WidgetMutation` for the shapes.
     WidgetMutate {
+        plugin: String,
         panel_id: u64,
         mutation: WidgetMutation,
     },
@@ -3852,6 +3861,7 @@ pub enum PluginCommand {
     /// mounted at a time; a second `MountFloatingWidget` replaces
     /// any existing one.
     MountFloatingWidget {
+        plugin: String,
         panel_id: u64,
         spec: WidgetSpec,
         width_pct: u8,
@@ -3865,11 +3875,15 @@ pub enum PluginCommand {
     /// Replace the spec of the currently-mounted floating widget
     /// panel. No-op when no floating panel is mounted, or when the
     /// `panel_id` doesn't match the mounted one.
-    UpdateFloatingWidget { panel_id: u64, spec: WidgetSpec },
+    UpdateFloatingWidget {
+        plugin: String,
+        panel_id: u64,
+        spec: WidgetSpec,
+    },
 
     /// Tear down the floating widget panel. No-op when no floating
     /// panel is mounted, or when the `panel_id` doesn't match.
-    UnmountFloatingWidget { panel_id: u64 },
+    UnmountFloatingWidget { plugin: String, panel_id: u64 },
 
     /// Control a mounted floating widget panel's placement / focus
     /// without re-sending its spec. `op` is one of:
@@ -3883,7 +3897,12 @@ pub enum PluginCommand {
     /// - "fullscreen" — a centered panel renders over the *entire* frame
     ///   (covering the dimmed dock) when `arg != 0`, instead of laying
     ///   into the chrome area beside the dock. No-op when no dock is up.
-    FloatingPanelControl { panel_id: u64, op: String, arg: f64 },
+    FloatingPanelControl {
+        plugin: String,
+        panel_id: u64,
+        op: String,
+        arg: f64,
+    },
 }
 
 impl PluginCommand {

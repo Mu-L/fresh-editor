@@ -5525,6 +5525,7 @@ impl JsEditorApi {
         Ok(self
             .command_sender
             .send(PluginCommand::MountWidgetPanel {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 buffer_id: BufferId(buffer_id as usize),
                 spec,
@@ -5552,6 +5553,7 @@ impl JsEditorApi {
         Ok(self
             .command_sender
             .send(PluginCommand::UpdateWidgetPanel {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 spec,
             })
@@ -5564,6 +5566,7 @@ impl JsEditorApi {
     pub fn unmount_widget_panel(&self, panel_id: f64) -> bool {
         self.command_sender
             .send(PluginCommand::UnmountWidgetPanel {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
             })
             .is_ok()
@@ -5595,6 +5598,7 @@ impl JsEditorApi {
         Ok(self
             .command_sender
             .send(PluginCommand::WidgetCommand {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 action,
             })
@@ -5624,6 +5628,7 @@ impl JsEditorApi {
         Ok(self
             .command_sender
             .send(PluginCommand::WidgetMutate {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 mutation,
             })
@@ -5655,6 +5660,7 @@ impl JsEditorApi {
         Ok(self
             .command_sender
             .send(PluginCommand::MountFloatingWidget {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 spec,
                 width_pct,
@@ -5683,6 +5689,7 @@ impl JsEditorApi {
         Ok(self
             .command_sender
             .send(PluginCommand::UpdateFloatingWidget {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 spec,
             })
@@ -5694,6 +5701,7 @@ impl JsEditorApi {
     pub fn unmount_floating_widget(&self, panel_id: f64) -> bool {
         self.command_sender
             .send(PluginCommand::UnmountFloatingWidget {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
             })
             .is_ok()
@@ -5708,6 +5716,7 @@ impl JsEditorApi {
     pub fn floating_panel_control(&self, panel_id: f64, op: String, arg: f64) -> bool {
         self.command_sender
             .send(PluginCommand::FloatingPanelControl {
+                plugin: self.plugin_name.clone(),
                 panel_id: panel_id as u64,
                 op,
                 arg,

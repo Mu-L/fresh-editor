@@ -221,7 +221,7 @@ impl Editor {
         // driven, it stops listening to `mouse_click` for its panel
         // and the duplicate dispatch becomes a no-op.
         if let (Some(brow), Some(bcol)) = (mc_buffer_row, mc_buffer_col) {
-            if let Some((panel_id, hit)) = self.widget_registry.hit_test(buffer_id, brow, bcol) {
+            if let Some((panel_key, hit)) = self.widget_registry.hit_test(buffer_id, brow, bcol) {
                 // Click-to-focus: if the clicked widget has a stable
                 // key that's tabbable, move focus there before
                 // firing the event. The next render shows the focus
@@ -230,15 +230,15 @@ impl Editor {
                 if !hit.widget_key.is_empty() {
                     let is_tabbable = self
                         .widget_registry
-                        .get(panel_id)
+                        .get(&panel_key)
                         .map(|p| p.tabbable.iter().any(|k| k == &hit.widget_key))
                         .unwrap_or(false);
                     if is_tabbable {
-                        self.set_panel_focus_and_notify(panel_id, hit.widget_key.clone());
+                        self.set_panel_focus_and_notify(&panel_key, hit.widget_key.clone());
                     }
                     // Re-render so the focus styling updates without
                     // waiting for the plugin to re-emit the spec.
-                    self.rerender_widget_panel(panel_id);
+                    self.rerender_widget_panel(&panel_key);
                 }
                 // Tree disclosure click: the host owns expansion
                 // state, so toggle it before firing the plugin
@@ -252,7 +252,11 @@ impl Editor {
                 let mut handled_specially = false;
                 if hit.widget_kind == "tree" && hit.event_type == "expand" {
                     if let Some(item_key) = hit.payload.get("key").and_then(|v| v.as_str()) {
-                        self.handle_widget_tree_expand_toggle(panel_id, &hit.widget_key, item_key);
+                        self.handle_widget_tree_expand_toggle(
+                            &panel_key,
+                            &hit.widget_key,
+                            item_key,
+                        );
                         handled_specially = true;
                     }
                 }
@@ -275,25 +279,16 @@ impl Editor {
                     if let Some(list_key) = hit.payload.get("list_key").and_then(|v| v.as_str()) {
                         event_widget_key = list_key.to_string();
                         if let Some(idx) = hit.payload.get("index").and_then(|v| v.as_i64()) {
-                            self.set_widget_list_selected_index(panel_id, list_key, idx as i32);
+                            self.set_widget_list_selected_index(&panel_key, list_key, idx as i32);
                         }
                     }
                 }
-                if !handled_specially
-                    && self
-                        .plugin_manager
-                        .read()
-                        .unwrap()
-                        .has_hook_handlers("widget_event")
-                {
-                    self.plugin_manager.read().unwrap().run_hook(
-                        "widget_event",
-                        HookArgs::WidgetEvent {
-                            panel_id,
-                            widget_key: event_widget_key,
-                            event_type: hit.event_type.to_string(),
-                            payload: hit.payload.clone(),
-                        },
+                if !handled_specially {
+                    self.fire_widget_event(
+                        &panel_key,
+                        event_widget_key,
+                        hit.event_type.to_string(),
+                        hit.payload.clone(),
                     );
                 }
             }

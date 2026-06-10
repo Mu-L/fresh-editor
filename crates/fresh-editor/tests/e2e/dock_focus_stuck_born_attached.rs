@@ -107,6 +107,7 @@ fn born_attached_session_does_not_wedge_source_window_typing() {
     harness
         .editor_mut()
         .handle_plugin_command(PluginCommand::MountFloatingWidget {
+            plugin: "test-plugin".to_string(),
             panel_id: 1,
             spec: minimal_panel_spec(),
             width_pct: 60,
@@ -150,7 +151,10 @@ fn born_attached_session_does_not_wedge_source_window_typing() {
     //    clear lands on the now-active born-attached window (B), not on A.
     harness
         .editor_mut()
-        .handle_plugin_command(PluginCommand::UnmountFloatingWidget { panel_id: 1 })
+        .handle_plugin_command(PluginCommand::UnmountFloatingWidget {
+            plugin: "test-plugin".to_string(),
+            panel_id: 1,
+        })
         .unwrap();
     harness
         .editor_mut()
