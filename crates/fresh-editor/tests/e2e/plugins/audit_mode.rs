@@ -2308,9 +2308,17 @@ fn test_review_diff_renamed_file_message() {
     );
 }
 
-/// Test that untracked directories show "(untracked directory)" message.
+/// Regression test for issue #2315: files inside a brand-new untracked
+/// directory must be listed and reviewable individually, not collapsed into a
+/// single blank, contentless `(untracked directory)` row.
+///
+/// git's default `status --porcelain` collapses a new directory into a single
+/// `?? dir/` entry, which the review showed as a nameless row with no diff.
+/// Running with `-uall` lists every untracked file individually, so each file
+/// (and its added content) is reviewable. Fails without the fix (the files
+/// never appear and the "(untracked directory)" placeholder is shown instead).
 #[test]
-fn test_review_diff_untracked_directory_message() {
+fn test_review_diff_untracked_directory_files_listed() {
     init_tracing_from_env();
     let repo = GitTestRepo::new();
     repo.setup_typical_project();
@@ -2319,8 +2327,9 @@ fn test_review_diff_untracked_directory_message() {
     repo.git_add_all();
     repo.git_commit("Initial commit");
 
-    // Create an untracked directory with a file inside
-    repo.create_file("newdir/hello.txt", "hello\n");
+    // Create an untracked *directory* of files — git collapses this to a single
+    // "?? newdir/" entry under the default untracked-files mode.
+    repo.create_file("newdir/hello.txt", "hello from newdir\n");
 
     let mut harness = EditorTestHarness::with_config_and_working_dir(
         120,
@@ -2339,13 +2348,20 @@ fn test_review_diff_untracked_directory_message() {
 
     let _screen = open_review_diff(&mut harness);
 
-    // The unified stream lists every file inline; the untracked directory
-    // header and its (untracked directory) message are both rendered.
-    let mut found_dir = false;
-    for _ in 0..6 {
+    // The file inside the new directory must be listed by name, and the
+    // "(untracked directory)" placeholder must NOT appear. Scan via PageDown
+    // since it may not be on the first viewport.
+    let mut found_file = false;
+    for _ in 0..8 {
         let s = harness.screen_to_string();
-        if s.contains("newdir/") && s.contains("untracked directory") {
-            found_dir = true;
+        assert!(
+            !s.contains("untracked directory"),
+            "The blank '(untracked directory)' placeholder must not be shown; \
+             files inside the new directory should be listed individually. Screen:\n{}",
+            s
+        );
+        if s.contains("hello.txt") {
+            found_file = true;
             break;
         }
         harness
@@ -2355,8 +2371,30 @@ fn test_review_diff_untracked_directory_message() {
     }
 
     assert!(
-        found_dir,
-        "Should find untracked directory with '(untracked directory)' message. Final screen:\n{}",
+        found_file,
+        "Should list the untracked file 'hello.txt' inside the new directory. Final screen:\n{}",
+        harness.screen_to_string()
+    );
+
+    // Focusing the file should reveal its added content as a diff, proving it
+    // is actually reviewable (not just a label).
+    let mut found_body = harness.screen_to_string().contains("hello from newdir");
+    for _ in 0..40 {
+        if found_body {
+            break;
+        }
+        harness
+            .send_key(KeyCode::Char('.'), KeyModifiers::NONE)
+            .unwrap();
+        harness.render().unwrap();
+        if harness.screen_to_string().contains("hello from newdir") {
+            found_body = true;
+        }
+    }
+    assert!(
+        found_body,
+        "Focusing the untracked file should show its added content 'hello from newdir'. \
+         Final screen:\n{}",
         harness.screen_to_string()
     );
 }
