@@ -1,6 +1,6 @@
 //! E2E tests for the settings modal
 
-use crate::common::harness::EditorTestHarness;
+use crate::common::harness::{EditorTestHarness, HarnessOptions};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 /// Test opening settings modal with Ctrl+,
@@ -221,6 +221,160 @@ fn test_settings_toggle_shows_modified() {
     harness
         .send_key(KeyCode::Enter, KeyModifiers::NONE)
         .unwrap();
+}
+
+fn find_setting_label_and_chip(
+    harness: &EditorTestHarness,
+    label: &str,
+) -> Option<(u16, u16, u16)> {
+    let height = harness.buffer().area.height;
+    for y in 0..height {
+        let line = harness.get_row_text(y);
+        let chars: Vec<char> = line.chars().collect();
+        let needle: Vec<char> = label.chars().collect();
+        let Some(label_col) = (0..chars.len().saturating_sub(needle.len().saturating_sub(1)))
+            .find(|&i| chars[i..i + needle.len()] == needle[..])
+        else {
+            continue;
+        };
+        let bracket_col = chars[label_col + needle.len()..]
+            .iter()
+            .position(|&c| c == '[')
+            .map(|offset| label_col + needle.len() + offset)?;
+        return Some((label_col as u16, bracket_col as u16, y));
+    }
+    None
+}
+
+fn screen_contains_text_at_or_after_col(
+    harness: &EditorTestHarness,
+    text: &str,
+    min_col: u16,
+) -> bool {
+    harness.screen_to_string().lines().any(|line| {
+        line.find(text)
+            .map(|col| col as u16 >= min_col)
+            .unwrap_or(false)
+    })
+}
+
+#[test]
+fn test_settings_toggle_mouse_click_only_chip_changes_value() {
+    let mut harness = EditorTestHarness::new(120, 40).unwrap();
+    harness.open_settings().unwrap();
+
+    let (label_x, chip_x, row) = find_setting_label_and_chip(&harness, "Check For Updates")
+        .unwrap_or_else(|| {
+            panic!(
+                "could not find Check For Updates toggle. Screen:\n{}",
+                harness.screen_to_string()
+            )
+        });
+
+    // Clicking the label/row should only select the setting, not toggle it.
+    harness.mouse_click(label_x, row).unwrap();
+    harness.render().unwrap();
+    assert!(
+        !harness.screen_to_string().contains("modified"),
+        "clicking a toggle label should not change the setting. Screen:\n{}",
+        harness.screen_to_string()
+    );
+
+    // Clicking inside the rendered [v]/[ ] chip should toggle and mark dirty.
+    harness.mouse_click(chip_x + 1, row).unwrap();
+    harness.render().unwrap();
+    assert!(
+        harness.screen_to_string().contains("modified"),
+        "clicking the toggle chip should change the setting. Screen:\n{}",
+        harness.screen_to_string()
+    );
+}
+
+#[test]
+fn test_settings_toggle_reverting_value_clears_dirty_markers() {
+    let mut harness = EditorTestHarness::new(120, 40).unwrap();
+    harness.open_settings().unwrap();
+
+    let (_label_x, chip_x, row) = find_setting_label_and_chip(&harness, "Check For Updates")
+        .unwrap_or_else(|| {
+            panic!(
+                "could not find Check For Updates toggle. Screen:\n{}",
+                harness.screen_to_string()
+            )
+        });
+
+    harness.mouse_click(chip_x + 1, row).unwrap();
+    harness.render().unwrap();
+    assert!(
+        harness.screen_to_string().contains("modified"),
+        "first toggle should mark settings dirty. Screen:\n{}",
+        harness.screen_to_string()
+    );
+
+    harness.mouse_click(chip_x + 1, row).unwrap();
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        !screen.contains("modified"),
+        "second toggle restores the original value, so the title should be clean. Screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains(">● Check For Updates"),
+        "second toggle restores the original value, so the row dirty marker should clear. Screen:\n{screen}"
+    );
+}
+
+#[test]
+fn test_plugin_toggle_mouse_click_chip_matches_visual_position() {
+    let mut harness =
+        EditorTestHarness::create(120, 40, HarnessOptions::new().without_empty_plugins_dir())
+            .unwrap();
+    harness.open_settings().unwrap();
+
+    harness
+        .send_key(KeyCode::Char('/'), KeyModifiers::NONE)
+        .unwrap();
+    harness.type_text("AutoOpen").unwrap();
+    harness.render().unwrap();
+    harness.assert_screen_contains("AutoOpen");
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness.render().unwrap();
+
+    assert!(
+        screen_contains_text_at_or_after_col(&harness, "Plugin: dashboard", 32),
+        "plugin settings page should show its title in the right panel. Screen:\n{}",
+        harness.screen_to_string()
+    );
+
+    let (_label_x, chip_x, row) =
+        find_setting_label_and_chip(&harness, "AutoOpen").unwrap_or_else(|| {
+            panic!(
+                "could not find dashboard AutoOpen toggle. Screen:\n{}",
+                harness.screen_to_string()
+            )
+        });
+
+    harness.mouse_click(chip_x + 1, row).unwrap();
+    harness.render().unwrap();
+    assert!(
+        harness.screen_to_string().contains("modified"),
+        "clicking the plugin toggle's visible chip should change it. Screen:\n{}",
+        harness.screen_to_string()
+    );
+
+    harness.mouse_click(chip_x + 1, row).unwrap();
+    harness.render().unwrap();
+    let screen = harness.screen_to_string();
+    assert!(
+        !screen.contains("modified"),
+        "clicking the plugin toggle again should restore the schema default and clear dirty markers. Screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains(">● AutoOpen"),
+        "plugin setting row dirty marker should clear after restoring the schema default. Screen:\n{screen}"
+    );
 }
 
 /// Test confirmation dialog shows pending changes

@@ -4,7 +4,7 @@
 
 use rust_i18n::t;
 
-use crate::primitives::display_width::str_width;
+use crate::primitives::display_width::{char_width, str_width};
 
 use super::entry_dialog::EntryDialogState;
 use super::items::SettingControl;
@@ -118,6 +118,39 @@ fn truncate_chars_with_ellipsis(s: &str, max_chars: usize) -> String {
         let kept: String = s.chars().take(max_chars.saturating_sub(3)).collect();
         format!("{}...", kept)
     }
+}
+
+/// Truncate `s` to at most `max_width` terminal columns, appending `"..."`.
+///
+/// Unlike [`truncate_chars_with_ellipsis`], this is display-width aware so a
+/// CJK or emoji label cannot overflow a fixed-width TUI cell after truncation.
+fn truncate_display_width_with_ellipsis(s: &str, max_width: usize) -> String {
+    if str_width(s) <= max_width {
+        return s.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+
+    let ellipsis = "...";
+    let ellipsis_width = str_width(ellipsis);
+    if max_width <= ellipsis_width {
+        return ".".repeat(max_width);
+    }
+
+    let target_width = max_width - ellipsis_width;
+    let mut kept = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let width = char_width(ch);
+        if used + width > target_width {
+            break;
+        }
+        kept.push(ch);
+        used += width;
+    }
+    kept.push_str(ellipsis);
+    kept
 }
 
 /// Render the settings modal
@@ -408,7 +441,7 @@ fn render_categories_horizontal(
 
     for (i, page) in state.pages.iter().enumerate() {
         let is_selected = i == state.selected_category;
-        let has_modified = page.items.iter().any(|item| item.modified);
+        let has_modified = state.page_has_pending_changes(i);
 
         let indicator = if has_modified { "● " } else { "  " };
         let name = &page.name;
@@ -524,6 +557,7 @@ fn render_categories(
         has_changes: bool,
         indent_cols: u16,
         is_category: bool,
+        is_plugin_category: bool,
         cat_idx: Option<usize>,
         section_idx: Option<usize>,
         label: String,
@@ -552,9 +586,10 @@ fn render_categories(
                     // Category row is "selected" iff the keyboard cursor
                     // is sitting on it (no section is the cursor target).
                     is_selected: idx == selected_category && tree_cursor.is_none(),
-                    has_changes: page.items.iter().any(|i| i.modified),
+                    has_changes: state.page_has_pending_changes(idx),
                     indent_cols: 0,
                     is_category: true,
+                    is_plugin_category: page.name.starts_with("Plugin: "),
                     cat_idx: Some(idx),
                     section_idx: None,
                     label: page.name.clone(),
@@ -579,6 +614,7 @@ fn render_categories(
                     has_changes: false,
                     indent_cols: 4,
                     is_category: false,
+                    is_plugin_category: false,
                     cat_idx: Some(cat_idx),
                     section_idx: Some(section_idx),
                     label: section.name.clone(),
@@ -666,7 +702,18 @@ fn render_categories(
             } else {
                 spans.push(Span::styled(" ", style));
             }
-            spans.push(Span::styled(data.label.clone(), style));
+            let label = if data.is_plugin_category {
+                let prefix_width: usize = spans
+                    .iter()
+                    .map(|span| str_width(span.content.as_ref()))
+                    .sum();
+                let label_width = row_area.width as usize;
+                let label_width = label_width.saturating_sub(prefix_width);
+                truncate_display_width_with_ellipsis(&data.label, label_width)
+            } else {
+                data.label.clone()
+            };
+            spans.push(Span::styled(label, style));
 
             frame.render_widget(Paragraph::new(Line::from(spans)), row_area);
 
@@ -724,20 +771,30 @@ fn render_settings_panel(
     theme: &Theme,
     layout: &mut SettingsLayout,
 ) {
-    let page = match state.current_page() {
-        Some(p) => p,
+    let (page_title, page_nullable) = match state.current_page() {
+        Some(p) => (p.name.clone(), p.nullable),
         None => return,
     };
 
-    // Page description suppressed: it duplicated the category name visible
-    // in the sidebar and pushed the actual settings down without adding
-    // information. The category names + section headers carry enough
-    // context.
     let mut y = area.y;
     let header_start_y = y;
 
+    // Right-panel page title is the full context fallback for sidebar labels,
+    // which are width-clamped because plugin names are external input.
+    if area.height > 0 && area.width > 0 {
+        let title = truncate_display_width_with_ellipsis(&page_title, area.width as usize);
+        let title_style = Style::default()
+            .fg(theme.editor_fg)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(
+            Paragraph::new(title).style(title_style),
+            Rect::new(area.x, y, area.width, 1),
+        );
+        y += 1;
+    }
+
     // "Clear" button for nullable categories (e.g., Option<LanguageConfig>)
-    if page.nullable && state.current_category_has_values() {
+    if page_nullable && state.current_category_has_values() {
         let btn_text = format!("[{}]", t!("settings.btn_clear_category"));
         let btn_len = btn_text.len() as u16;
         let is_hovered = matches!(state.hover_hit, Some(SettingsHit::ClearCategoryButton));
@@ -798,15 +855,20 @@ fn render_settings_panel(
         .filter_map(|item| {
             // Only consider single-row controls for alignment
             match &item.control {
-                SettingControl::Toggle(s) => Some(s.label.len() as u16),
-                SettingControl::Number(s) => Some(s.label.len() as u16),
-                SettingControl::Dropdown(s) => Some(s.label.len() as u16),
-                SettingControl::Text(s) => Some(s.label.len() as u16),
+                SettingControl::Toggle(s) => Some(str_width(&s.label) as u16),
+                SettingControl::Number(s) => Some(str_width(&s.label) as u16),
+                SettingControl::Dropdown(s) => Some(str_width(&s.label) as u16),
+                SettingControl::Text(s) => Some(str_width(&s.label) as u16),
                 // Multi-row controls have their labels on separate lines
                 _ => None,
             }
         })
         .max();
+    let pending_dirty_by_item: Vec<bool> = page
+        .items
+        .iter()
+        .map(|item| state.path_has_pending_change(&item.path))
+        .collect();
 
     // Use ScrollablePanel to render items with automatic scroll handling
     let panel_layout = state.scroll_panel.render(
@@ -823,6 +885,10 @@ fn render_settings_panel(
                 &render_ctx,
                 theme,
                 max_label_width,
+                pending_dirty_by_item
+                    .get(info.index)
+                    .copied()
+                    .unwrap_or(false),
             )
         },
         theme,
@@ -910,6 +976,7 @@ fn render_setting_item_pure(
     ctx: &RenderContext,
     theme: &Theme,
     label_width: Option<u16>,
+    pending_dirty: bool,
 ) -> SettingItemLayoutInfo {
     let plan = item.layout_box(area.width, &item.style);
     let style = item.style;
@@ -1062,7 +1129,7 @@ fn render_setting_item_pure(
                 Rect::new(inner_area.x, inner_area.y, 1, 1),
             );
         }
-        if item.modified && label_row_visible && inner_area.width >= 2 {
+        if pending_dirty && label_row_visible && inner_area.width >= 2 {
             frame.render_widget(
                 Paragraph::new("●").style(Style::default().fg(theme.settings_selected_fg)),
                 Rect::new(inner_area.x + 1, inner_area.y, 1, 1),
@@ -1086,8 +1153,7 @@ fn render_setting_item_pure(
                 &item.name,
                 content_skip_top,
                 theme,
-                label_width
-                    .map(|w| w.saturating_sub(style.card_border_cols + style.focus_indicator_cols)),
+                label_width,
                 item.read_only,
                 item.is_null,
             );
@@ -1237,7 +1303,7 @@ fn render_control(
             }
             let colors = ToggleColors::from_theme(theme);
             let toggle_layout = render_toggle_aligned(frame, area, state, &colors, label_width);
-            ControlLayoutInfo::Toggle(toggle_layout.full_area)
+            ControlLayoutInfo::Toggle(toggle_layout.checkbox_area)
         }
 
         SettingControl::Number(state) => {
@@ -4159,6 +4225,28 @@ mod tests {
         let out = truncate_chars_with_ellipsis("📦📦📦📦📦📦📦📦", 5);
         assert!(out.ends_with("..."));
         assert_eq!(out.chars().count(), 5);
+    }
+
+    #[test]
+    fn truncate_display_width_with_ellipsis_ascii_truncates_to_width() {
+        let out = truncate_display_width_with_ellipsis("Plugin: very-long-plugin-name", 18);
+        assert_eq!(out, "Plugin: very-lo...");
+        assert!(str_width(&out) <= 18);
+    }
+
+    #[test]
+    fn truncate_display_width_with_ellipsis_handles_tiny_widths() {
+        assert_eq!(truncate_display_width_with_ellipsis("abcdef", 0), "");
+        assert_eq!(truncate_display_width_with_ellipsis("abcdef", 1), ".");
+        assert_eq!(truncate_display_width_with_ellipsis("abcdef", 2), "..");
+        assert_eq!(truncate_display_width_with_ellipsis("abcdef", 3), "...");
+    }
+
+    #[test]
+    fn truncate_display_width_with_ellipsis_multicolumn_does_not_overflow() {
+        let out = truncate_display_width_with_ellipsis("Plugin: 你好世界📦📦", 14);
+        assert!(out.ends_with("..."));
+        assert!(str_width(&out) <= 14, "{out:?} was too wide");
     }
 
     // Basic compile test - actual rendering tests would need a test backend

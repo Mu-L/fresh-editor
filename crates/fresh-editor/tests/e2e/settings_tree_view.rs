@@ -174,14 +174,9 @@ fn tree_keyboard_nav_scrolls_body_both_directions() {
         harness.screen_to_string()
     );
 
-    // BackTab from Settings goes directly to Categories (focus_prev wraps
-    // back through the panel cycle).
-    harness
-        .send_key(KeyCode::BackTab, KeyModifiers::NONE)
-        .unwrap();
-    harness.render().unwrap();
-
     // Down on the tree → body should show the NEXT section (Editing).
+    // Section clicks keep focus in the tree, so keyboard navigation can
+    // continue from the clicked section without an extra focus hop.
     let next = &EDITOR_SECTIONS[4];
     harness.send_key(KeyCode::Down, KeyModifiers::NONE).unwrap();
     harness.render().unwrap();
@@ -289,6 +284,31 @@ fn click_tree_section_jumps_body_both_directions() {
     );
 }
 
+#[test]
+fn click_tree_section_keeps_left_tree_focus_marker() {
+    let mut harness = EditorTestHarness::new(120, 40).unwrap();
+    open_editor_expanded(&mut harness);
+
+    let section = &EDITOR_SECTIONS[6]; // LSP
+    let (col, row) = find_tree_row(&harness, section.0, 120).expect("LSP section row");
+    harness.mouse_click(col, row).unwrap();
+    harness.render().unwrap();
+
+    let (tree_x_start, _) = tree_bounds(120);
+    assert_eq!(
+        harness.get_cell(tree_x_start, row).as_deref(),
+        Some(">"),
+        "mouse-clicking a section row should keep keyboard focus in the \
+         left tree, matching top-level category clicks. Screen:\n{}",
+        harness.screen_to_string()
+    );
+    assert!(
+        body_shows_section(&harness, section),
+        "section click should still jump the body to the clicked section. Screen:\n{}",
+        harness.screen_to_string()
+    );
+}
+
 /// 3a. Body keyboard scroll moves the left-panel section highlight in
 ///     both directions.
 #[test]
@@ -302,8 +322,12 @@ fn body_keyboard_scroll_updates_tree_highlight_both_directions() {
     harness.mouse_click(col, row).unwrap();
     harness.render().unwrap();
 
+    // Section clicks keep focus in the tree; move to the body before
+    // testing body keyboard scroll.
+    harness.send_key(KeyCode::Tab, KeyModifiers::NONE).unwrap();
+    harness.render().unwrap();
+
     // Press PageDown several times in the body — content scrolls forward.
-    // The body panel was given focus by the click, so PageDown goes to it.
     for _ in 0..3 {
         harness
             .send_key(KeyCode::PageDown, KeyModifiers::NONE)

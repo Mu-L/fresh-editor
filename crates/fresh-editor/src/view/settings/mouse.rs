@@ -291,6 +291,12 @@ impl Editor {
             SettingsHit::CategorySection(cat_idx, section_idx) => {
                 if let Some(ref mut state) = self.settings_state {
                     state.jump_to_section(cat_idx, section_idx);
+                    // Mouse clicks in the left tree should keep the tree as
+                    // the focused panel, just like clicking a top-level
+                    // category. `jump_to_section` is also used by search and
+                    // keyboard flows where moving focus to the settings body
+                    // is correct, so restore the mouse-specific focus here.
+                    state.focus.set(FocusPanel::Categories);
                 }
             }
             SettingsHit::CategoriesPanel | SettingsHit::CategoriesScrollbar => {
@@ -1011,10 +1017,10 @@ impl Editor {
                 // Fallback: if the row text is shorter than the field
                 // (common — items rarely fill 30 chars), the user clicks
                 // the [x] which is right after `]`. Use a hand-rolled
-                // approximation: text_indent + field_width + 1 ≤ col.
+                // approximation: text_indent + field_width < col.
                 let text_indent = _layout.dialog_x + 2 + 3 /* focus indicator */ + 2 /* TextList indent */ + 1 /* `[` */;
                 let estimated_field_width = 28u16;
-                col >= text_indent + estimated_field_width + 1
+                col > text_indent + estimated_field_width
             };
 
         match (on_add_row, item_row_idx, in_trailing_button) {

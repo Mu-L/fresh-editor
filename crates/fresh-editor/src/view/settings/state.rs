@@ -364,6 +364,67 @@ impl SettingsState {
         );
     }
 
+    fn paths_intersect(a: &str, b: &str) -> bool {
+        if a.is_empty() || b.is_empty() {
+            return a == b;
+        }
+        if a == b {
+            return true;
+        }
+        let a_prefix = format!("{}/", a.trim_end_matches('/'));
+        let b_prefix = format!("{}/", b.trim_end_matches('/'));
+        a.starts_with(&b_prefix) || b.starts_with(&a_prefix)
+    }
+
+    /// True when this JSON pointer has an unsaved change in the current
+    /// Settings session. This is intentionally separate from `item.modified`,
+    /// which tracks whether a value is defined in the target config layer.
+    pub fn path_has_pending_change(&self, path: &str) -> bool {
+        self.pending_changes
+            .keys()
+            .any(|pending| Self::paths_intersect(path, pending))
+            || self
+                .pending_deletions
+                .iter()
+                .any(|pending| Self::paths_intersect(path, pending))
+    }
+
+    pub fn page_has_pending_changes(&self, page_idx: usize) -> bool {
+        let Some(page) = self.pages.get(page_idx) else {
+            return false;
+        };
+        (!page.path.is_empty() && self.path_has_pending_change(&page.path))
+            || page
+                .items
+                .iter()
+                .any(|item| self.path_has_pending_change(&item.path))
+    }
+
+    fn schema_default_for_path(&self, path: &str) -> Option<serde_json::Value> {
+        self.pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .find(|item| item.path == path)
+            .and_then(|item| item.default.clone())
+    }
+
+    /// Return the value this setting had when Settings was opened.
+    ///
+    /// Built-in settings are usually materialized in `original_config`.
+    /// Plugin settings can exist only as schema defaults until the user saves
+    /// an override, so the schema default is part of the original effective
+    /// value for dirty-state comparisons.
+    fn effective_original_value(&self, path: &str) -> Option<serde_json::Value> {
+        self.original_config
+            .pointer(path)
+            .cloned()
+            .or_else(|| self.schema_default_for_path(path))
+    }
+
+    fn value_matches_effective_original(&self, path: &str, value: &serde_json::Value) -> bool {
+        self.effective_original_value(path).as_ref() == Some(value)
+    }
+
     /// Hide the settings panel
     pub fn hide(&mut self) {
         self.visible = false;
@@ -953,9 +1014,7 @@ impl SettingsState {
 
     /// Record a pending change for a setting
     pub fn set_pending_change(&mut self, path: &str, value: serde_json::Value) {
-        // Check if this is the same as the original value
-        let original = self.original_config.pointer(path);
-        if original == Some(&value) {
+        if self.value_matches_effective_original(path, &value) {
             self.pending_changes.remove(path);
         } else {
             self.pending_changes.insert(path.to_string(), value);
@@ -1119,6 +1178,25 @@ impl SettingsState {
         });
 
         if let Some((path, default)) = reset_info {
+            let original_source = self.get_layer_source(&path);
+
+            if original_source != self.target_layer {
+                // The row is only modified because of an unsaved pending edit.
+                // Reset should cancel that edit and return to the inherited
+                // resolved value, not record a no-op deletion against a layer
+                // that did not define the setting in the first place.
+                self.pending_changes.remove(&path);
+                self.pending_deletions.remove(&path);
+                let original = self.effective_original_value(&path).unwrap_or(default);
+                if let Some(item) = self.current_item_mut() {
+                    update_control_from_value(&mut item.control, &original);
+                    item.modified = false;
+                    item.layer_source = original_source;
+                    item.is_null = item.nullable && original.is_null();
+                }
+                return;
+            }
+
             // Mark this path for deletion from the target layer
             self.pending_deletions.insert(path.clone());
             // Remove any pending change for this path
@@ -1224,17 +1302,33 @@ impl SettingsState {
         });
 
         if let Some((path, value)) = change_info {
+            let original_value = self.effective_original_value(&path);
+            let matches_original = original_value.as_ref() == Some(&value);
+            let original_source = self.get_layer_source(&path);
+
             // When user changes a value, it becomes "modified" (defined in target layer)
             // Remove from pending deletions if it was scheduled for removal
             self.pending_deletions.remove(&path);
+            self.set_pending_change(&path, value);
 
             // Update the item's state
             if let Some(item) = self.current_item_mut() {
-                item.modified = true; // New semantic: value is now defined in target layer
-                item.layer_source = target_layer; // Value now comes from target layer
-                item.is_null = false; // Explicit value clears the inherited state
+                if matches_original {
+                    item.modified = !item.is_auto_managed && original_source == target_layer;
+                    item.layer_source = original_source;
+                    item.is_null = item.nullable
+                        && original_value
+                            .as_ref()
+                            .map(|v| v.is_null())
+                            .unwrap_or_else(|| {
+                                item.default.as_ref().map(|d| d.is_null()).unwrap_or(true)
+                            });
+                } else {
+                    item.modified = true; // New semantic: value is now defined in target layer
+                    item.layer_source = target_layer; // Value now comes from target layer
+                    item.is_null = false; // Explicit value clears the inherited state
+                }
             }
-            self.set_pending_change(&path, value);
         }
     }
 
@@ -3117,6 +3211,28 @@ mod tests {
 }
 "#;
 
+    const TEST_SCHEMA_THEME_DEFAULT: &str = r#"
+{
+  "type": "object",
+  "properties": {
+    "theme": {
+      "type": "string",
+      "enum": ["dark", "light", "high-contrast"],
+      "default": "high-contrast"
+    }
+  },
+  "$defs": {}
+}
+"#;
+
+    fn open_theme_dropdown_state() -> SettingsState {
+        let config = test_config();
+        let mut state = SettingsState::new(TEST_SCHEMA_THEME_DEFAULT, &config).unwrap();
+        state.show();
+        state.toggle_focus();
+        state
+    }
+
     #[test]
     fn test_dropdown_toggle() {
         let config = test_config();
@@ -3219,6 +3335,41 @@ mod tests {
             }
         });
         assert_eq!(after_change, after_confirm);
+    }
+
+    #[test]
+    fn dropdown_reverting_to_original_value_clears_pending_and_row_modified() {
+        let mut state = open_theme_dropdown_state();
+
+        state.dropdown_select(0); // dark
+        assert!(state.has_changes());
+        assert!(state.current_item().unwrap().modified);
+
+        state.dropdown_select(2); // high-contrast, matching Config::default()
+        assert!(!state.has_changes());
+        let item = state.current_item().unwrap();
+        assert!(!item.modified);
+        assert_eq!(item.layer_source, ConfigLayer::System);
+    }
+
+    #[test]
+    fn reset_after_unsaved_inherited_dropdown_change_cancels_pending_edit() {
+        let mut state = open_theme_dropdown_state();
+
+        state.dropdown_select(1); // light
+        assert!(state.has_changes());
+        assert!(state.current_item().unwrap().modified);
+
+        state.reset_current_to_default();
+        assert!(!state.has_changes());
+        let item = state.current_item().unwrap();
+        assert!(!item.modified);
+        assert_eq!(item.layer_source, ConfigLayer::System);
+        if let SettingControl::Dropdown(dropdown) = &item.control {
+            assert_eq!(dropdown.selected_value(), Some("high-contrast"));
+        } else {
+            panic!("theme should render as a dropdown");
+        }
     }
 
     #[test]

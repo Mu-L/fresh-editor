@@ -508,15 +508,16 @@ mod tests {
             0,
             "/test".to_string(),
             Rect::new(35, 10, 50, 2),
-            ControlLayoutInfo::Toggle(Rect::new(37, 11, 15, 1)),
+            ControlLayoutInfo::Toggle(Rect::new(49, 11, 3, 1)),
             None,
         );
 
-        // Click on toggle control
-        assert_eq!(layout.hit_test(40, 11), Some(SettingsHit::ControlToggle(0)));
+        // Click on toggle chip
+        assert_eq!(layout.hit_test(50, 11), Some(SettingsHit::ControlToggle(0)));
 
-        // Click on item but not on toggle
+        // Click on item/label but not on toggle
         assert_eq!(layout.hit_test(35, 10), Some(SettingsHit::Item(0)));
+        assert_eq!(layout.hit_test(40, 11), Some(SettingsHit::Item(0)));
     }
 
     /// Reproducer for issue #1825: clicking on the value area between the
