@@ -3659,6 +3659,7 @@ interface EditorAPI {
 		maxResults?: number;
 		wholeWords?: boolean;
 		sourceBufferId?: number;
+		fileGlob?: string;
 	}): SearchHandle;
 	/**
 	* Replace matches in a file's buffer (async)
