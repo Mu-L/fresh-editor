@@ -17,7 +17,7 @@ For live updates on Fresh, [follow me on X](https://x.com/TheNoamLewis).
 * **Theme text attributes** - syntax colors can now carry `bold`/`italic`/`underlined`/`dim`/`reversed` modifiers (#2638, by @asukaminato0721).
 * **More languages highlighted** - new grammars for gettext PO, m4, Xcode pbxproj, Metal, CUDA, HIP, Fortran, LLVM IR, and MLIR (#2593), plus fixed GLSL/HLSL/WGSL highlighting (#2553); both by @asukaminato0721.
 * **`NextPane` / `PrevPane`** - cycle through every split+tab pane as one flat list, distinct from `NextSplit`/`PrevSplit` and `NextWindow`/`PrevWindow`; landing on a terminal now also switches it into terminal mode (#2562, by @masmu).
-* **Orchestrator dock** - the session list is now a customizable folder tree (create/rename/delete folders, "Move to Folder…"); the toolbar is condensed to a "New Task…" dropdown and a "Search Tasks" field, with other filters tucked into a collapsible section. Cards are now bordered, the context menu is advertised in the hint bar, and folder organization survives a crash (#2703).
+* **Orchestrator dock: organize workspaces into custom folders** - create/rename/delete folders and move workspaces between them ("Move to Folder…" via the context menu, `F2`, right-click, or the palette); the layout survives a crash. The toolbar is condensed to a "New Task…" dropdown and a search field, with other filters in a collapsible section (#2703).
 * **Search in Project: file filter** - a new **Files** field limits project search & replace to comma-separated globs like `*.rs` or `src/**` (#2699, by @asukaminato0721).
 
 ### Bug Fixes
@@ -43,10 +43,12 @@ For live updates on Fresh, [follow me on X](https://x.com/TheNoamLewis).
 * **Orchestrator remembers workspaces after a crash** and shows "Cancel" instead of "Quit" on the trust prompt (#2658).
 * **Command palette names no longer truncate at the start** - the name column sizes to the longest visible name; only an overlong name is trimmed, at its tail (#2703).
 * **Compose mode: cursor movement no longer lags in large files** - arrow keys used to re-run wrapping and concealment over the whole buffer on every keypress.
+* **Per-language settings now apply everywhere** - language-dependent buffer settings (tab size, auto-close, whitespace indicators, word characters, etc.) were applied inconsistently depending on how a buffer was created, and didn't refresh when a buffer's language changed. They now resolve uniformly and re-apply on any language change.
+* **Wheel-scrolled tree views no longer snap back** to the selected row when a plugin refreshes the tree; scrollbar drags on trees also work now.
 
 ### Internals
 
-* A round of flaky-e2e-test stabilization replaced fixed-delay waits with semantic waits across the vi-mode, LSP, review-diff, and search-replace suites.
+* A round of flaky-e2e-test stabilization replaced fixed-delay waits with semantic waits across the vi-mode, LSP, review-diff, search-replace, and orchestrator-dock suites.
 
 ## 0.4.3
 
