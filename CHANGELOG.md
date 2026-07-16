@@ -4,18 +4,21 @@
 
 For live updates on Fresh, [follow me on X](https://x.com/TheNoamLewis).
 
-> Most options below can be changed in the **Settings UI** — run **Open Settings** from the command palette (`Ctrl+P`).
+> Most options below can be changed in the **Settings UI** - run **Open Settings** from the command palette (`Ctrl+P`).
 
 ### Features
 
-* **Indent rainbow** - color indentation guides by indent level via `editor.rainbow_indentation` and a six-color `indent_rainbow_1`-`indent_rainbow_6` theme palette; also fixes a literal `{level}` placeholder leaking into translated locale strings (#2632, requested by @akarinotomoshibi, by @asukaminato0721).
-* **Virtual space** - the cursor can move past a line's end, like Visual Studio or Vim's `virtualedit`. Enable with `editor.virtual_space` (`on` or `block`), toggle per buffer via **Toggle Virtual Space (Current Buffer)**.
+* **Terminal text selection with the mouse** - dragging on a live integrated terminal now selects text: the view pauses in place (pixel-identical) while you drag, `Ctrl+C` copies, and copying or clicking away resumes the live grid; double/triple-click selects a word/line. Mouse events are forwarded to the program inside only when it actually asked for mouse reporting, and `Shift`+drag selects even from a mouse-hungry program (xterm convention).
+
+> If a new mouse behavior gets in your way, disable it in the **Settings UI** (`Ctrl+P` → **Open Settings**) - see Terminal > "Mouse Drag Selects" and Terminal > "Mouse Forwarding".
+
+* **Indent rainbow** - color indentation guides by indent level via Editor > "Rainbow Indentation" and a six-color `indent_rainbow_1`-`indent_rainbow_6` theme palette; also fixes a literal `{level}` placeholder leaking into translated locale strings (#2632, requested by @akarinotomoshibi, by @asukaminato0721).
+* **Virtual space** - the cursor can move past a line's end, like Visual Studio or Vim's `virtualedit`. Enable with Editor > "Virtual Space" (`on` or `block`), toggle per buffer via **Toggle Virtual Space (Current Buffer)**.
 * **Theme text attributes** - syntax colors can now carry `bold`/`italic`/`underlined`/`dim`/`reversed` modifiers (#2638, by @asukaminato0721).
 * **More languages highlighted** - new grammars for gettext PO, m4, Xcode pbxproj, Metal, CUDA, HIP, Fortran, LLVM IR, and MLIR (#2593), plus fixed GLSL/HLSL/WGSL highlighting (#2553); both by @asukaminato0721.
 * **`NextPane` / `PrevPane`** - cycle through every split+tab pane as one flat list, distinct from `NextSplit`/`PrevSplit` and `NextWindow`/`PrevWindow`; landing on a terminal now also switches it into terminal mode (#2562, by @masmu).
-* **Orchestrator dock** - the session list is now a customizable folder tree (create/rename/delete folders, "Move to Folder…"); the toolbar is condensed to a "New Task…" dropdown and a "Search Tasks" field, with other filters tucked into a collapsible section.
-* **Terminal text selection with the mouse** - dragging on a live integrated terminal now selects text: the split drops into read-only scrollback (pixel-identical view; `Ctrl+Space` resumes) with a real selection that `Ctrl+C` copies, and double-click selects words in scrollback; a bare click still just focuses the terminal. Mouse events are forwarded to the program inside the terminal only when it actually enabled mouse reporting (DECSET 1000/1002/1003) instead of whenever it was on the alternate screen, and `Shift`+drag bypasses a mouse-hungry program to select anyway (xterm convention). New output no longer yanks the view away while a selection is active. Both behaviors are configurable: `terminal.mouse_drag_selects = false` makes drags on the live grid inert again, and `terminal.mouse_forwarding = "alt_screen"` restores the legacy forwarding rule.
-* **Web UI: text is selectable everywhere** - holding `Alt` lets the browser own the mouse for native text selection over any surface — buffer, live terminals (without pausing them), file explorer, menus, dialogs — with `Ctrl+C` copying it; multi-line selections over the cell grid keep their newlines. `Ctrl+Alt+S` toggles the mode off/on (persisted like zoom) if Alt-drag clashes with your workflow.
+* **Orchestrator dock** - the session list is now a customizable folder tree (create/rename/delete folders, "Move to Folder…"); the toolbar is condensed to a "New Task…" dropdown and a "Search Tasks" field, with other filters tucked into a collapsible section. Cards are now bordered, the context menu is advertised in the hint bar, and folder organization survives a crash (#2703).
+* **Search in Project: file filter** - a new **Files** field limits project search & replace to comma-separated globs like `*.rs` or `src/**` (#2699, by @asukaminato0721).
 
 ### Bug Fixes
 
@@ -29,7 +32,7 @@ For live updates on Fresh, [follow me on X](https://x.com/TheNoamLewis).
 * **Virtual space status bar tracks the cursor** into virtual space instead of freezing at the last real position (#2577).
 * **Indentation guide staircase gap fixed** when a block's opener is scrolled off-screen (#2679).
 * **Large file fixes**: the `:N` line jump now offers a scan prompt instead of jumping to line 1 (#2597), the line-count scan no longer undercounts on the first pass (#2596), and editing a large line-wrapped file no longer stalls for ~1 second per keystroke (#2610).
-* **Remote fixes**: the integrated terminal now works when the remote's login shell is fish or any non-POSIX shell, instead of failing on `=` syntax (#2584, reported by @demin-dmitriy); switching to a workspace on a stalled SSH link no longer freezes the editor, since a dead connection now fails at connect time instead of hanging during workspace restore; and diving into a disconnected SSH workspace from the dock now lands in that workspace's empty "Disconnected" shell with the failure reason and a retry, instead of the dock claiming a switch that never happened — dormant remote rows also show a backend badge and `user@host` detail (#2570).
+* **Remote fixes**: the integrated terminal now works when the remote's login shell is fish or any non-POSIX shell, instead of failing on `=` syntax (#2584, reported by @demin-dmitriy); switching to a workspace on a stalled SSH link no longer freezes the editor, since a dead connection now fails at connect time instead of hanging during workspace restore; and diving into a disconnected SSH workspace from the dock now lands in that workspace's empty "Disconnected" shell with the failure reason and a retry, instead of the dock claiming a switch that never happened - dormant remote rows also show a backend badge and `user@host` detail (#2570).
 * **Terminal scrolling no longer pins a CPU core** - auto-revert is now per-buffer (off for terminals), and terminal buffers never line-wrap (#2608, #2609).
 * **Per-split terminal scrollback** - a terminal shown in two splits can now read scrollback in one split while the other keeps following live output (#2595).
 * **Tab bar scrolling** now reveals the active tab with minimal movement instead of re-centering it on every switch (#2675).
@@ -38,6 +41,8 @@ For live updates on Fresh, [follow me on X](https://x.com/TheNoamLewis).
 * **File Explorer fixes**: the context menu now grabs the keyboard while open, so keys no longer leak into the tree underneath (#2587); and git decorations now cover nested sub-repos even when the workspace root is itself a git repo (#2592).
 * **Git Grep no-match is reported as "No matches"**, not an error (#2591).
 * **Orchestrator remembers workspaces after a crash** and shows "Cancel" instead of "Quit" on the trust prompt (#2658).
+* **Command palette names no longer truncate at the start** - the name column sizes to the longest visible name; only an overlong name is trimmed, at its tail (#2703).
+* **Compose mode: cursor movement no longer lags in large files** - arrow keys used to re-run wrapping and concealment over the whole buffer on every keypress.
 
 ### Internals
 
